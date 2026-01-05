@@ -1,32 +1,41 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from telegram.constants import ChatType
-from telegram.error import TelegramError
 
 logging.basicConfig(level=logging.INFO)
 
-# === ВСТАВЬ ТОКЕН У СЕБЯ ===
-TOKEN = "8591165656:AAFvwMeza7LXruoId7sHqQ_FEeTgmBgqqi4"
+# =========================
+# 1) ВСТАВЬ ТОКЕН В ЭТУ СТРОКУ (1 раз)
+# =========================
+TOKEN = "REPLACE_ME_WITH_TOKEN"
 
-# === НАСТРОЙКИ КАНАЛА/БОТА ===
+# =========================
+# 2) НАСТРОЙКИ КАНАЛА/БОТА
+# =========================
 BOT_USERNAME = "naturalsense_assistant_bot"
+CHANNEL_USERNAME = "NaturalSense"     # то, что после t.me/
+CHANNEL_URL = f"https://t.me/{CHANNEL_USERNAME}"
 
-# ВАЖНО: поставь реальный username канала (то, что после t.me/)
-# Пример: если ссылка t.me/NSNaturalSense → тут должно быть "@NSNaturalSense"
-CHANNEL_ID = "@NaturalSense"
-CHANNEL_URL = "https://t.me/NaturalSense"
-
-
+# =========================
+# UI (клавиатуры)
+# =========================
 def menu_kb():
-    # ✅ СТАБИЛЬНО: кнопки-ССЫЛКИ, а не callback
+    # ВАЖНО: из закрепа люди будут попадать сразу в tone/skin/news/reviews/tags
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎨 Выбрать тон кожи", url=f"https://t.me/{BOT_USERNAME}?start=tone")],
-        [InlineKeyboardButton("💧 Тип кожи", url=f"https://t.me/{BOT_USERNAME}?start=skin")],
-        [InlineKeyboardButton("📰 Новости", url=CHANNEL_URL)],
-        [InlineKeyboardButton("🧴 Обзоры", url=CHANNEL_URL)],
-        [InlineKeyboardButton("🔍 Поиск по тегам", url=f"https://t.me/{BOT_USERNAME}?start=tags")],
-        [InlineKeyboardButton("↩️ Вернуться в канал", url=CHANNEL_URL)],
+        [
+            InlineKeyboardButton("🎨 Тон кожи", url=f"https://t.me/{BOT_USERNAME}?start=tone"),
+            InlineKeyboardButton("💧 Тип кожи", url=f"https://t.me/{BOT_USERNAME}?start=skin"),
+        ],
+        [
+            InlineKeyboardButton("📰 Новости", url=f"https://t.me/{BOT_USERNAME}?start=news"),
+            InlineKeyboardButton("🧴 Обзоры", url=f"https://t.me/{BOT_USERNAME}?start=reviews"),
+        ],
+        [
+            InlineKeyboardButton("🔍 Теги", url=f"https://t.me/{BOT_USERNAME}?start=tags"),
+        ],
+        [
+            InlineKeyboardButton("↩️ Вернуться в канал", url=CHANNEL_URL),
+        ],
     ])
 
 
@@ -36,7 +45,7 @@ def tone_kb():
         [InlineKeyboardButton("🌤 Светлый", callback_data="tone:light")],
         [InlineKeyboardButton("🌼 Средний", callback_data="tone:medium")],
         [InlineKeyboardButton("🌰 Тёмный", callback_data="tone:deep")],
-        [InlineKeyboardButton("✅ Готово → меню", callback_data="go:menu")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="back:menu")],
     ])
 
 
@@ -46,7 +55,25 @@ def skin_kb():
         [InlineKeyboardButton("🌿 Нормальная", callback_data="skin:normal")],
         [InlineKeyboardButton("⚖️ Комбинированная", callback_data="skin:combo")],
         [InlineKeyboardButton("💎 Жирная", callback_data="skin:oily")],
-        [InlineKeyboardButton("✅ Готово → меню", callback_data="go:menu")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="back:menu")],
+    ])
+
+
+def news_kb():
+    # Пока заглушки: потом поменяем на ссылки на КОНКРЕТНЫЕ посты
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔥 Новинки недели", url=CHANNEL_URL)],
+        [InlineKeyboardButton("💄 Запуски брендов", url=CHANNEL_URL)],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="back:menu")],
+    ])
+
+
+def reviews_kb():
+    # Пока заглушки: потом поменяем на ссылки на КОНКРЕТНЫЕ посты
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⭐ Топ продукты", url=CHANNEL_URL)],
+        [InlineKeyboardButton("🧴 Уход", url=CHANNEL_URL)],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="back:menu")],
     ])
 
 
@@ -55,10 +82,13 @@ def tags_kb():
         [InlineKeyboardButton("#news", callback_data="tag:news")],
         [InlineKeyboardButton("#reviews", callback_data="tag:reviews")],
         [InlineKeyboardButton("#compare", callback_data="tag:compare")],
-        [InlineKeyboardButton("✅ В меню", callback_data="go:menu")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="back:menu")],
     ])
 
 
+# =========================
+# /start с deep-link параметрами
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     arg = (context.args[0] if context.args else "menu").lower().strip()
 
@@ -70,22 +100,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("💧 Выбери тип кожи:", reply_markup=skin_kb())
         return
 
+    if arg == "news":
+        await update.message.reply_text("📰 Новости:", reply_markup=news_kb())
+        return
+
+    if arg == "reviews":
+        await update.message.reply_text("🧴 Обзоры:", reply_markup=reviews_kb())
+        return
+
     if arg == "tags":
         await update.message.reply_text("🔍 Выбери тег:", reply_markup=tags_kb())
         return
 
-    await update.message.reply_text("✅ Меню Natural Sense", reply_markup=menu_kb())
+    await update.message.reply_text(
+        "NS · Natural Sense\nprivate beauty space\n\nВыберите раздел 👇",
+        reply_markup=menu_kb()
+    )
 
 
+# =========================
+# Callback-обработка (нажатия внутри tone/skin/tags)
+# =========================
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     data = q.data or ""
 
-    if data == "go:menu":
-        await q.edit_message_text("✅ Меню Natural Sense", reply_markup=menu_kb())
+    if data == "back:menu":
+        await q.edit_message_text(
+            "NS · Natural Sense\nprivate beauty space\n\nВыберите раздел 👇",
+            reply_markup=menu_kb()
+        )
         return
 
+    # Сохраняем выбор (пока в памяти пользователя)
     if data.startswith("tone:"):
         context.user_data["tone"] = data.split(":", 1)[1]
         await q.edit_message_text("🤍 Тон кожи сохранён", reply_markup=tone_kb())
@@ -104,42 +152,12 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text("Ок ✅", reply_markup=menu_kb())
 
 
-async def pinmenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # команда работает из лички
-    if update.effective_chat.type != ChatType.PRIVATE:
-        return
-
-    text = "NS · Natural Sense\nprivate beauty space\n\nВыберите раздел 👇"
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Открыть меню", url=f"https://t.me/{BOT_USERNAME}?start=menu")],
-        [InlineKeyboardButton("🎨 Выбрать тон кожи", url=f"https://t.me/{BOT_USERNAME}?start=tone")],
-        [InlineKeyboardButton("💧 Тип кожи", url=f"https://t.me/{BOT_USERNAME}?start=skin")],
-        [InlineKeyboardButton("📰 Новости", url=CHANNEL_URL)],
-        [InlineKeyboardButton("🧴 Обзоры", url=CHANNEL_URL)],
-        [InlineKeyboardButton("🔍 Поиск по тегам", url=f"https://t.me/{BOT_USERNAME}?start=tags")],
-    ])
-
-    try:
-        msg = await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=kb)
-    except TelegramError as e:
-        await update.message.reply_text(f"❌ Не смог отправить пост в канал.\nПричина: {e}")
-        return
-
-    try:
-        await context.bot.pin_chat_message(chat_id=CHANNEL_ID, message_id=msg.message_id)
-        await update.message.reply_text("✅ Меню опубликовано и ЗАКРЕПЛЕНО в канале.")
-    except TelegramError as e:
-        await update.message.reply_text(
-            "⚠️ Пост в канал отправил, но НЕ смог закрепить.\n"
-            f"Причина: {e}\n\n"
-            "Проверь права бота в канале: 'Управление сообщениями канала' (закреп)."
-        )
-
-
+# =========================
+# Запуск
+# =========================
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("pinmenu", pinmenu))
     app.add_handler(CallbackQueryHandler(on_button))
     app.run_polling()
 
