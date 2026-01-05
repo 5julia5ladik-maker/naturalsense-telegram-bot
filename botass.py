@@ -7,7 +7,7 @@ logging.basicConfig(level=logging.INFO)
 # =========================
 # 1) ВСТАВЬ ТОКЕН В ЭТУ СТРОКУ (1 раз)
 # =========================
-TOKEN = "REPLACE_ME_WITH_TOKEN"
+TOKEN = "8591165656:AAFvwMeza7LXruoId7sHqQ_FEeTgmBgqqi4"
 
 # =========================
 # 2) НАСТРОЙКИ КАНАЛА/БОТА
