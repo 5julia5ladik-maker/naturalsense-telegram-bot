@@ -1,35 +1,29 @@
-import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-logging.basicConfig(level=logging.INFO)
+# =========================
+# ВСТАВЬ СВОЙ ТОКЕН ЗДЕСЬ
+# =========================
+TOKEN = "8591165656:AAFvwMeza7LXruoId7sHqQ_FEeTgmBgqqi4"  # <-- вставь токен между кавычками
 
 CHANNEL_URL = "https://t.me/NaturalSense"
 
-
-def must_env(name: str) -> str:
-    v = os.getenv(name, "").strip()
-    if not v:
-        raise RuntimeError(f"Missing env var: {name}. Add it in Railway → Variables.")
-    return v
+logging.basicConfig(level=logging.INFO)
 
 
-TOKEN = must_env("TOKEN")
-
-
-def menu_kb() -> InlineKeyboardMarkup:
+def menu_kb():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎨 Выбрать тон кожи", url="https://t.me/naturalsense_assistant_bot?start=tone")],
-        [InlineKeyboardButton("💧 Тип кожи", url="https://t.me/naturalsense_assistant_bot?start=skin")],
+        [InlineKeyboardButton("🎨 Выбрать тон кожи", callback_data="tone")],
+        [InlineKeyboardButton("💧 Тип кожи", callback_data="skin")],
         [InlineKeyboardButton("📰 Новости", url=CHANNEL_URL)],
         [InlineKeyboardButton("🧴 Обзоры", url=CHANNEL_URL)],
-        [InlineKeyboardButton("🔍 Поиск по тегам", url="https://t.me/naturalsense_assistant_bot?start=tags")],
+        [InlineKeyboardButton("🔍 Поиск по тегам", callback_data="tags")],
         [InlineKeyboardButton("↩️ Вернуться в канал", url=CHANNEL_URL)],
     ])
 
 
-def tone_kb() -> InlineKeyboardMarkup:
+def tone_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🤍 Очень светлый", callback_data="tone:very_light")],
         [InlineKeyboardButton("🌤 Светлый", callback_data="tone:light")],
@@ -39,7 +33,7 @@ def tone_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def skin_kb() -> InlineKeyboardMarkup:
+def skin_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💧 Сухая", callback_data="skin:dry")],
         [InlineKeyboardButton("🌿 Нормальная", callback_data="skin:normal")],
@@ -49,7 +43,7 @@ def skin_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def tags_kb() -> InlineKeyboardMarkup:
+def tags_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("#news", callback_data="tag:news")],
         [InlineKeyboardButton("#reviews", callback_data="tag:reviews")],
@@ -59,14 +53,16 @@ def tags_kb() -> InlineKeyboardMarkup:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    arg = (context.args[0] if context.args else "menu").lower().strip()
+    arg = (context.args[0] if context.args else "menu").lower()
 
     if arg == "tone":
         await update.message.reply_text("Выбери тон кожи:", reply_markup=tone_kb())
         return
+
     if arg == "skin":
         await update.message.reply_text("Выбери тип кожи:", reply_markup=skin_kb())
         return
+
     if arg == "tags":
         await update.message.reply_text("Выбери тег:", reply_markup=tags_kb())
         return
@@ -77,33 +73,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    data = (q.data or "").strip()
+    data = q.data
 
     if data == "go:menu":
         await q.edit_message_text("✅ Меню Natural Sense", reply_markup=menu_kb())
         return
 
-    # Сохраняем в память (пока без базы) — для будущего
     if data.startswith("tone:"):
-        context.user_data["tone"] = data.split(":", 1)[1]
         await q.edit_message_text("Тон кожи сохранён 🤍", reply_markup=tone_kb())
         return
 
     if data.startswith("skin:"):
-        context.user_data["skin"] = data.split(":", 1)[1]
         await q.edit_message_text("Тип кожи сохранён 🤍", reply_markup=skin_kb())
         return
 
     if data.startswith("tag:"):
         tag = data.split(":", 1)[1]
-        # Здесь можно позже сделать поиск по каналу/список постов.
         await q.edit_message_text(
-            f"🔍 Тег выбран: #{tag}\n\nПока это заглушка. Дальше подключим выдачу постов по тегу.",
+            f"🔍 Тег выбран: #{tag}\n\n(Пока заглушка — дальше подключим выдачу постов)",
             reply_markup=tags_kb()
         )
         return
 
-    await q.edit_message_text("Ок ✅", reply_markup=menu_kb())
+    await q.edit_message_text("Ок", reply_markup=menu_kb())
 
 
 def main():
