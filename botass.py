@@ -1,4 +1,3 @@
-
 import re
 import sqlite3
 import logging
@@ -9,21 +8,24 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
 )
-from telegram.error import TelegramError
 from telegram.constants import ChatType
+from telegram.error import TelegramError
 
 logging.basicConfig(level=logging.INFO)
 
-TOKEN = "8591165656:AAFvwMeza7LXruoId7sHqQ_FEeTgmBgqqi4"  # <-- вставь токен сюда
+# =========================
+# НАСТРОЙКИ
+# =========================
+TOKEN = "8591165656:AAFvwMeza7LXruoId7sHqQ_FEeTgmBgqqi4"
 
-# ВАЖНО: username канала (после t.me/)
+BOT_USERNAME = "naturalsense_assistant_bot"   # username бота без @
 CHANNEL_USERNAME = "NaturalSense"
-CHANNEL_URL = f"https://t.me/NaturalSense"
-CHANNEL_ID = f"@{CHANNEL_USERNAME}"  # если канал приватный — нужно будет -100...
+CHANNEL_URL = "https://t.me/NaturalSense"
+CHANNEL_ID = "@NaturalSense"   # если приватный → -100...
 
-# -------------------------
-# DB (SQLite for MVP)
-# -------------------------
+# =========================
+# БАЗА ДЛЯ ТЕГОВ
+# =========================
 DB_PATH = "tags.db"
 
 def db_init():
@@ -46,7 +48,7 @@ def db_add(tag: str, message_id: int):
     con.commit()
     con.close()
 
-def db_list(tag: str, limit: int, offset: int) -> List[int]:
+def db_list(tag: str, limit: int, offset: int):
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
     cur.execute("""
@@ -67,19 +69,19 @@ def db_count(tag: str) -> int:
     con.close()
     return int(n)
 
-# -------------------------
-# Tags parsing
-# -------------------------
+# =========================
+# ТЕГИ
+# =========================
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
 
-def extract_tags(text: str) -> List[str]:
+def extract_tags(text: str):
     if not text:
         return []
     return [f"#{m.group(1)}" for m in TAG_RE.finditer(text)]
 
-# -------------------------
-# UI structure (как ты хотел)
-# -------------------------
+# =========================
+# СТРУКТУРА
+# =========================
 CATEGORIES = [
     ("🆕 Новинка", "#Новинка"),
     ("💎 Кратко о люкс продукте", "#Люкс"),
@@ -106,6 +108,9 @@ SEPHORA = [
 
 PAGE_SIZE = 10
 
+# =========================
+# КЛАВИАТУРЫ
+# =========================
 def main_menu_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📂 Категории", callback_data="menu:categories")],
@@ -114,7 +119,7 @@ def main_menu_kb():
         [InlineKeyboardButton("↩️ В канал", url=CHANNEL_URL)],
     ])
 
-def section_kb(items: List[Tuple[str, str]]):
+def section_kb(items):
     rows = [[InlineKeyboardButton(title, callback_data=f"tag:{tag}:0")] for title, tag in items]
     rows.append([InlineKeyboardButton("⬅️ Назад", callback_data="menu:home")])
     return InlineKeyboardMarkup(rows)
@@ -122,10 +127,10 @@ def section_kb(items: List[Tuple[str, str]]):
 def posts_kb(tag: str, offset: int):
     ids = db_list(tag, PAGE_SIZE, offset)
     total = db_count(tag)
-
     rows = []
+
     for mid in ids:
-        rows.append([InlineKeyboardButton(f"📌 Пост {mid}", url=f"{CHANNEL_URL}/{mid}")])
+        rows.append([InlineKeyboardButton("📌 Открыть пост", url=f"{CHANNEL_URL}/{mid}")])
 
     nav = []
     if offset > 0:
@@ -142,51 +147,32 @@ def posts_kb(tag: str, offset: int):
 
     return InlineKeyboardMarkup(rows), total
 
-# -------------------------
-# Commands
-# -------------------------
-async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Я на связи. Команды работают.")
-
+# =========================
+# START С DEEPLINK
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    arg = context.args[0] if context.args else "menu"
+
+    if arg == "categories":
+        await update.message.reply_text("📂 Категории", reply_markup=section_kb(CATEGORIES))
+        return
+
+    if arg == "brands":
+        await update.message.reply_text("🏷 Бренды", reply_markup=section_kb(BRANDS))
+        return
+
+    if arg == "sephora":
+        await update.message.reply_text("💸 Sephora", reply_markup=section_kb(SEPHORA))
+        return
+
     await update.message.reply_text(
         "NS · Natural Sense\nprivate beauty space\n\nВыберите раздел 👇",
         reply_markup=main_menu_kb()
     )
 
-async def pinmenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # команда должна запускаться из лички
-    if update.effective_chat.type != ChatType.PRIVATE:
-        return
-
-    text = "NS · Natural Sense\nprivate beauty space\n\nВыберите раздел 👇"
-    kb = main_menu_kb()
-
-    # 1) Отправить меню в канал
-    try:
-        msg = await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=kb)
-    except TelegramError as e:
-        await update.message.reply_text(
-            "❌ Не смог отправить меню в канал.\n"
-            f"Причина: {e}\n\n"
-            "Проверь: бот админ канала и CHANNEL_USERNAME верный."
-        )
-        return
-
-    # 2) Закрепить
-    try:
-        await context.bot.pin_chat_message(chat_id=CHANNEL_ID, message_id=msg.message_id)
-        await update.message.reply_text("✅ Меню отправлено и ЗАКРЕПЛЕНО в канале.")
-    except TelegramError as e:
-        await update.message.reply_text(
-            "⚠️ Меню отправлено, но НЕ закрепилось.\n"
-            f"Причина: {e}\n\n"
-            "Проверь права бота: 'Управление сообщениями канала' (закреп)."
-        )
-
-# -------------------------
-# Callbacks
-# -------------------------
+# =========================
+# CALLBACK
+# =========================
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -215,19 +201,18 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, tag, offset_str = data.split(":", 2)
         offset = int(offset_str)
         kb, total = posts_kb(tag, offset)
+
         if total == 0:
             await q.edit_message_text(
-                f"{tag}\n\nПока нет постов с этим тегом.\n"
-                "Бот начнёт собирать посты с тегами после того, как он админ канала и ты публикуешь новые посты.",
+                f"{tag}\n\nПока нет постов с этим тегом.",
                 reply_markup=kb
             )
         else:
             await q.edit_message_text(f"{tag} — найдено: {total}", reply_markup=kb)
-        return
 
-# -------------------------
-# Channel post indexing (только новые посты)
-# -------------------------
+# =========================
+# ИНДЕКСАЦИЯ ПОСТОВ КАНАЛА
+# =========================
 async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
     if not msg:
@@ -235,28 +220,41 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = msg.text or msg.caption or ""
     tags = extract_tags(text)
-    if not tags:
-        return
-
     for t in tags:
         db_add(t, msg.message_id)
 
-    logging.info("Indexed post %s tags=%s", msg.message_id, tags)
+# =========================
+# ЗАКРЕП
+# =========================
+async def pinmenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != ChatType.PRIVATE:
+        return
 
+    text = "NS · Natural Sense\nprivate beauty space\n\nВыберите раздел 👇"
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📂 Категории", url=f"https://t.me/{BOT_USERNAME}?start=categories")],
+        [InlineKeyboardButton("🏷 Бренды", url=f"https://t.me/{BOT_USERNAME}?start=brands")],
+        [InlineKeyboardButton("💸 Sephora", url=f"https://t.me/{BOT_USERNAME}?start=sephora")],
+    ])
+
+    try:
+        msg = await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=kb)
+        await context.bot.pin_chat_message(chat_id=CHANNEL_ID, message_id=msg.message_id)
+        await update.message.reply_text("✅ Меню отправлено и закреплено.")
+    except TelegramError as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+# =========================
+# MAIN
+# =========================
 def main():
     db_init()
-
     app = Application.builder().token(TOKEN).build()
 
-    # Команды
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("ping", ping))
     app.add_handler(CommandHandler("pinmenu", pinmenu))
-
-    # Кнопки
     app.add_handler(CallbackQueryHandler(on_callback))
-
-    # Индексация новых постов канала
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, on_channel_post))
 
     app.run_polling()
