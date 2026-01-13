@@ -9,13 +9,17 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
 )
+from telegram.error import TelegramError
+from telegram.constants import ChatType
 
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = "8591165656:AAFvwMeza7LXruoId7sHqQ_FEeTgmBgqqi4"  # <-- вставь токен сюда
 
-CHANNEL_USERNAME = "NaturalSense"  # t.me/<username>
+# ВАЖНО: username канала (после t.me/)
+CHANNEL_USERNAME = "NaturalSense"
 CHANNEL_URL = f"https://t.me/NaturalSense"
+CHANNEL_ID = f"@{CHANNEL_USERNAME}"  # если канал приватный — нужно будет -100...
 
 # -------------------------
 # DB (SQLite for MVP)
@@ -71,11 +75,10 @@ TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
 def extract_tags(text: str) -> List[str]:
     if not text:
         return []
-    # сохраняем в виде "#Новинка"
     return [f"#{m.group(1)}" for m in TAG_RE.finditer(text)]
 
 # -------------------------
-# UI
+# UI structure (как ты хотел)
 # -------------------------
 CATEGORIES = [
     ("🆕 Новинка", "#Новинка"),
@@ -111,9 +114,9 @@ def main_menu_kb():
         [InlineKeyboardButton("↩️ В канал", url=CHANNEL_URL)],
     ])
 
-def list_kb(items: List[Tuple[str,str]], back_cb: str):
+def section_kb(items: List[Tuple[str, str]]):
     rows = [[InlineKeyboardButton(title, callback_data=f"tag:{tag}:0")] for title, tag in items]
-    rows.append([InlineKeyboardButton("⬅️ Назад", callback_data=back_cb)])
+    rows.append([InlineKeyboardButton("⬅️ Назад", callback_data="menu:home")])
     return InlineKeyboardMarkup(rows)
 
 def posts_kb(tag: str, offset: int):
@@ -140,14 +143,50 @@ def posts_kb(tag: str, offset: int):
     return InlineKeyboardMarkup(rows), total
 
 # -------------------------
-# Handlers
+# Commands
 # -------------------------
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("✅ Я на связи. Команды работают.")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "NS · Natural Sense\nprivate beauty space\n\nВыберите раздел 👇",
         reply_markup=main_menu_kb()
     )
 
+async def pinmenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # команда должна запускаться из лички
+    if update.effective_chat.type != ChatType.PRIVATE:
+        return
+
+    text = "NS · Natural Sense\nprivate beauty space\n\nВыберите раздел 👇"
+    kb = main_menu_kb()
+
+    # 1) Отправить меню в канал
+    try:
+        msg = await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=kb)
+    except TelegramError as e:
+        await update.message.reply_text(
+            "❌ Не смог отправить меню в канал.\n"
+            f"Причина: {e}\n\n"
+            "Проверь: бот админ канала и CHANNEL_USERNAME верный."
+        )
+        return
+
+    # 2) Закрепить
+    try:
+        await context.bot.pin_chat_message(chat_id=CHANNEL_ID, message_id=msg.message_id)
+        await update.message.reply_text("✅ Меню отправлено и ЗАКРЕПЛЕНО в канале.")
+    except TelegramError as e:
+        await update.message.reply_text(
+            "⚠️ Меню отправлено, но НЕ закрепилось.\n"
+            f"Причина: {e}\n\n"
+            "Проверь права бота: 'Управление сообщениями канала' (закреп)."
+        )
+
+# -------------------------
+# Callbacks
+# -------------------------
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -161,34 +200,35 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "menu:categories":
-        await q.edit_message_text("📂 Категории", reply_markup=list_kb(CATEGORIES, "menu:home"))
+        await q.edit_message_text("📂 Категории", reply_markup=section_kb(CATEGORIES))
         return
 
     if data == "menu:brands":
-        await q.edit_message_text("🏷 Бренды", reply_markup=list_kb(BRANDS, "menu:home"))
+        await q.edit_message_text("🏷 Бренды", reply_markup=section_kb(BRANDS))
         return
 
     if data == "menu:sephora":
-        await q.edit_message_text("💸 Sephora", reply_markup=list_kb(SEPHORA, "menu:home"))
+        await q.edit_message_text("💸 Sephora", reply_markup=section_kb(SEPHORA))
         return
 
     if data.startswith("tag:"):
-        # формат: tag:#Новинка:0
         _, tag, offset_str = data.split(":", 2)
         offset = int(offset_str)
         kb, total = posts_kb(tag, offset)
         if total == 0:
             await q.edit_message_text(
                 f"{tag}\n\nПока нет постов с этим тегом.\n"
-                "Важно: бот начнёт собирать посты с тегами после того, как его добавили в админы канала.",
+                "Бот начнёт собирать посты с тегами после того, как он админ канала и ты публикуешь новые посты.",
                 reply_markup=kb
             )
         else:
             await q.edit_message_text(f"{tag} — найдено: {total}", reply_markup=kb)
         return
 
+# -------------------------
+# Channel post indexing (только новые посты)
+# -------------------------
 async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Этот хендлер срабатывает на новые посты в канале, если бот админ
     msg = update.channel_post
     if not msg:
         return
@@ -201,16 +241,22 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for t in tags:
         db_add(t, msg.message_id)
 
-    logging.info("Indexed channel post %s tags=%s", msg.message_id, tags)
+    logging.info("Indexed post %s tags=%s", msg.message_id, tags)
 
 def main():
     db_init()
+
     app = Application.builder().token(TOKEN).build()
 
+    # Команды
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(CommandHandler("pinmenu", pinmenu))
+
+    # Кнопки
     app.add_handler(CallbackQueryHandler(on_callback))
 
-    # Ловим новые посты канала (только будущие)
+    # Индексация новых постов канала
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, on_channel_post))
 
     app.run_polling()
