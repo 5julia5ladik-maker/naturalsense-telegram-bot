@@ -16,9 +16,10 @@ logging.basicConfig(level=logging.INFO)
 # CONFIG
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8591165656:AAFvwMeza7LXruoId7sHqQ_FEeTgmBgqqi4")  # фейковый
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")  # https://xxx.up.railway.app
+PUBLIC_BASE_URL = os.getenv("https://naturalsense-telegram-bot-production.up.railway.app/
+", "").rstrip("/")  # https://xxx.up.railway.app
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "NaturalSense")
-CHANNEL_URL = f"https://t.me/{CHANNEL_USERNAME}"
+CHANNEL_URL = f"https://t.me/NaturalSense"
 DB_PATH = "tags.db"
 
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
