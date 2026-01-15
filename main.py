@@ -2,15 +2,15 @@ import os
 import re
 import sqlite3
 import logging
-from typing import Optional, List, Tuple
+from typing import List, Optional, Dict, Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from telegram import (
     Update,
-    InlineKeyboardMarkup,
     InlineKeyboardButton,
+    InlineKeyboardMarkup,
     WebAppInfo,
 )
 from telegram.ext import (
@@ -21,44 +21,44 @@ from telegram.ext import (
 )
 
 logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("ns")
 
 # =========================
-# CONFIG (можешь менять здесь, но лучше через Railway Variables)
+# ENV / CONFIG
 # =========================
-BOT_TOKEN = os.getenv("8591165656:AAFvwMeza7LXruoId7sHqQ_FEeTgmBgqqi4", "").strip()  # обязательно реальный
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")  # https://xxx.up.railway.app
-BOT_USERNAME = os.getenv("BOT_USERNAME", "naturalsense_assistant_bot").lstrip("@")  # юзернейм бота
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "NaturalSense").lstrip("@")  # юзернейм канала
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")  # ОБЯЗАТЕЛЬНО реальный из BotFather
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")  # домен Railway, без /
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "NaturalSense").lstrip("@")
 CHANNEL_URL = f"https://t.me/{CHANNEL_USERNAME}"
+CHANNEL_CHAT_ID = os.getenv("CHANNEL_CHAT_ID", "").strip()  # optional: -100xxxxxxxxxx (если хочешь pin в канале)
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0") or "0")  # optional
 
 DB_PATH = "tags.db"
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
-PAGE_SIZE = 8
+PAGE_SIZE = 12
 
 # =========================
-# TAG LIST (как ты просил)
+# MENU DATA (минимум как ты хотел)
 # =========================
 CATEGORIES = [
     ("🆕 Новинка", "#Новинка"),
-    ("💎 Кратко о люкс продукте", "#Люкс"),
+    ("💎 Люкс", "#Люкс"),
     ("🔥 Тренд", "#Тренд"),
     ("🏛 История бренда", "#История"),
     ("⭐ Личная оценка продукта", "#Оценка"),
     ("🧴 Тип продукта / факты", "#Факты"),
     ("🧪 Составы продуктов", "#Состав"),
 ]
-
 BRANDS = [
     ("Dior", "#Dior"),
     ("Chanel", "#Chanel"),
     ("YSL", "#YSL"),
     ("Charlotte Tilbury", "#Charlotte"),
 ]
-
 SEPHORA = [
     ("💸 Актуальные цены", "#SephoraPrice"),
     ("🆕 Новинки Sephora", "#SephoraNew"),
-    ("🏷 Скидки / находки", "#SephoraDeals"),
+    ("🏷 Скидки / находки", "#SephoraSale"),
 ]
 
 # =========================
@@ -89,14 +89,6 @@ def db_add(tag: str, message_id: int):
     con.commit()
     con.close()
 
-def db_count(tag: str) -> int:
-    con = sqlite3.connect(DB_PATH)
-    cur = con.cursor()
-    cur.execute("SELECT COUNT(*) FROM tag_posts WHERE tag = ?", (tag,))
-    n = cur.fetchone()[0]
-    con.close()
-    return int(n)
-
 def db_list(tag: str, limit: int, offset: int) -> List[int]:
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
@@ -110,175 +102,101 @@ def db_list(tag: str, limit: int, offset: int) -> List[int]:
     con.close()
     return [r[0] for r in rows]
 
+def db_count(tag: str) -> int:
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    cur.execute("SELECT COUNT(*) FROM tag_posts WHERE tag = ?", (tag,))
+    n = cur.fetchone()[0]
+    con.close()
+    return int(n)
+
 db_init()
 
 # =========================
-# MINI APP (как "приложение")
+# FASTAPI (Mini App / API)
 # =========================
+app = FastAPI()
+
 MINIAPP_HTML = """
 <!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>NS · Natural Sense</title>
 <style>
-:root{
-  --bg:#0b0b0d;
-  --panel:#101016;
-  --line:#22222a;
-  --text:#f2efe9;
-  --muted:#b9b2a7;
-  --btn:#16161f;
-}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);
-  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-.wrap{max-width:540px;margin:0 auto;min-height:100vh;padding:18px;display:flex;flex-direction:column;gap:14px}
-.head{padding:6px 2px 0}
-.brand{font-weight:800;font-size:20px;letter-spacing:.2px}
-.sub{margin-top:6px;color:var(--muted);font-size:12px;letter-spacing:.9px;text-transform:lowercase}
-.card{border:1px solid var(--line);background:rgba(255,255,255,.02);border-radius:18px;padding:14px}
-.h{font-size:16px;font-weight:800;margin:0 0 8px}
-.p{margin:0;color:var(--muted);font-size:13px;line-height:1.35}
-.grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px}
-.btn{width:100%;text-align:left;padding:14px 12px;border-radius:16px;border:1px solid var(--line);
-  background:var(--btn);color:var(--text);font-size:14px;cursor:pointer}
-.small{display:block;color:var(--muted);font-size:12px;margin-top:4px}
-.list{display:flex;flex-direction:column;gap:10px;margin-top:10px}
-.item{display:flex;justify-content:space-between;gap:10px;align-items:center;
-  border:1px solid var(--line);border-radius:16px;padding:12px;background:rgba(255,255,255,.02)}
-.item a{color:#e9dcc7;text-decoration:none;font-weight:800}
-.footer{display:flex;gap:10px;justify-content:space-between}
-.ghost{border:1px solid var(--line);background:transparent;color:var(--muted);
-  padding:10px 12px;border-radius:14px;text-decoration:none;cursor:pointer;font-size:13px}
-.pager{display:flex;gap:10px;margin-top:12px}
+  :root{--bg:#0c0c10;--line:#22222b;--panel:#101018;--text:#f2ede4;--muted:#b9b2a7}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  .wrap{max-width:520px;margin:0 auto;min-height:100vh;padding:18px;display:flex;flex-direction:column;gap:14px}
+  .title{font-weight:800;font-size:20px}
+  .sub{color:var(--muted);font-size:12px;letter-spacing:.8px;text-transform:lowercase;margin-top:4px}
+  .panel{border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.02);padding:14px}
+  .btn{width:100%;text-align:left;padding:14px 12px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--text);font-size:14px;cursor:pointer;margin-top:10px}
+  .btn:hover{background:rgba(255,255,255,.06)}
+  .small{display:block;color:var(--muted);font-size:12px;margin-top:4px}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="head">
-    <div class="brand">NS · Natural Sense</div>
+  <div>
+    <div class="title">NS · Natural Sense</div>
     <div class="sub">luxury beauty magazine</div>
   </div>
 
-  <div class="card" id="screen"></div>
-
-  <div class="footer">
-    <button class="ghost" id="back" style="display:none;">Back</button>
-    <a class="ghost" id="channel" target="_blank" rel="noreferrer">Open channel</a>
+  <div class="panel">
+    <div style="font-weight:700;margin-bottom:8px;">Выберите раздел 👇</div>
+    <button class="btn" onclick="go('cat')">📂 Категории<span class="small">по тегам</span></button>
+    <button class="btn" onclick="go('brand')">🏷 Бренды<span class="small">по тегам</span></button>
+    <button class="btn" onclick="go('seph')">💸 Sephora<span class="small">цены / находки</span></button>
+    <button class="btn" onclick="openChannel()">↩ В канал<span class="small">открыть @NaturalSense</span></button>
   </div>
 </div>
 
 <script>
-let cfg=null;
-let stack=[];
-const screen=document.getElementById("screen");
-const back=document.getElementById("back");
-const channel=document.getElementById("channel");
-
-back.onclick=()=>{ stack.pop(); render(); };
-
-function btn(label, sub, onClick){
-  const id="b_"+Math.random().toString(16).slice(2);
-  setTimeout(()=>{ const el=document.getElementById(id); if(el) el.onclick=onClick; },0);
-  return <button class="btn" id="${id}">${label}${sub?<span class="small">${sub}</span>:""}</button>;
+async function cfg(){ return (await fetch("/api/config")).json(); }
+async function go(which){
+  const c = await cfg();
+  const map = {cat:c.categories, brand:c.brands, seph:c.sephora};
+  const list = map[which] || [];
+  let html = '<div class="wrap"><div><div class="title">NS · Natural Sense</div><div class="sub">luxury beauty magazine</div></div>';
+  html += '<div class="panel"><div style="font-weight:700;margin-bottom:8px;">Выберите пункт</div>';
+  list.forEach(it=>{
+    html += `<button class="btn" onclick="openTag('${it.tag}')">${it.title}<span class="small">${it.tag}</span></button>`;
+  });
+  html += `<button class="btn" onclick="location.href='/webapp'">← Назад</button>`;
+  html += '</div></div>';
+  document.body.innerHTML = html;
 }
-function grid(html){ return <div class="grid">${html}</div>; }
-
-function push(v){ stack.push(v); render(); }
-
-async function loadCfg(){
-  const r=await fetch("/api/config"); cfg=await r.json();
-  channel.href=cfg.channel_url;
+async function openTag(tag){
+  const c = await cfg();
+  const url = `/api/posts?tag=${encodeURIComponent(tag)}&offset=0`;
+  const data = await (await fetch(url)).json();
+  let html = '<div class="wrap"><div><div class="title">NS · Natural Sense</div><div class="sub">luxury beauty magazine</div></div>';
+  html += `<div class="panel"><div style="font-weight:700;margin-bottom:8px;">${tag} · материалов: ${data.total}</div>`;
+  if(data.total === 0){
+    html += `<div style="color:var(--muted)">Пока нет постов с этим тегом. Добавь тег в посты канала.</div>`;
+  } else {
+    data.posts.forEach(p=>{
+      html += `<button class="btn" onclick="window.open('${p.url}','_blank')">Открыть пост #${p.message_id}<span class="small">${p.url}</span></button>`;
+    });
+  }
+  html += `<button class="btn" onclick="location.href='/webapp'">← Назад</button>`;
+  html += '</div></div>';
+  document.body.innerHTML = html;
 }
-
-async function render(){
-  back.style.display = stack.length>1 ? "inline-flex" : "none";
-  const v=stack[stack.length-1];
-
-  if(v.type==="home"){
-    screen.innerHTML =
-      <div class="h">Выберите раздел 👇</div><div class="p">всё как в приложении</div> +
-      grid(
-        btn("📂 Категории","sections", ()=>push({type:"list", key:"categories", title:"Категории"})) +
-        btn("🏷 Бренды","brands", ()=>push({type:"list", key:"brands", title:"Бренды"})) +
-        btn("💸 Sephora","prices & picks", ()=>push({type:"list", key:"sephora", title:"Sephora"})) +
-        btn("↩ В канал","", ()=>window.open(cfg.channel_url,"_blank"))
-      );
-    return;
-  }
-
-  if(v.type==="list"){
-    const arr=cfg[v.key]||[];
-    let html=<div class="h">${v.title}</div><div class="p">выберите пункт</div>;
-    let b="";
-    for(const it of arr){
-      b += btn(it.title, tag: ${it.tag}, ()=>push({type:"posts", title:it.title, tag:it.tag, offset:0}));
-    }
-    screen.innerHTML = html + grid(b);
-    return;
-  }
-
-  if(v.type==="posts"){
-    const r=await fetch(/api/posts?tag=${encodeURIComponent(v.tag)}&offset=${v.offset});
-    const data=await r.json();
-
-    let html = <div class="h">${v.title}</div><div class="p">Материалов: ${data.total} · ${v.tag}</div>;
-
-    if(data.total===0){
-      html += <div class="p" style="margin-top:10px">Пока нет постов с тегом ${v.tag}. Добавь тег в посты канала.</div>;
-      screen.innerHTML = html;
-      return;
-    }
-
-    html += <div class="list"> + data.posts.map(p=>
-      <div class="item">
-        <div class="p">Пост #${p.message_id}</div>
-        <a href="${p.url}" target="_blank" rel="noreferrer">Открыть</a>
-      </div>
-    ).join("") + </div>;
-
-    const prev=Math.max(0, v.offset - data.limit);
-    const next=v.offset + data.limit;
-    html += 
-      <div class="pager">
-        <button class="ghost" id="prev" ${v.offset<=0?"disabled":""}>Prev</button>
-        <button class="ghost" id="next" ${(next>=data.total)?"disabled":""}>Next</button>
-      </div>
-    ;
-
-    screen.innerHTML = html;
-
-    setTimeout(()=>{
-      const p=document.getElementById("prev");
-      const n=document.getElementById("next");
-      if(p) p.onclick=()=>{ v.offset=prev; render(); };
-      if(n) n.onclick=()=>{ v.offset=next; render(); };
-    },0);
-
-    return;
-  }
+async function openChannel(){
+  const c = await cfg();
+  window.open(c.channel_url, "_blank");
 }
-
-(async function(){
-  await loadCfg();
-  stack=[{type:"home"}];
-  render();
-})();
 </script>
 </body>
 </html>
 """
 
-# =========================
-# FastAPI
-# =========================
-app = FastAPI()
-
 @app.get("/", response_class=HTMLResponse)
 def root():
-    return HTMLResponse("<h3>OK</h3><p>MiniApp: <a href='/webapp'>/webapp</a></p>")
+    return HTMLResponse("<h3>OK</h3><p>Mini App: <a href='/webapp'>/webapp</a></p>")
 
 @app.get("/webapp", response_class=HTMLResponse)
 def webapp():
@@ -301,171 +219,157 @@ def api_posts(tag: str, offset: int = 0, limit: int = PAGE_SIZE):
     return {"tag": tag, "total": total, "offset": offset, "limit": limit, "posts": posts}
 
 # =========================
-# Telegram Bot (python-telegram-bot)
+# TELEGRAM BOT
 # =========================
 tg_app: Optional[Application] = None
 
-def deep_link(payload: str) -> str:
-    # открывает бота по кнопке из канала
-    return f"https://t.me/{BOT_USERNAME}?start={payload}"
-
-def main_menu_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📂 Категории", callback_data="menu:categories")],
-        [InlineKeyboardButton("🏷 Бренды", callback_data="menu:brands")],
-        [InlineKeyboardButton("💸 Sephora", callback_data="menu:sephora")],
-        [InlineKeyboardButton("✦ Открыть журнал (app)", web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/webapp"))] if PUBLIC_BASE_URL else [],
-        [InlineKeyboardButton("↩ В канал", url=CHANNEL_URL)],
-    ])
-
-def list_kb(kind: str, items: List[Tuple[str, str]]) -> InlineKeyboardMarkup:
-    rows = []
-    for title, tag in items:
-        rows.append([InlineKeyboardButton(title, callback_data=f"tag:{kind}:{tag}:0")])
-    rows.append([InlineKeyboardButton("⬅ Назад", callback_data="back:main")])
-    return InlineKeyboardMarkup(rows)
-
-def posts_kb(kind: str, tag: str, offset: int, total: int, ids: List[int]) -> InlineKeyboardMarkup:
-    rows = []
-    for mid in ids:
-        rows.append([InlineKeyboardButton(f"Открыть пост #{mid}", url=f"{CHANNEL_URL}/{mid}")])
-
-    nav = []
-    if offset > 0:
-        nav.append(InlineKeyboardButton("⬅ Prev", callback_data=f"tag:{kind}:{tag}:{max(0, offset-PAGE_SIZE)}"))
-    if offset + PAGE_SIZE < total:
-        nav.append(InlineKeyboardButton("Next ➡", callback_data=f"tag:{kind}:{tag}:{offset+PAGE_SIZE}"))
-    if nav:
-        rows.append(nav)
-
-    rows.append([InlineKeyboardButton("⬅ Назад", callback_data=f"back:{kind}")])
+def kb_main() -> InlineKeyboardMarkup:
+    # Главное меню в боте (не в канале)
+    rows = [
+        [InlineKeyboardButton("📂 Категории", callback_data="m:cat")],
+        [InlineKeyboardButton("🏷 Бренды", callback_data="m:brand")],
+        [InlineKeyboardButton("💸 Sephora", callback_data="m:seph")],
+    ]
+    # Mini App кнопка (как приложение)
+    if PUBLIC_BASE_URL:
+        rows.append([InlineKeyboardButton("✦ Open Journal", web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/webapp"))])
     rows.append([InlineKeyboardButton("↩ В канал", url=CHANNEL_URL)])
     return InlineKeyboardMarkup(rows)
 
-def kind_items(kind: str) -> List[Tuple[str, str]]:
-    if kind == "categories":
-        return CATEGORIES
-    if kind == "brands":
-        return BRANDS
-    return SEPHORA
+def kb_list(kind: str) -> InlineKeyboardMarkup:
+    if kind == "cat":
+        items = CATEGORIES
+        back = "m:home"
+    elif kind == "brand":
+        items = BRANDS
+        back = "m:home"
+    else:
+        items = SEPHORA
+        back = "m:home"
+
+    rows = []
+    for title, tag in items:
+        rows.append([InlineKeyboardButton(title, callback_data=f"t:{tag}:0")])
+    rows.append([InlineKeyboardButton("← Назад", callback_data=back)])
+    return InlineKeyboardMarkup(rows)
+
+def kb_posts(tag: str, offset: int, total: int) -> InlineKeyboardMarkup:
+    rows = []
+    # пагинация
+    prev_off = max(0, offset - PAGE_SIZE)
+    next_off = offset + PAGE_SIZE
+    nav = []
+    if offset > 0:
+        nav.append(InlineKeyboardButton("◀ Prev", callback_data=f"t:{tag}:{prev_off}"))
+    if next_off < total:
+        nav.append(InlineKeyboardButton("Next ▶", callback_data=f"t:{tag}:{next_off}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("← В меню", callback_data="m:home")])
+    rows.append([InlineKeyboardButton("↩ В канал", url=CHANNEL_URL)])
+    return InlineKeyboardMarkup(rows)
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "NS · Natural Sense\nluxury beauty journal\n\nВыберите раздел 👇",
+        reply_markup=kb_main()
+    )
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ OK")
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # /start или /start categories /start brands /start sephora
-    payload = ""
-    if context.args:
-        payload = context.args[0].strip().lower()
-        if payload in ("categories", "brands", "sephora"):
-        items = kind_items(payload)
-        await update.message.reply_text("Выберите пункт 👇", reply_markup=list_kb(payload, items))
-        return
-
-    await update.message.reply_text(
-        "NS · Natural Sense\nluxury beauty journal",
-        reply_markup=main_menu_kb()
-    )
-
 async def cmd_pinmenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Шлёт пост в канал и закрепляет его.
-    ВАЖНО: бот должен быть админом канала с правом Manage Messages.
-    """
-    bot = context.bot
+    # Закрепить меню в канале (если заданы CHANNEL_CHAT_ID и права админа)
+    if not CHANNEL_CHAT_ID:
+        await update.message.reply_text("❌ CHANNEL_CHAT_ID не задан в Variables (нужно -100xxxxxxxxxx).")
+        return
 
     text = "NS · Natural Sense\nprivate beauty space\n\nВыберите раздел 👇"
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📂 Категории", url=deep_link("categories"))],
-        [InlineKeyboardButton("🏷 Бренды", url=deep_link("brands"))],
-        [InlineKeyboardButton("💸 Sephora", url=deep_link("sephora"))],
-        [InlineKeyboardButton("✦ Открыть журнал (app)", url=f"{PUBLIC_BASE_URL}/webapp")] if PUBLIC_BASE_URL else [],
-        [InlineKeyboardButton("↩ В канал", url=CHANNEL_URL)],
-    ])
-
-    msg = await bot.send_message(chat_id=f"@{CHANNEL_USERNAME}", text=text, reply_markup=kb, disable_web_page_preview=True)
+    msg = await context.bot.send_message(chat_id=CHANNEL_CHAT_ID, text=text, reply_markup=kb_main())
     try:
-        await bot.pin_chat_message(chat_id=f"@{CHANNEL_USERNAME}", message_id=msg.message_id, disable_notification=True)
+        await context.bot.pin_chat_message(chat_id=CHANNEL_CHAT_ID, message_id=msg.message_id, disable_notification=True)
+        await update.message.reply_text("✅ Меню отправлено и закреплено.")
     except Exception as e:
-        logging.error("Pin failed: %s", e)
-        await update.message.reply_text("Меню отправил, но закрепить не смог — проверь права бота в канале (Manage Messages).")
-        return
-
-    await update.message.reply_text("✅ Меню отправлено и закреплено.")
+        await update.message.reply_text(f"❌ Не смог закрепить: {e}")
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-
     data = q.data or ""
 
-    if data == "back:main":
-        await q.edit_message_text("NS · Natural Sense\nluxury beauty journal", reply_markup=main_menu_kb())
+    # Меню
+    if data == "m:home":
+        await q.edit_message_text("NS · Natural Sense\nluxury beauty journal\n\nВыберите раздел 👇", reply_markup=kb_main())
+        return
+    if data == "m:cat":
+        await q.edit_message_text("📂 Категории\nВыберите пункт:", reply_markup=kb_list("cat"))
+        return
+    if data == "m:brand":
+        await q.edit_message_text("🏷 Бренды\nВыберите пункт:", reply_markup=kb_list("brand"))
+        return
+    if data == "m:seph":
+        await q.edit_message_text("💸 Sephora\nВыберите пункт:", reply_markup=kb_list("seph"))
         return
 
-    if data.startswith("menu:"):
-        kind = data.split(":", 1)[1]
-        items = kind_items(kind)
-        await q.edit_message_text("Выберите пункт 👇", reply_markup=list_kb(kind, items))
-        return
-
-    if data.startswith("back:"):
-        kind = data.split(":", 1)[1]
-        items = kind_items(kind)
-        await q.edit_message_text("Выберите пункт 👇", reply_markup=list_kb(kind, items))
-        return
-
-    if data.startswith("tag:"):
-        # tag:<kind>:<tag>:<offset>
-        parts = data.split(":")
-        if len(parts) != 4:
-            return
-        kind, tag, offset_s = parts[1], parts[2], parts[3]
+    # Теги: t:#Dior:0
+    if data.startswith("t:"):
         try:
-            offset = int(offset_s)
-        except:
-            offset = 0
+            _, tag, off = data.split(":", 2)
+            offset = int(off)
+        except Exception:
+            await q.edit_message_text("❌ Ошибка кнопки. Вернись в меню.", reply_markup=kb_main())
+            return
 
         total = db_count(tag)
         ids = db_list(tag, PAGE_SIZE, offset)
-        title = tag
 
         if total == 0:
-            await q.edit_message_text(
-                f"Пока нет постов с тегом {tag}.\nДобавь тег в посты канала — и бот начнет показывать их.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⬅ Назад", callback_data=f"back:{kind}")],
-                    [InlineKeyboardButton("↩ В канал", url=CHANNEL_URL)]
-                ])
-            )
+            text = f"{tag}\n\nПока нет постов с этим тегом.\nДобавь тег в посты канала и попробуй снова."
+            await q.edit_message_text(text, reply_markup=kb_posts(tag, offset, total))
             return
 
-        await q.edit_message_text(
-            f"{title}\nМатериалов: {total}",
-            reply_markup=posts_kb(kind, tag, offset, total, ids),
-            disable_web_page_preview=True
-        )
+        # формируем список ссылок
+        lines = [f"{tag} · материалов: {total}\n"]
+        for mid in ids:
+            lines.append(f"• {CHANNEL_URL}/{mid}")
+        text = "\n".join(lines)
+
+        await q.edit_message_text(text, disable_web_page_preview=True, reply_markup=kb_posts(tag, offset, total))
         return
 
-async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # индексируем теги из постов канала
-    post = update.channel_post
-    if not post:
-        return
-    text = post.text or post.caption or ""
-    tags = extract_tags(text)
-    if not tags:
-        return
-    for t in tags:
-        db_add(t, post.message_id)
-    logging.info("Indexed tags %s for msg %s", tags, post.message_id)
+    await q.edit_message_text("Меню:", reply_markup=kb_main())
 
+# =========================
+# WEBHOOK ENDPOINT
+# =========================
+@app.post("/telegram/webhook")
+async def telegram_webhook(req: Request):
+    if not tg_app:
+        return JSONResponse({"ok": False, "error": "tg_app not ready"}, status_code=503)
+
+    data = await req.json()
+    update = Update.de_json(data, tg_app.bot)
+    await tg_app.process_update(update)
+
+    # Индексация тегов из канала (важно: бот должен быть админом канала, чтобы получать channel_post)
+    if update and update.channel_post:
+        text = update.channel_post.text or update.channel_post.caption or ""
+        tags = extract_tags(text)
+        if tags:
+            for t in tags:
+                db_add(t, update.channel_post.message_id)
+
+    return JSONResponse({"ok": True})
+
+# =========================
+# STARTUP / SHUTDOWN
+# =========================
 @app.on_event("startup")
-async def startup():
+async def on_startup():
     global tg_app
 
     if not BOT_TOKEN:
-        logging.error("BOT_TOKEN is empty. Set Railway Variable BOT_TOKEN.")
+        log.error("BOT_TOKEN is empty. Set it in Railway Variables.")
         return
 
     tg_app = Application.builder().token(BOT_TOKEN).build()
@@ -473,52 +377,23 @@ async def startup():
     tg_app.add_handler(CommandHandler("ping", cmd_ping))
     tg_app.add_handler(CommandHandler("pinmenu", cmd_pinmenu))
     tg_app.add_handler(CallbackQueryHandler(on_callback))
-    tg_app.add_handler(CommandHandler("help", cmd_start))
-
-    # channel posts (для индекса тегов)
-    tg_app.add_handler(
-        # это сработает на channel_post апдейты
-        # (в PTB channel_post приходит как Update.channel_post, handler можно не отдельный, но так стабильнее)
-        # используем MessageHandler не надо — обработаем через application.process_update ниже в webhook
-        # поэтому просто оставим функцию ниже, а тег-индексация будет в /telegram/webhook
-        CommandHandler("_noop", cmd_ping)
-    )
 
     await tg_app.initialize()
     await tg_app.start()
 
-    # ставим webhook
+    # Ставим webhook (обязательно PUBLIC_BASE_URL)
     if PUBLIC_BASE_URL:
-        webhook_url = f"{PUBLIC_BASE_URL}/telegram/webhook"
+        wh = f"{PUBLIC_BASE_URL}/telegram/webhook"
         try:
-            await tg_app.bot.set_webhook(webhook_url)
-            logging.info("Webhook set: %s", webhook_url)
+            await tg_app.bot.set_webhook(url=wh, drop_pending_updates=True)
+            log.info("Webhook set to %s", wh)
         except Exception as e:
-            logging.error("Webhook set failed: %s", e)
+            log.error("Webhook set failed: %s", e)
     else:
-        logging.warning("PUBLIC_BASE_URL empty. Webhook not set.")
+        log.warning("PUBLIC_BASE_URL is empty. Webhook can't be set.")
 
 @app.on_event("shutdown")
-async def shutdown():
+async def on_shutdown():
     if tg_app:
         await tg_app.stop()
         await tg_app.shutdown()
-
-@app.post("/telegram/webhook")
-async def telegram_webhook(req: Request):
-    if not tg_app:
-        return JSONResponse({"ok": False, "error": "tg_app not ready"})
-
-    data = await req.json()
-
-    upd = Update.de_json(data, tg_app.bot)
-    await tg_app.process_update(upd)
-
-    # индексируем теги из канала прямо здесь
-    if upd and upd.channel_post:
-        post = upd.channel_post
-        text = post.text or post.caption or ""
-        for t in extract_tags(text):
-            db_add(t, post.message_id)
-
-    return JSONResponse({"ok": True})
