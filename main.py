@@ -4,7 +4,7 @@ import sqlite3
 import logging
 from typing import List, Optional
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
@@ -16,12 +16,11 @@ logging.basicConfig(level=logging.INFO)
 # CONFIG
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8591165656:AAFvwMeza7LXruoId7sHqQ_FEeTgmBgqqi4")  # фейковый
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
-", "").rstrip("/")  # https://xxx.up.railway.app
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")  # сюда НЕ вставляй ссылку в код
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "NaturalSense")
-CHANNEL_URL = f"https://t.me/NaturalSense"
-DB_PATH = "tags.db"
+CHANNEL_URL = f"https://t.me/{CHANNEL_USERNAME}"
 
+DB_PATH = "tags.db"
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
 PAGE_SIZE = 12
 
@@ -74,14 +73,10 @@ def db_count(tag: str) -> int:
     con.close()
     return int(n)
 
-# =========================
-# FASTAPI APP
-# =========================
-app = FastAPI()
 db_init()
 
 # =========================
-# MINI APP (HTML/CSS/JS) — В ОДНОМ ОТВЕТЕ
+# MINI APP HTML
 # =========================
 MINIAPP_HTML = """
 <!doctype html>
@@ -89,185 +84,150 @@ MINIAPP_HTML = """
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Natural Sense · Journal</title>
+  <title>NS · Natural Sense</title>
   <style>
     :root{
-      --bg:#0b0b0d;
-      --panel:#111116;
-      --text:#f3f1ed;
-      --muted:#b8b2a8;
-      --line:#22222a;
-      --btn:#171720;
-      --btn2:#0f0f14;
-      --accent:#e7dcc7;
+      --bg:#0b0b0d; --line:#22222a; --panel:#101016;
+      --text:#f2efe9; --muted:#b9b2a7; --btn:#16161f; --btn2:#0f0f15;
     }
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--text);
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    .app{max-width:520px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;
-      padding:18px;gap:14px}
-    .top{padding:12px 12px 0 12px}
-    .brand{font-weight:600;letter-spacing:.2px;font-size:20px}
-    .subtitle{margin-top:6px;color:var(--muted);font-size:13px;letter-spacing:.6px;text-transform:lowercase}
-    .screen{flex:1;border:1px solid var(--line);border-radius:18px;padding:14px;
-      background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0))}
-    .card{border:1px solid var(--line);background:rgba(255,255,255,.02);border-radius:16px;padding:14px;margin-bottom:12px}
-    .h1{font-size:18px;font-weight:600;margin:0 0 8px 0}
+    .wrap{max-width:520px;margin:0 auto;min-height:100vh;padding:18px;display:flex;flex-direction:column;gap:14px}
+    .top{padding:10px 12px 0}
+    .brand{font-weight:700;font-size:20px;letter-spacing:.2px}
+    .sub{margin-top:6px;color:var(--muted);font-size:12px;letter-spacing:.8px;text-transform:lowercase}
+    .screen{flex:1;border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));
+      padding:14px}
+    .card{border:1px solid var(--line);background:rgba(255,255,255,.02);border-radius:16px;padding:14px}
+    .h{font-size:16px;font-weight:700;margin:0 0 8px}
     .p{margin:0;color:var(--muted);font-size:13px;line-height:1.35}
-    .grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
-    .btn{width:100%;padding:14px 12px;border-radius:14px;border:1px solid var(--line);
-      background:var(--btn);color:var(--text);font-size:14px;text-align:left;cursor:pointer}
+    .grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px}
+    .btn{width:100%;text-align:left;padding:14px 12px;border-radius:14px;border:1px solid var(--line);
+      background:var(--btn);color:var(--text);font-size:14px;cursor:pointer}
     .btn:hover{background:var(--btn2)}
-    .btn .small{display:block;color:var(--muted);font-size:12px;margin-top:4px}
+    .small{display:block;color:var(--muted);font-size:12px;margin-top:4px}
     .footer{display:flex;gap:10px;justify-content:space-between;align-items:center}
     .ghost{border:1px solid var(--line);background:transparent;color:var(--muted);
       padding:10px 12px;border-radius:12px;text-decoration:none;cursor:pointer;font-size:13px}
     .list{display:flex;flex-direction:column;gap:10px;margin-top:10px}
     .item{display:flex;justify-content:space-between;gap:10px;align-items:center;
       border:1px solid var(--line);border-radius:14px;padding:12px;background:rgba(255,255,255,.02)}
-    .item a{color:var(--accent);text-decoration:none;font-weight:600}
+    .item a{color:#e9dcc7;text-decoration:none;font-weight:700}
     .pager{display:flex;gap:10px;margin-top:12px}
   </style>
 </head>
 <body>
-  <div class="app">
-    <div class="top">
-      <div class="brand">NS · Natural Sense</div>
-      <div class="subtitle">luxury beauty journal</div>
-    </div>
-
-    <div id="screen" class="screen"></div>
-
-    <div class="footer">
-      <button class="ghost" id="btnBack" style="display:none;">Back</button>
-      <a class="ghost" id="btnChannel" target="_blank" rel="noreferrer">Open channel</a>
-    </div>
+<div class="wrap">
+  <div class="top">
+    <div class="brand">NS · Natural Sense</div>
+    <div class="sub">luxury beauty magazine</div>
   </div>
 
+  <div class="screen" id="screen"></div>
+
+  <div class="footer">
+    <button class="ghost" id="back" style="display:none;">Back</button>
+    <a class="ghost" id="channel" target="_blank" rel="noreferrer">Open channel</a>
+  </div>
+</div>
+
 <script>
-let config=null;
+let cfg=null;
 let stack=[];
 const screen=document.getElementById("screen");
-const btnBack=document.getElementById("btnBack");
-const btnChannel=document.getElementById("btnChannel");
+const back=document.getElementById("back");
+const channel=document.getElementById("channel");
 
-btnBack.addEventListener("click", ()=>{ stack.pop(); render(); });
+back.onclick=()=>{ stack.pop(); render(); };
 
-function push(view){ stack.push(view); render(); }
-function card(title, subtitle){
-  return `<div class="card"><div class="h1">${title}</div><div class="p">${subtitle}</div></div>`;
-}
-function gridButtons(html){ return `<div class="grid">${html}</div>`; }
-
-function button(label, sub, onClick){
+function card(t,s){ return `<div class="card"><div class="h">${t}</div><div class="p">${s}</div></div>`; }
+function btn(label, sub, onClick){
   const id="b_"+Math.random().toString(16).slice(2);
   setTimeout(()=>{ const el=document.getElementById(id); if(el) el.onclick=onClick; },0);
   return `<button class="btn" id="${id}">${label}${sub?`<span class="small">${sub}</span>`:""}</button>`;
 }
+function grid(html){ return `<div class="grid">${html}</div>`; }
 
-function homeView(){ return {type:"home"}; }
-function sectionCoverView(sectionKey,title){ return {type:"sectionCover", sectionKey, title}; }
-function sectionListView(sectionKey,title){ return {type:"sectionList", sectionKey, title}; }
-function tagCoverView(tag,title){ return {type:"tagCover", tag, title}; }
-function postsView(tag,title,offset=0){ return {type:"posts", tag, title, offset}; }
+function push(v){ stack.push(v); render(); }
 
-async function loadConfig(){
-  const r=await fetch("/api/config");
-  config=await r.json();
-  btnChannel.href=config.channel_url;
+async function loadCfg(){
+  const r=await fetch("/api/config"); cfg=await r.json();
+  channel.href=cfg.channel_url;
 }
 
 async function render(){
-  if(!config) return;
-  btnBack.style.display = stack.length>1 ? "inline-flex" : "none";
-  const view=stack[stack.length-1];
+  back.style.display = stack.length>1 ? "inline-flex" : "none";
+  const v=stack[stack.length-1];
 
-  if(view.type==="home"){
+  if(v.type==="home"){
     screen.innerHTML =
-      card("NS · Natural Sense","luxury beauty journal") +
-      gridButtons(
-        button("📂 Categories","Editorial sections", ()=>push(sectionCoverView("categories","Categories"))) +
-        button("🏷 Brands","Houses & icons", ()=>push(sectionCoverView("brands","Brands"))) +
-        button("💸 Sephora","Curated picks & updates", ()=>push(sectionCoverView("sephora","Sephora"))) +
-        button("💎 Beauty Challenges","Editorial events", ()=>alert("MVP: позже добавим")) +
-        button("↩ Open channel", config.channel_url, ()=>window.open(config.channel_url,"_blank"))
+      card("Выберите раздел 👇","всё как в приложении") +
+      grid(
+        btn("📂 Категории","sections", ()=>push({type:"list", key:"categories", title:"Категории"})) +
+        btn("🏷 Бренды","brands", ()=>push({type:"list", key:"brands", title:"Бренды"})) +
+        btn("💸 Sephora","prices & picks", ()=>push({type:"list", key:"sephora", title:"Sephora"})) +
+        btn("↩ В канал","", ()=>window.open(cfg.channel_url,"_blank"))
       );
     return;
   }
 
-  if(view.type==="sectionCover"){
-    screen.innerHTML =
-      card(`Natural Sense · ${view.title}`, "luxury beauty journal") +
-      gridButtons(
-        button("✦ Open","Continue", ()=>push(sectionListView(view.sectionKey, view.title))) +
-        button("Back","", ()=>{stack.pop(); render();})
-      );
-    return;
-  }
-
-  if(view.type==="sectionList"){
-    const arr=config[view.sectionKey]||[];
-    let btns="";
+  if(v.type==="list"){
+    const arr=cfg[v.key]||[];
+    let html=card(v.title,"выберите пункт");
+    let b="";
     for(const it of arr){
-      btns += button(it.title, `tag: ${it.tag}`, ()=>push(tagCoverView(it.tag, it.title)));
+      b += btn(it.title, `tag: ${it.tag}`, ()=>push({type:"posts", title:it.title, tag:it.tag, offset:0}));
     }
-    screen.innerHTML = card(view.title,"Choose a section") + gridButtons(btns);
+    screen.innerHTML = html + grid(b);
     return;
   }
 
-  if(view.type==="tagCover"){
-    screen.innerHTML =
-      card(view.title, `tag: ${view.tag}`) +
-      gridButtons(
-        button("✦ Open materials","Articles in channel", ()=>push(postsView(view.tag, view.title, 0))) +
-        button("Back","", ()=>{stack.pop(); render();})
-      );
-    return;
-  }
-
-  if(view.type==="posts"){
-    const r=await fetch(`/api/posts?tag=${encodeURIComponent(view.tag)}&offset=${view.offset}`);
+  if(v.type==="posts"){
+    const r=await fetch(`/api/posts?tag=${encodeURIComponent(v.tag)}&offset=${v.offset}`);
     const data=await r.json();
 
-    let list="";
+    let html = card(v.title, `Материалов: ${data.total} · ${v.tag}`);
+
     if(data.total===0){
-      list = `<div class="card"><div class="p">No materials yet for ${view.tag}. Publish new posts with this tag.</div></div>`;
-    } else {
-      list = `<div class="card"><div class="p">${view.title} · materials: ${data.total}</div></div>`;
-      list += `<div class="list">` + data.posts.map(p => `
-        <div class="item">
-          <div class="p">Material #${p.message_id}</div>
-          <a href="${p.url}" target="_blank" rel="noreferrer">Open</a>
-        </div>
-      `).join("") + `</div>`;
+      html += `<div class="card"><div class="p">Пока нет постов с тегом ${v.tag}. Добавь тег в посты канала.</div></div>`;
+      screen.innerHTML = html;
+      return;
     }
 
-    const prev=Math.max(0, view.offset - data.limit);
-    const next=view.offset + data.limit;
+    html += `<div class="list">` + data.posts.map(p=>`
+      <div class="item">
+        <div class="p">Пост #${p.message_id}</div>
+        <a href="${p.url}" target="_blank" rel="noreferrer">Открыть</a>
+      </div>
+    `).join("") + `</div>`;
 
-    list += `
+    const prev=Math.max(0, v.offset - data.limit);
+    const next=v.offset + data.limit;
+
+    html += `
       <div class="pager">
-        <button class="ghost" id="prevBtn" ${view.offset<=0?"disabled":""}>Prev</button>
-        <button class="ghost" id="nextBtn" ${(next>=data.total)?"disabled":""}>Next</button>
+        <button class="ghost" id="prev" ${v.offset<=0?"disabled":""}>Prev</button>
+        <button class="ghost" id="next" ${(next>=data.total)?"disabled":""}>Next</button>
       </div>
     `;
 
-    screen.innerHTML=list;
+    screen.innerHTML = html;
 
     setTimeout(()=>{
-      const p=document.getElementById("prevBtn");
-      const n=document.getElementById("nextBtn");
-      if(p) p.onclick=()=>{ view.offset=prev; render(); };
-      if(n) n.onclick=()=>{ view.offset=next; render(); };
+      const p=document.getElementById("prev");
+      const n=document.getElementById("next");
+      if(p) p.onclick=()=>{ v.offset=prev; render(); };
+      if(n) n.onclick=()=>{ v.offset=next; render(); };
     },0);
 
     return;
   }
 }
 
-(async function init(){
-  await loadConfig();
-  stack=[homeView()];
+(async function(){
+  await loadCfg();
+  stack=[{type:"home"}];
   render();
 })();
 </script>
@@ -276,36 +236,39 @@ async function render(){
 """
 
 # =========================
-# MINI APP ROUTE
+# FASTAPI
 # =========================
+app = FastAPI()
+
+@app.get("/", response_class=HTMLResponse)
+def root():
+    return HTMLResponse("<h3>OK</h3><p>Mini App: <a href='/webapp'>/webapp</a></p>")
+
 @app.get("/webapp", response_class=HTMLResponse)
 def webapp():
     return HTMLResponse(MINIAPP_HTML)
 
-# =========================
-# API
-# =========================
 @app.get("/api/config")
 def api_config():
     return {
         "channel_url": CHANNEL_URL,
         "categories": [
-            {"title": "Новинка", "tag": "#Новинка"},
-            {"title": "Люкс", "tag": "#Люкс"},
-            {"title": "Тренд", "tag": "#Тренд"},
-            {"title": "Оценка", "tag": "#Оценка"},
-            {"title": "Факты / состав", "tag": "#Факты"},
+            {"title": "🆕 Новинка", "tag": "#Новинка"},
+            {"title": "💎 Люкс", "tag": "#Люкс"},
+            {"title": "🔥 Тренд", "tag": "#Тренд"},
+            {"title": "⭐ Оценка", "tag": "#Оценка"},
+            {"title": "🧪 Факты/Состав", "tag": "#Факты"},
         ],
         "brands": [
             {"title": "Dior", "tag": "#Dior"},
             {"title": "Chanel", "tag": "#Chanel"},
-            {"title": "Charlotte", "tag": "#Charlotte"},
             {"title": "YSL", "tag": "#YSL"},
+            {"title": "Charlotte", "tag": "#Charlotte"},
         ],
         "sephora": [
             {"title": "Новинки", "tag": "#SephoraNew"},
-            {"title": "Best sellers", "tag": "#SephoraTop"},
-            {"title": "Выгодно сейчас", "tag": "#SephoraSale"},
+            {"title": "Топ", "tag": "#SephoraTop"},
+            {"title": "Скидки", "tag": "#SephoraSale"},
         ],
     }
 
@@ -316,42 +279,28 @@ def api_posts(tag: str, offset: int = 0, limit: int = PAGE_SIZE):
     posts = [{"message_id": mid, "url": f"{CHANNEL_URL}/{mid}"} for mid in ids]
     return {"tag": tag, "total": total, "offset": offset, "limit": limit, "posts": posts}
 
-@app.get("/", response_class=HTMLResponse)
-def root():
-    return f"""
-    <html>
-      <body style="font-family:Arial">
-        <h2>NS Mini App is running</h2>
-        <p>Open mini app: <a href="/webapp">/webapp</a></p>
-      </body>
-    </html>
-    """
-
 # =========================
-# TELEGRAM BOT (WEBHOOK)
+# TELEGRAM BOT
 # =========================
 tg_app: Optional[Application] = None
 
-def home_kb():
-    if not PUBLIC_BASE_URL:
-        # мини апп не откроется без публичного домена
-        return InlineKeyboardMarkup([[InlineKeyboardButton("↩ В канал", url=CHANNEL_URL)]])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✦ Open Journal", web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/webapp"))],
-        [InlineKeyboardButton("↩ В канал", url=CHANNEL_URL)],
-    ])
+def start_keyboard() -> InlineKeyboardMarkup:
+    if PUBLIC_BASE_URL:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✦ Open Journal", web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/webapp"))],
+            [InlineKeyboardButton("↩ В канал", url=CHANNEL_URL)],
+        ])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("↩ В канал", url=CHANNEL_URL)]])
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("NS · Natural Sense\nluxury beauty journal", reply_markup=home_kb())
+    await update.message.reply_text("NS · Natural Sense\nluxury beauty magazine", reply_markup=start_keyboard())
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ OK")
 
-async def init_telegram():
+@app.on_event("startup")
+async def on_startup():
     global tg_app
-    if tg_app is not None:
-        return
-
     tg_app = Application.builder().token(BOT_TOKEN).build()
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("ping", cmd_ping))
@@ -359,17 +308,13 @@ async def init_telegram():
     await tg_app.initialize()
     await tg_app.start()
 
-@app.on_event("startup")
-async def on_startup():
-    await init_telegram()
-
+    # webhook ставим только если есть домен
     if PUBLIC_BASE_URL:
-        webhook_url = f"{PUBLIC_BASE_URL}/telegram/webhook"
         try:
-            await tg_app.bot.set_webhook(url=webhook_url)
-            logging.info("Webhook set: %s", webhook_url)
+            await tg_app.bot.set_webhook(url=f"{PUBLIC_BASE_URL}/telegram/webhook")
+            logging.info("Webhook set")
         except Exception as e:
-            logging.error("Webhook set failed: %s", e)
+            logging.error("Webhook error: %s", e)
 
 @app.on_event("shutdown")
 async def on_shutdown():
@@ -379,20 +324,15 @@ async def on_shutdown():
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(req: Request):
-    if not tg_app:
-        raise HTTPException(status_code=500, detail="Bot not initialized")
-
     data = await req.json()
-    update = Update.de_json(data, tg_app.bot)
 
-    # обработка апдейта
+    update = Update.de_json(data, tg_app.bot)
     await tg_app.process_update(update)
 
-    # индексируем посты из канала
+    # индексируем теги из постов канала
     if update and update.channel_post:
         text = update.channel_post.text or update.channel_post.caption or ""
-        tags = extract_tags(text)
-        for t in tags:
+        for t in extract_tags(text):
             db_add(t, update.channel_post.message_id)
 
     return JSONResponse({"ok": True})
