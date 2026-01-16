@@ -15,33 +15,51 @@ from sqlalchemy import Column, Integer, String, DateTime, JSON, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("main")
 
-# ============================================================================
-# CONFIG
-# ============================================================================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "NaturalSense")
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./ns.db")
+# -----------------------------------------------------------------------------
+# CONFIG (ENV)
+# -----------------------------------------------------------------------------
+def env_get(name: str, default: str | None = None) -> str | None:
+    """Read env var; also tries trimmed key as safety."""
+    v = os.getenv(name)
+    if v is not None:
+        return v
+    # safety: sometimes people accidentally create keys with spaces in name in UI.
+    # This won't fix that, but we keep it simple and explicit.
+    return default
 
-# Railway может дать postgres:// или postgresql:// — для async нужен postgresql+asyncpg://
+BOT_TOKEN = env_get("BOT_TOKEN")
+PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
+CHANNEL_USERNAME = env_get("CHANNEL_USERNAME", "NaturalSense") or "NaturalSense"
+DATABASE_URL = env_get("DATABASE_URL", "sqlite+aiosqlite:///./ns.db") or "sqlite+aiosqlite:///./ns.db"
+
+# Fix Railway postgres schemes for async SQLAlchemy
 if DATABASE_URL:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
     elif DATABASE_URL.startswith("postgresql://"):
         DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
+# ENV diagnostics (safe)
+tok = BOT_TOKEN or ""
+logger.info(
+    "ENV CHECK: BOT_TOKEN_present=%s BOT_TOKEN_len=%s PUBLIC_BASE_URL_present=%s DATABASE_URL_present=%s",
+    bool(BOT_TOKEN), len(tok), bool(PUBLIC_BASE_URL), bool(DATABASE_URL)
+)
 
-# ============================================================================
+# -----------------------------------------------------------------------------
 # DATABASE MODELS
-# ============================================================================
+# -----------------------------------------------------------------------------
 Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
-    
+
     id = Column(Integer, primary_key=True)
     telegram_id = Column(Integer, unique=True, index=True, nullable=False)
     username = Column(String, nullable=True)
@@ -51,9 +69,9 @@ class User(Base):
     favorites = Column(JSON, default=list)
     joined_at = Column(DateTime, default=datetime.utcnow)
 
-# ============================================================================
-# DATABASE CONNECTION
-# ============================================================================
+# -----------------------------------------------------------------------------
+# DATABASE
+# -----------------------------------------------------------------------------
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -62,17 +80,12 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
     logger.info("✅ Database initialized")
 
-# ============================================================================
-# DATABASE QUERIES
-# ============================================================================
 async def get_user(telegram_id: int):
     async with async_session_maker() as session:
-        result = await session.execute(
-            select(User).where(User.telegram_id == telegram_id)
-        )
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         return result.scalar_one_or_none()
 
-async def create_user(telegram_id: int, username: str = None, first_name: str = None):
+async def create_user(telegram_id: int, username: str | None = None, first_name: str | None = None):
     async with async_session_maker() as session:
         user = User(
             telegram_id=telegram_id,
@@ -83,48 +96,50 @@ async def create_user(telegram_id: int, username: str = None, first_name: str = 
         session.add(user)
         await session.commit()
         await session.refresh(user)
-        logger.info(f"✅ New user created: {telegram_id}")
+        logger.info("✅ New user created: %s", telegram_id)
         return user
 
 async def add_points(telegram_id: int, points: int):
     async with async_session_maker() as session:
-        result = await session.execute(
-            select(User).where(User.telegram_id == telegram_id)
-        )
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
         if not user:
             return None
-        
+
         user.points += points
-        
+
         # Auto tier upgrade
         if user.points >= 500:
             user.tier = "vip"
         elif user.points >= 100:
             user.tier = "premium"
-        
+
         await session.commit()
         await session.refresh(user)
         return user
 
-# ============================================================================
+# -----------------------------------------------------------------------------
 # TELEGRAM BOT
-# ============================================================================
-tg_app = None
-tg_task = None
+# -----------------------------------------------------------------------------
+tg_app: Application | None = None
+tg_task: asyncio.Task | None = None
 
 def get_main_keyboard():
-    webapp_url = f"{PUBLIC_BASE_URL}/webapp"
-    return ReplyKeyboardMarkup([
-        [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
-        [KeyboardButton("👤 Профиль"), KeyboardButton("🎁 Челленджи")],
-        [KeyboardButton("↩️ В канал")]
-    ], resize_keyboard=True)
+    # If PUBLIC_BASE_URL not set, webapp button still shown but opens relative path (can be useless)
+    webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
+            [KeyboardButton("👤 Профиль"), KeyboardButton("🎁 Челленджи")],
+            [KeyboardButton("↩️ В канал")],
+        ],
+        resize_keyboard=True
+    )
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db_user = await get_user(user.id)
-    
+
     if not db_user:
         db_user = await create_user(
             telegram_id=user.id,
@@ -135,31 +150,30 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await add_points(user.id, 5)
         text = f"С возвращением, {user.first_name}!\n+5 баллов за визит ✨"
-    
-    kb = get_main_keyboard()
-    await update.message.reply_text(text, reply_markup=kb)
 
-async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(text, reply_markup=get_main_keyboard())
+
+async def cmd_profile(update: Update, context: ContextTypes.DEFAULTi_TYPE if False else ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db_user = await get_user(user.id)
-    
+
     if not db_user:
         await update.message.reply_text("Нажми /start для регистрации")
         return
-    
+
     tier_emoji = {"free": "🥉", "premium": "🥈", "vip": "🥇"}
     tier_name = {"free": "Bronze", "premium": "Silver", "vip": "Gold VIP"}
-    
+
     next_tier_points = {
         "free": (100, "Silver"),
         "premium": (500, "Gold VIP"),
-        "vip": (1000, "Platinum")
+        "vip": (1000, "Platinum"),
     }
-    
+
     next_points, next_name = next_tier_points.get(db_user.tier, (0, "Max"))
     remaining = max(0, next_points - db_user.points)
-    
-    text = f"""
+
+    text = f"""\
 👤 **Твой профиль**
 
 {tier_emoji.get(db_user.tier, "🥉")} Уровень: {tier_name.get(db_user.tier, "Bronze")}
@@ -169,19 +183,21 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📅 С нами: {db_user.joined_at.strftime("%d.%m.%Y")}
 
 Продолжай активничать! 🚀
-    """
+"""
     await update.message.reply_text(text, parse_mode="Markdown")
 
 async def start_telegram_bot():
+    """Start bot polling only if BOT_TOKEN is present. Never crash the API."""
     global tg_app, tg_task
-    
+
     if not BOT_TOKEN:
-        raise RuntimeError("❌ BOT_TOKEN not set in environment variables")
-    
+        logger.error("❌ BOT_TOKEN not set; starting API WITHOUT Telegram bot")
+        return
+
     tg_app = Application.builder().token(BOT_TOKEN).build()
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
-    
+
     async def run():
         await tg_app.initialize()
         await tg_app.start()
@@ -189,13 +205,14 @@ async def start_telegram_bot():
         logger.info("✅ Telegram bot started (polling)")
         while True:
             await asyncio.sleep(3600)
-    
+
     tg_task = asyncio.create_task(run())
 
 async def stop_telegram_bot():
     global tg_app, tg_task
     if tg_task:
         tg_task.cancel()
+        tg_task = None
     if tg_app:
         try:
             await tg_app.updater.stop()
@@ -203,14 +220,15 @@ async def stop_telegram_bot():
             await tg_app.shutdown()
             logger.info("✅ Telegram bot stopped")
         except Exception as e:
-            logger.error(f"Error stopping bot: {e}")
+            logger.error("Error stopping bot: %s", e)
+        finally:
+            tg_app = None
 
-# ============================================================================
-# REACT MINI APP HTML
-# ============================================================================
+# -----------------------------------------------------------------------------
+# WEBAPP HTML (React via CDN)
+# -----------------------------------------------------------------------------
 def get_webapp_html():
-    return f"""
-<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -246,7 +264,7 @@ def get_webapp_html():
   <script type="text/babel">
     const {{ useState, useEffect }} = React;
     const tg = window.Telegram?.WebApp;
-    
+
     if (tg) {{
       tg.expand();
       tg.setHeaderColor("#0c0f14");
@@ -256,11 +274,8 @@ def get_webapp_html():
     const CHANNEL = "{CHANNEL_USERNAME}";
 
     const openLink = (url) => {{
-      if (tg?.openTelegramLink) {{
-        tg.openTelegramLink(url);
-      }} else {{
-        window.open(url, "_blank");
-      }}
+      if (tg?.openTelegramLink) tg.openTelegramLink(url);
+      else window.open(url, "_blank");
     }};
 
     const searchLink = (tag) => {{
@@ -283,14 +298,9 @@ def get_webapp_html():
           background: "radial-gradient(600px 300px at 10% 0%, rgba(230,193,128,0.26), transparent 60%)",
           pointerEvents: "none"
         }}}} />
-        
         <div style={{{{ position: "relative" }}}}>
-          <div style={{{{ fontSize: "20px", fontWeight: 650, letterSpacing: "0.2px" }}}}>
-            NS · Natural Sense
-          </div>
-          <div style={{{{ marginTop: "6px", fontSize: "13px", color: "var(--muted)" }}}}>
-            luxury beauty magazine
-          </div>
+          <div style={{{{ fontSize: "20px", fontWeight: 650, letterSpacing: "0.2px" }}}}>NS · Natural Sense</div>
+          <div style={{{{ marginTop: "6px", fontSize: "13px", color: "var(--muted)" }}}}>luxury beauty magazine</div>
 
           {{user && (
             <div style={{{{
@@ -300,15 +310,15 @@ def get_webapp_html():
               borderRadius: "14px",
               border: "1px solid rgba(230, 193, 128, 0.2)"
             }}}}>
-              <div style={{{{ fontSize: "13px", color: "var(--muted)" }}}}>
-                Привет, {{user.first_name}}!
-              </div>
+              <div style={{{{ fontSize: "13px", color: "var(--muted)" }}}}>Привет, {{user.first_name}}!</div>
               <div style={{{{ fontSize: "16px", fontWeight: 600, marginTop: "4px" }}}}>
-                💎 {{user.points}} баллов • {{{{
-                  free: "🥉 Bronze",
-                  premium: "🥈 Silver",
-                  vip: "🥇 Gold VIP"
-                }}[user.tier] || "🥉 Bronze"}}
+                💎 {{user.points}} баллов • {{
+                  ({{
+                    free: "🥉 Bronze",
+                    premium: "🥈 Silver",
+                    vip: "🥇 Gold VIP"
+                  }}[user.tier]) || "🥉 Bronze"
+                }}
               </div>
             </div>
           )}}
@@ -323,13 +333,8 @@ def get_webapp_html():
         {{ id: "brand", label: "Бренды" }},
         {{ id: "sephora", label: "Sephora" }}
       ];
-
       return (
-        <div style={{{{
-          display: "flex",
-          gap: "8px",
-          marginTop: "14px"
-        }}}}>
+        <div style={{{{ display: "flex", gap: "8px", marginTop: "14px" }}}}>
           {{tabs.map(tab => (
             <div
               key={{tab.id}}
@@ -370,19 +375,12 @@ def get_webapp_html():
           color: "var(--text)",
           fontSize: "15px",
           margin: "10px 0",
-          cursor: "pointer",
-          transition: "all 0.2s"
+          cursor: "pointer"
         }}}}
-        onMouseEnter={{(e) => e.currentTarget.style.background = "rgba(255,255,255,0.10)"}}
-        onMouseLeave={{(e) => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}}
       >
         <div>
           <div>{{icon}} {{label}}</div>
-          {{subtitle && (
-            <div style={{{{ fontSize: "12px", color: "var(--muted)", marginTop: "4px" }}}}>
-              {{subtitle}}
-            </div>
-          )}}
+          {{subtitle && <div style={{{{ fontSize:"12px", color:"var(--muted)", marginTop:"4px" }}}}>{{subtitle}}</div>}}
         </div>
         <span style={{{{ opacity: 0.8 }}}}>›</span>
       </div>
@@ -408,18 +406,14 @@ def get_webapp_html():
         if (tg?.initDataUnsafe?.user) {{
           const tgUser = tg.initDataUnsafe.user;
           fetch(`/api/user/${{tgUser.id}}`)
-            .then(r => r.json())
-            .then(data => {{
-              if (!data.error) setUser(data);
-            }})
-            .catch(() => {{
-              setUser({{
-                telegram_id: tgUser.id,
-                first_name: tgUser.first_name,
-                points: 10,
-                tier: "free"
-              }});
-            }});
+            .then(r => r.ok ? r.json() : Promise.reject())
+            .then(data => setUser(data))
+            .catch(() => setUser({{
+              telegram_id: tgUser.id,
+              first_name: tgUser.first_name,
+              points: 10,
+              tier: "free"
+            }}));
         }}
       }}, []);
 
@@ -435,7 +429,6 @@ def get_webapp_html():
                 <Button icon="↩️" label="В канал" onClick={{() => openLink(`https://t.me/${{CHANNEL}}`)}} />
               </Panel>
             );
-          
           case "cat":
             return (
               <Panel>
@@ -448,7 +441,6 @@ def get_webapp_html():
                 <Button icon="🧪" label="Составы продуктов" onClick={{() => openLink(searchLink("Состав"))}} />
               </Panel>
             );
-          
           case "brand":
             return (
               <Panel>
@@ -457,33 +449,25 @@ def get_webapp_html():
                 <Button icon="✨" label="Charlotte Tilbury" onClick={{() => openLink(searchLink("CharlotteTilbury"))}} />
               </Panel>
             );
-          
           case "sephora":
             return (
               <Panel>
-                <Button icon="🇹🇷" label="Актуальные цены (TR)" onClick={{() => openLink(searchLink("SephoraTR"))}} subtitle="Ежедневное обновление" />
+                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={{() => openLink(searchLink("SephoraTR"))}} />
                 <Button icon="🎁" label="Подарки / акции" onClick={{() => openLink(searchLink("SephoraPromo"))}} />
                 <Button icon="🧾" label="Гайды / как покупать" onClick={{() => openLink(searchLink("SephoraGuide"))}} />
               </Panel>
             );
-          
           default:
             return null;
         }}
       }};
 
       return (
-        <div style={{{{ padding: "18px 16px 26px", maxWidth: "520px", margin: "0 auto" }}}}>
+        <div style={{{{ padding:"18px 16px 26px", maxWidth:"520px", margin:"0 auto" }}}}>
           <Hero user={{user}} />
           <Tabs active={{activeTab}} onChange={{setActiveTab}} />
           {{renderContent()}}
-          
-          <div style={{{{
-            marginTop: "20px",
-            color: "var(--muted)",
-            fontSize: "12px",
-            textAlign: "center"
-          }}}}>
+          <div style={{{{ marginTop:"20px", color:"var(--muted)", fontSize:"12px", textAlign:"center" }}}}>
             Открывается как Mini App внутри Telegram
           </div>
         </div>
@@ -496,9 +480,9 @@ def get_webapp_html():
 </html>
 """
 
-# ============================================================================
-# FASTAPI APP
-# ============================================================================
+# -----------------------------------------------------------------------------
+# FASTAPI
+# -----------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -508,11 +492,7 @@ async def lifespan(app: FastAPI):
     await stop_telegram_bot()
     logger.info("✅ NS · Natural Sense stopped")
 
-app = FastAPI(
-    title="NS · Natural Sense API",
-    version="2.0.0",
-    lifespan=lifespan
-)
+app = FastAPI(title="NS · Natural Sense API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -524,11 +504,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {
-        "app": "NS · Natural Sense",
-        "status": "running",
-        "version": "2.0.0"
-    }
+    return {"app": "NS · Natural Sense", "status": "running", "version": "2.0.0"}
 
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp():
@@ -539,7 +515,6 @@ async def get_user_api(telegram_id: int):
     user = await get_user(telegram_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
     return {
         "id": user.id,
         "telegram_id": user.telegram_id,
@@ -548,7 +523,7 @@ async def get_user_api(telegram_id: int):
         "tier": user.tier,
         "points": user.points,
         "favorites": user.favorites,
-        "joined_at": user.joined_at.isoformat()
+        "joined_at": user.joined_at.isoformat(),
     }
 
 @app.post("/api/user/{telegram_id}/points")
@@ -556,12 +531,7 @@ async def add_points_api(telegram_id: int, points: int):
     user = await add_points(telegram_id, points)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    return {
-        "success": True,
-        "new_total": user.points,
-        "tier": user.tier
-    }
+    return {"success": True, "new_total": user.points, "tier": user.tier}
 
 @app.get("/health")
 async def health():
