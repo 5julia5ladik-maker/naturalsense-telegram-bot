@@ -26,9 +26,13 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "NaturalSense")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./ns.db")
 
-# Если Railway даёт postgres:// вместо postgresql://
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+# Railway может дать postgres:// или postgresql:// — для async нужен postgresql+asyncpg://
+if DATABASE_URL:
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
 
 # ============================================================================
 # DATABASE MODELS
