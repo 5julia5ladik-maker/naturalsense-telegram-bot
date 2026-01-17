@@ -1,22 +1,15 @@
 import os
-import re
 import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 from sqlalchemy import Column, Integer, String, DateTime, JSON, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -32,9 +25,12 @@ logger = logging.getLogger("main")
 # CONFIG (ENV)
 # -----------------------------------------------------------------------------
 def env_get(name: str, default: str | None = None) -> str | None:
+    """Read env var; also tries trimmed key as safety."""
     v = os.getenv(name)
     if v is not None:
         return v
+    # safety: sometimes people accidentally create keys with spaces in name in UI.
+    # This won't fix that, but we keep it simple and explicit.
     return default
 
 BOT_TOKEN = env_get("BOT_TOKEN")
@@ -49,6 +45,7 @@ if DATABASE_URL:
     elif DATABASE_URL.startswith("postgresql://"):
         DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
+# ENV diagnostics (safe)
 tok = BOT_TOKEN or ""
 logger.info(
     "ENV CHECK: BOT_TOKEN_present=%s BOT_TOKEN_len=%s PUBLIC_BASE_URL_present=%s DATABASE_URL_present=%s",
@@ -72,15 +69,6 @@ class User(Base):
     favorites = Column(JSON, default=list)
     joined_at = Column(DateTime, default=datetime.utcnow)
 
-class Post(Base):
-    __tablename__ = "posts"
-
-    id = Column(Integer, primary_key=True)
-    channel_message_id = Column(Integer, unique=True, index=True, nullable=False)
-    text = Column(String, nullable=True)
-    tags = Column(JSON, default=list)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
 # -----------------------------------------------------------------------------
 # DATABASE
 # -----------------------------------------------------------------------------
@@ -92,9 +80,6 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
     logger.info("✅ Database initialized")
 
-# -----------------------------------------------------------------------------
-# USER QUERIES
-# -----------------------------------------------------------------------------
 async def get_user(telegram_id: int):
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
@@ -123,6 +108,7 @@ async def add_points(telegram_id: int, points: int):
 
         user.points += points
 
+        # Auto tier upgrade
         if user.points >= 500:
             user.tier = "vip"
         elif user.points >= 100:
@@ -133,67 +119,13 @@ async def add_points(telegram_id: int, points: int):
         return user
 
 # -----------------------------------------------------------------------------
-# POSTS (TAGS) INDEX
-# -----------------------------------------------------------------------------
-TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
-
-def extract_tags(text: str | None) -> list[str]:
-    if not text:
-        return []
-    tags = [m.group(1) for m in TAG_RE.finditer(text)]
-    out, seen = [], set()
-    for t in tags:
-        if t not in seen:
-            seen.add(t)
-            out.append(t)
-    return out
-
-def post_url(message_id: int) -> str:
-    return f"https://t.me/{CHANNEL_USERNAME}/{message_id}"
-
-def preview_text(text: str | None, limit: int = 160) -> str:
-    if not text:
-        return ""
-    s = re.sub(r"\s+", " ", text.strip())
-    return (s[:limit] + "…") if len(s) > limit else s
-
-async def save_channel_post(message_id: int, text: str | None):
-    async with async_session_maker() as session:
-        res = await session.execute(select(Post).where(Post.channel_message_id == message_id))
-        p = res.scalar_one_or_none()
-
-        if p:
-            p.text = text
-            p.tags = extract_tags(text)
-            await session.commit()
-            return p
-
-        p = Post(
-            channel_message_id=message_id,
-            text=text,
-            tags=extract_tags(text),
-        )
-        session.add(p)
-        await session.commit()
-        await session.refresh(p)
-        logger.info("✅ Indexed channel post id=%s tags=%s", message_id, p.tags)
-        return p
-
-async def list_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
-    async with async_session_maker() as session:
-        q = select(Post).order_by(Post.channel_message_id.desc()).limit(limit).offset(offset)
-        rows = (await session.execute(q)).scalars().all()
-        if tag:
-            rows = [p for p in rows if tag in (p.tags or [])]
-        return rows
-
-# -----------------------------------------------------------------------------
-# TELEGRAM BOT (polling) + channel posts handler
+# TELEGRAM BOT
 # -----------------------------------------------------------------------------
 tg_app: Application | None = None
 tg_task: asyncio.Task | None = None
 
 def get_main_keyboard():
+    # If PUBLIC_BASE_URL not set, webapp button still shown but opens relative path (can be useless)
     webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
     return ReplyKeyboardMarkup(
         [
@@ -221,7 +153,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(text, reply_markup=get_main_keyboard())
 
-async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_profile(update: Update, context: ContextTypes.DEFAULTi_TYPE if False else ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db_user = await get_user(user.id)
 
@@ -254,19 +186,8 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     await update.message.reply_text(text, parse_mode="Markdown")
 
-async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Bot (as admin in channel) receives channel posts here.
-    Index by message_id and tags from text/caption.
-    """
-    msg = update.channel_post
-    if not msg:
-        return
-
-    text = msg.text or msg.caption or None
-    await save_channel_post(msg.message_id, text)
-
 async def start_telegram_bot():
+    """Start bot polling only if BOT_TOKEN is present. Never crash the API."""
     global tg_app, tg_task
 
     if not BOT_TOKEN:
@@ -276,9 +197,6 @@ async def start_telegram_bot():
     tg_app = Application.builder().token(BOT_TOKEN).build()
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
-
-    # IMPORTANT: index channel posts (bot must be admin in channel)
-    tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
 
     async def run():
         await tg_app.initialize()
@@ -307,297 +225,260 @@ async def stop_telegram_bot():
             tg_app = None
 
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (NO f-string; safe placeholders)
+# WEBAPP HTML (React via CDN)
 # -----------------------------------------------------------------------------
 def get_webapp_html():
-    html = r"""
-<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>NS · Natural Sense</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    :root {
-      --bg:#0c0f14;
-      --text:rgba(255,255,255,0.92);
-      --muted:rgba(255,255,255,0.60);
-      --stroke:rgba(255,255,255,0.10);
-      --card:rgba(255,255,255,0.06);
-      --gold:rgba(230,193,128,0.9);
-    }
-    body {
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
-      background: radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%), var(--bg);
-      color:var(--text);
-      overflow-x:hidden;
-    }
-    #root { min-height:100vh; }
+    * {{ margin:0; padding:0; box-sizing:border-box; }}
+    :root {{
+      --bg: #0c0f14;
+      --card: rgba(255,255,255,0.08);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.60);
+      --gold: rgba(230, 193, 128, 0.9);
+      --stroke: rgba(255,255,255,0.10);
+    }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%),
+                  var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+    }}
+    #root {{ min-height: 100vh; }}
   </style>
 </head>
 <body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const {{ useState, useEffect }} = React;
     const tg = window.Telegram?.WebApp;
 
-    if (tg) {
+    if (tg) {{
       tg.expand();
       tg.setHeaderColor("#0c0f14");
       tg.setBackgroundColor("#0c0f14");
-    }
+    }}
 
-    const CHANNEL = "__CHANNEL_USERNAME__";
+    const CHANNEL = "{CHANNEL_USERNAME}";
 
-    const openLink = (url) => {
+    const openLink = (url) => {{
       if (tg?.openTelegramLink) tg.openTelegramLink(url);
       else window.open(url, "_blank");
-    };
+    }};
 
-    const Chip = ({ text, onClick, active }) => (
-      <div onClick={onClick} style={{
-        padding:"8px 10px",
-        borderRadius:"999px",
-        fontSize:"12px",
-        cursor:"pointer",
-        userSelect:"none",
-        border: active ? "1px solid rgba(230,193,128,0.45)" : "1px solid var(--stroke)",
-        background: active ? "rgba(230,193,128,0.12)" : "rgba(255,255,255,0.06)",
-        color: active ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.85)"
-      }}>
-        {text}
-      </div>
-    );
+    const searchLink = (tag) => {{
+      const clean = tag.startsWith("#") ? tag.slice(1) : tag;
+      return `https://t.me/${{CHANNEL}}?q=%23${{clean}}`;
+    }};
 
-    const Card = ({ post }) => (
-      <div onClick={() => openLink(post.url)} style={{
-        border:"1px solid var(--stroke)",
-        background:"var(--card)",
-        borderRadius:"18px",
-        padding:"14px",
-        marginTop:"10px",
-        cursor:"pointer"
-      }}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div style={{fontSize:"13px",color:"var(--muted)"}}>📝 Пост</div>
-          <div style={{fontSize:"12px",color:"var(--muted)"}}>#{post.channel_message_id}</div>
-        </div>
+    const Hero = ({{ user }}) => (
+      <div style={{{{
+        border: "1px solid var(--stroke)",
+        background: "linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05))",
+        borderRadius: "22px",
+        padding: "16px 14px",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+        position: "relative",
+        overflow: "hidden"
+      }}}}>
+        <div style={{{{
+          position: "absolute", inset: "-2px",
+          background: "radial-gradient(600px 300px at 10% 0%, rgba(230,193,128,0.26), transparent 60%)",
+          pointerEvents: "none"
+        }}}} />
+        <div style={{{{ position: "relative" }}}}>
+          <div style={{{{ fontSize: "20px", fontWeight: 650, letterSpacing: "0.2px" }}}}>NS · Natural Sense</div>
+          <div style={{{{ marginTop: "6px", fontSize: "13px", color: "var(--muted)" }}}}>luxury beauty magazine</div>
 
-        <div style={{marginTop:"10px",fontSize:"14px",lineHeight:1.35,whiteSpace:"pre-wrap"}}>
-          {post.preview || "Открыть пост →"}
-        </div>
-
-        <div style={{marginTop:"10px",display:"flex",gap:"8px",flexWrap:"wrap"}}>
-          {(post.tags || []).slice(0,6).map(t => (
-            <div key={t} style={{
-              fontSize:"12px",
-              padding:"6px 8px",
-              borderRadius:"999px",
-              border:"1px solid var(--stroke)",
-              background:"rgba(255,255,255,0.05)",
-              color:"rgba(255,255,255,0.85)"
-            }}>#{t}</div>
-          ))}
-        </div>
-
-        <div style={{marginTop:"12px",fontSize:"13px",color:"rgba(230,193,128,0.9)"}}>
-          Открыть в канале →
+          {{user && (
+            <div style={{{{
+              marginTop: "14px",
+              padding: "12px",
+              background: "rgba(230, 193, 128, 0.1)",
+              borderRadius: "14px",
+              border: "1px solid rgba(230, 193, 128, 0.2)"
+            }}}}>
+              <div style={{{{ fontSize: "13px", color: "var(--muted)" }}}}>Привет, {{user.first_name}}!</div>
+              <div style={{{{ fontSize: "16px", fontWeight: 600, marginTop: "4px" }}}}>
+                💎 {{user.points}} баллов • {{
+                  ({{
+                    free: "🥉 Bronze",
+                    premium: "🥈 Silver",
+                    vip: "🥇 Gold VIP"
+                  }}[user.tier]) || "🥉 Bronze"
+                }}
+              </div>
+            </div>
+          )}}
         </div>
       </div>
     );
 
-    const App = () => {
+    const Tabs = ({{ active, onChange }}) => {{
+      const tabs = [
+        {{ id: "home", label: "Главное" }},
+        {{ id: "cat", label: "Категории" }},
+        {{ id: "brand", label: "Бренды" }},
+        {{ id: "sephora", label: "Sephora" }}
+      ];
+      return (
+        <div style={{{{ display: "flex", gap: "8px", marginTop: "14px" }}}}>
+          {{tabs.map(tab => (
+            <div
+              key={{tab.id}}
+              onClick={{() => onChange(tab.id)}}
+              style={{{{
+                flex: 1,
+                border: active === tab.id ? "1px solid rgba(230,193,128,0.40)" : "1px solid var(--stroke)",
+                background: active === tab.id ? "rgba(230,193,128,0.12)" : "rgba(255,255,255,0.06)",
+                color: active === tab.id ? "rgba(255,255,255,0.95)" : "var(--text)",
+                padding: "10px",
+                borderRadius: "14px",
+                fontSize: "13px",
+                textAlign: "center",
+                cursor: "pointer",
+                userSelect: "none",
+                transition: "all 0.2s"
+              }}}}
+            >
+              {{tab.label}}
+            </div>
+          ))}}
+        </div>
+      );
+    }};
+
+    const Button = ({{ icon, label, onClick, subtitle }}) => (
+      <div
+        onClick={{onClick}}
+        style={{{{
+          width: "100%",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "14px",
+          borderRadius: "18px",
+          border: "1px solid var(--stroke)",
+          background: "rgba(255,255,255,0.06)",
+          color: "var(--text)",
+          fontSize: "15px",
+          margin: "10px 0",
+          cursor: "pointer"
+        }}}}
+      >
+        <div>
+          <div>{{icon}} {{label}}</div>
+          {{subtitle && <div style={{{{ fontSize:"12px", color:"var(--muted)", marginTop:"4px" }}}}>{{subtitle}}</div>}}
+        </div>
+        <span style={{{{ opacity: 0.8 }}}}>›</span>
+      </div>
+    );
+
+    const Panel = ({{ children }}) => (
+      <div style={{{{
+        marginTop: "14px",
+        border: "1px solid var(--stroke)",
+        background: "rgba(255,255,255,0.05)",
+        borderRadius: "22px",
+        padding: "12px"
+      }}}}>
+        {{children}}
+      </div>
+    );
+
+    const App = () => {{
       const [activeTab, setActiveTab] = useState("home");
-      const [tag, setTag] = useState(null);
-      const [posts, setPosts] = useState([]);
-      const [loading, setLoading] = useState(false);
+      const [user, setUser] = useState(null);
 
-      const tabs = useMemo(() => ([
-        { id: "home", label: "Главное" },
-        { id: "cat", label: "Категории" },
-        { id: "brand", label: "Бренды" },
-        { id: "sephora", label: "Sephora" },
-      ]), []);
+      useEffect(() => {{
+        if (tg?.initDataUnsafe?.user) {{
+          const tgUser = tg.initDataUnsafe.user;
+          fetch(`/api/user/${{tgUser.id}}`)
+            .then(r => r.ok ? r.json() : Promise.reject())
+            .then(data => setUser(data))
+            .catch(() => setUser({{
+              telegram_id: tgUser.id,
+              first_name: tgUser.first_name,
+              points: 10,
+              tier: "free"
+            }}));
+        }}
+      }}, []);
 
-      const loadPosts = (t) => {
-        setLoading(true);
-        const url = t ? `/api/posts?tag=${encodeURIComponent(t)}` : `/api/posts`;
-        fetch(url)
-          .then(r => r.json())
-          .then(data => setPosts(Array.isArray(data) ? data : []))
-          .catch(() => setPosts([]))
-          .finally(() => setLoading(false));
-      };
-
-      useEffect(() => {
-        // load latest on start
-        loadPosts(null);
-      }, []);
-
-      const openTag = (t) => {
-        setTag(t);
-        loadPosts(t);
-      };
-
-      const renderContent = () => {
-        switch (activeTab) {
+      const renderContent = () => {{
+        switch (activeTab) {{
           case "home":
             return (
-              <div style={{
-                marginTop:"14px",
-                border:"1px solid var(--stroke)",
-                background:"rgba(255,255,255,0.05)",
-                borderRadius:"22px",
-                padding:"12px"
-              }}>
-                <div style={{fontSize:"13px", color:"var(--muted)"}}>Последние посты</div>
-                {loading && <div style={{marginTop:"10px", color:"var(--muted)"}}>Загрузка…</div>}
-                {!loading && posts.map(p => <Card key={p.id} post={p} />)}
-              </div>
+              <Panel>
+                <Button icon="📂" label="Категории" onClick={{() => setActiveTab("cat")}} />
+                <Button icon="🏷" label="Бренды" onClick={{() => setActiveTab("brand")}} />
+                <Button icon="💸" label="Sephora" onClick={{() => setActiveTab("sephora")}} />
+                <Button icon="💎" label="Beauty Challenges" onClick={{() => openLink(`https://t.me/${{CHANNEL}}?q=%23Challenge`)}} />
+                <Button icon="↩️" label="В канал" onClick={{() => openLink(`https://t.me/${{CHANNEL}}`)}} />
+              </Panel>
             );
-
           case "cat":
             return (
-              <div style={{
-                marginTop:"14px",
-                border:"1px solid var(--stroke)",
-                background:"rgba(255,255,255,0.05)",
-                borderRadius:"22px",
-                padding:"12px"
-              }}>
-                <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
-                  <Chip text="🆕 Новинка" active={tag==="Новинка"} onClick={() => openTag("Новинка")} />
-                  <Chip text="💎 Люкс" active={tag==="Люкс"} onClick={() => openTag("Люкс")} />
-                  <Chip text="🔥 Тренд" active={tag==="Тренд"} onClick={() => openTag("Тренд")} />
-                  <Chip text="🏛 История" active={tag==="История"} onClick={() => openTag("История")} />
-                  <Chip text="⭐ Оценка" active={tag==="Оценка"} onClick={() => openTag("Оценка")} />
-                  <Chip text="🧴 Факты" active={tag==="Факты"} onClick={() => openTag("Факты")} />
-                  <Chip text="🧪 Состав" active={tag==="Состав"} onClick={() => openTag("Состав")} />
-                </div>
-
-                {loading && <div style={{marginTop:"10px", color:"var(--muted)"}}>Загрузка…</div>}
-                {!loading && posts.length === 0 && (
-                  <div style={{marginTop:"10px", color:"var(--muted)"}}>
-                    Нет постов по тегу #{tag}. Бот индексирует только новые посты после запуска.
-                  </div>
-                )}
-                {!loading && posts.map(p => <Card key={p.id} post={p} />)}
-              </div>
+              <Panel>
+                <Button icon="🆕" label="Новинка" onClick={{() => openLink(searchLink("Новинка"))}} />
+                <Button icon="💎" label="Кратко о люкс продукте" onClick={{() => openLink(searchLink("Люкс"))}} />
+                <Button icon="🔥" label="Тренд" onClick={{() => openLink(searchLink("Тренд"))}} />
+                <Button icon="🏛" label="История бренда" onClick={{() => openLink(searchLink("История"))}} />
+                <Button icon="⭐" label="Личная оценка" onClick={{() => openLink(searchLink("Оценка"))}} />
+                <Button icon="🧴" label="Тип продукта / факты" onClick={{() => openLink(searchLink("Факты"))}} />
+                <Button icon="🧪" label="Составы продуктов" onClick={{() => openLink(searchLink("Состав"))}} />
+              </Panel>
             );
-
           case "brand":
             return (
-              <div style={{
-                marginTop:"14px",
-                border:"1px solid var(--stroke)",
-                background:"rgba(255,255,255,0.05)",
-                borderRadius:"22px",
-                padding:"12px"
-              }}>
-                <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
-                  <Chip text="✨ Dior" active={tag==="Dior"} onClick={() => openTag("Dior")} />
-                  <Chip text="✨ Chanel" active={tag==="Chanel"} onClick={() => openTag("Chanel")} />
-                  <Chip text="✨ CharlotteTilbury" active={tag==="CharlotteTilbury"} onClick={() => openTag("CharlotteTilbury")} />
-                </div>
-
-                {loading && <div style={{marginTop:"10px", color:"var(--muted)"}}>Загрузка…</div>}
-                {!loading && posts.length === 0 && (
-                  <div style={{marginTop:"10px", color:"var(--muted)"}}>
-                    Нет постов по тегу #{tag}.
-                  </div>
-                )}
-                {!loading && posts.map(p => <Card key={p.id} post={p} />)}
-              </div>
+              <Panel>
+                <Button icon="✨" label="Dior" onClick={{() => openLink(searchLink("Dior"))}} />
+                <Button icon="✨" label="Chanel" onClick={{() => openLink(searchLink("Chanel"))}} />
+                <Button icon="✨" label="Charlotte Tilbury" onClick={{() => openLink(searchLink("CharlotteTilbury"))}} />
+              </Panel>
             );
-
           case "sephora":
             return (
-              <div style={{
-                marginTop:"14px",
-                border:"1px solid var(--stroke)",
-                background:"rgba(255,255,255,0.05)",
-                borderRadius:"22px",
-                padding:"12px"
-              }}>
-                <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
-                  <Chip text="🇹🇷 SephoraTR" active={tag==="SephoraTR"} onClick={() => openTag("SephoraTR")} />
-                  <Chip text="🎁 SephoraPromo" active={tag==="SephoraPromo"} onClick={() => openTag("SephoraPromo")} />
-                  <Chip text="🧾 SephoraGuide" active={tag==="SephoraGuide"} onClick={() => openTag("SephoraGuide")} />
-                </div>
-
-                {loading && <div style={{marginTop:"10px", color:"var(--muted)"}}>Загрузка…</div>}
-                {!loading && posts.length === 0 && (
-                  <div style={{marginTop:"10px", color:"var(--muted)"}}>
-                    Нет постов по тегу #{tag}.
-                  </div>
-                )}
-                {!loading && posts.map(p => <Card key={p.id} post={p} />)}
-              </div>
+              <Panel>
+                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={{() => openLink(searchLink("SephoraTR"))}} />
+                <Button icon="🎁" label="Подарки / акции" onClick={{() => openLink(searchLink("SephoraPromo"))}} />
+                <Button icon="🧾" label="Гайды / как покупать" onClick={{() => openLink(searchLink("SephoraGuide"))}} />
+              </Panel>
             );
-
           default:
             return null;
-        }
-      };
+        }}
+      }};
 
       return (
-        <div style={{ padding:"18px 16px 26px", maxWidth:"520px", margin:"0 auto" }}>
-          <div style={{
-            border:"1px solid var(--stroke)",
-            background:"linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05))",
-            borderRadius:"22px",
-            padding:"16px 14px",
-            boxShadow:"0 10px 30px rgba(0,0,0,0.35)"
-          }}>
-            <div style={{ fontSize:"20px", fontWeight:650 }}>NS · Natural Sense</div>
-            <div style={{ marginTop:"6px", fontSize:"13px", color:"var(--muted)" }}>
-              Мини-журнал: кликай категории/бренды → смотри посты с #тегом
-            </div>
-          </div>
-
-          <div style={{ display:"flex", gap:"8px", marginTop:"14px" }}>
-            {tabs.map(t => (
-              <div
-                key={t.id}
-                onClick={() => setActiveTab(t.id)}
-                style={{
-                  flex: 1,
-                  border: activeTab === t.id ? "1px solid rgba(230,193,128,0.40)" : "1px solid var(--stroke)",
-                  background: activeTab === t.id ? "rgba(230,193,128,0.12)" : "rgba(255,255,255,0.06)",
-                  padding: "10px",
-                  borderRadius: "14px",
-                  fontSize: "13px",
-                  textAlign: "center",
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
-              >
-                {t.label}
-              </div>
-            ))}
-          </div>
-
-          {renderContent()}
-
-          <div style={{ marginTop:"20px", color:"var(--muted)", fontSize:"12px", textAlign:"center" }}>
-            Канал: @{CHANNEL}
+        <div style={{{{ padding:"18px 16px 26px", maxWidth:"520px", margin:"0 auto" }}}}>
+          <Hero user={{user}} />
+          <Tabs active={{activeTab}} onChange={{setActiveTab}} />
+          {{renderContent()}}
+          <div style={{{{ marginTop:"20px", color:"var(--muted)", fontSize:"12px", textAlign:"center" }}}}>
+            Открывается как Mini App внутри Telegram
           </div>
         </div>
       );
-    };
+    }};
 
     ReactDOM.render(<App />, document.getElementById("root"));
   </script>
 </body>
 </html>
 """
-    return html.replace("__CHANNEL_USERNAME__", CHANNEL_USERNAME)
 
 # -----------------------------------------------------------------------------
 # FASTAPI
@@ -611,10 +492,10 @@ async def lifespan(app: FastAPI):
     await stop_telegram_bot()
     logger.info("✅ NS · Natural Sense stopped")
 
-app = FastAPI(title="NS · Natural Sense API", version="2.1.0", lifespan=lifespan)
+app = FastAPI(title="NS · Natural Sense API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
-    CORSMIDDLEWARE,
+    CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
@@ -623,7 +504,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"app": "NS · Natural Sense", "status": "running", "version": "2.1.0"}
+    return {"app": "NS · Natural Sense", "status": "running", "version": "2.0.0"}
 
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp():
@@ -652,22 +533,6 @@ async def add_points_api(telegram_id: int, points: int):
         raise HTTPException(status_code=404, detail="User not found")
     return {"success": True, "new_total": user.points, "tier": user.tier}
 
-@app.get("/api/posts")
-async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
-    rows = await list_posts(tag=tag, limit=limit, offset=offset)
-    return [
-        {
-            "id": p.id,
-            "channel_message_id": p.channel_message_id,
-            "url": post_url(p.channel_message_id),
-            "tags": p.tags or [],
-            "preview": preview_text(p.text, 160),
-            "created_at": p.created_at.isoformat(),
-        }
-        for p in rows
-    ]
-
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
-
