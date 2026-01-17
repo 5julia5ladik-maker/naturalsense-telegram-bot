@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -9,7 +10,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from sqlalchemy import Column, Integer, String, DateTime, JSON, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -25,12 +32,10 @@ logger = logging.getLogger("main")
 # CONFIG (ENV)
 # -----------------------------------------------------------------------------
 def env_get(name: str, default: str | None = None) -> str | None:
-    """Read env var; also tries trimmed key as safety."""
+    """Read env var."""
     v = os.getenv(name)
     if v is not None:
         return v
-    # safety: sometimes people accidentally create keys with spaces in name in UI.
-    # This won't fix that, but we keep it simple and explicit.
     return default
 
 BOT_TOKEN = env_get("BOT_TOKEN")
@@ -69,6 +74,15 @@ class User(Base):
     favorites = Column(JSON, default=list)
     joined_at = Column(DateTime, default=datetime.utcnow)
 
+class Post(Base):
+    __tablename__ = "posts"
+
+    id = Column(Integer, primary_key=True)
+    channel_message_id = Column(Integer, unique=True, index=True, nullable=False)
+    text = Column(String, nullable=True)
+    tags = Column(JSON, default=list)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 # -----------------------------------------------------------------------------
 # DATABASE
 # -----------------------------------------------------------------------------
@@ -80,6 +94,9 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
     logger.info("✅ Database initialized")
 
+# -----------------------------------------------------------------------------
+# USER QUERIES
+# -----------------------------------------------------------------------------
 async def get_user(telegram_id: int):
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
@@ -119,13 +136,68 @@ async def add_points(telegram_id: int, points: int):
         return user
 
 # -----------------------------------------------------------------------------
+# POSTS INDEX (TAGS)
+# -----------------------------------------------------------------------------
+TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
+
+def extract_tags(text: str | None) -> list[str]:
+    if not text:
+        return []
+    tags = [m.group(1) for m in TAG_RE.finditer(text)]
+    out, seen = [], set()
+    for t in tags:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+def post_url(message_id: int) -> str:
+    return f"https://t.me/{CHANNEL_USERNAME}/{message_id}"
+
+def preview_text(text: str | None, limit: int = 180) -> str:
+    if not text:
+        return ""
+    s = re.sub(r"\s+", " ", text.strip())
+    return (s[:limit] + "…") if len(s) > limit else s
+
+async def upsert_post(channel_message_id: int, text: str | None):
+    tags = extract_tags(text)
+    async with async_session_maker() as session:
+        res = await session.execute(select(Post).where(Post.channel_message_id == channel_message_id))
+        p = res.scalar_one_or_none()
+        if p:
+            p.text = text
+            p.tags = tags
+            await session.commit()
+            return p
+
+        p = Post(
+            channel_message_id=channel_message_id,
+            text=text,
+            tags=tags
+        )
+        session.add(p)
+        await session.commit()
+        await session.refresh(p)
+        logger.info("✅ Indexed post %s tags=%s", channel_message_id, tags)
+        return p
+
+async def list_posts_by_tag(tag: str | None, limit: int = 50, offset: int = 0):
+    async with async_session_maker() as session:
+        # берём последние посты, а фильтруем по тегу уже в питоне (простая и надежная логика)
+        q = select(Post).order_by(Post.channel_message_id.desc()).limit(limit).offset(offset)
+        rows = (await session.execute(q)).scalars().all()
+        if tag:
+            rows = [p for p in rows if tag in (p.tags or [])]
+        return rows
+
+# -----------------------------------------------------------------------------
 # TELEGRAM BOT
 # -----------------------------------------------------------------------------
 tg_app: Application | None = None
 tg_task: asyncio.Task | None = None
 
 def get_main_keyboard():
-    # If PUBLIC_BASE_URL not set, webapp button still shown but opens relative path (can be useless)
     webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
     return ReplyKeyboardMarkup(
         [
@@ -153,7 +225,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(text, reply_markup=get_main_keyboard())
 
-async def cmd_profile(update: Update, context: ContextTypes.DEFAULTi_TYPE if False else ContextTypes.DEFAULT_TYPE):
+async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db_user = await get_user(user.id)
 
@@ -186,8 +258,18 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULTi_TYPE if Fal
 """
     await update.message.reply_text(text, parse_mode="Markdown")
 
+async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Срабатывает, когда бот-админ видит новый пост в канале.
+    Индексируем текст/подпись и #теги.
+    """
+    msg = update.channel_post
+    if not msg:
+        return
+    text = msg.text or msg.caption or ""
+    await upsert_post(msg.message_id, text)
+
 async def start_telegram_bot():
-    """Start bot polling only if BOT_TOKEN is present. Never crash the API."""
     global tg_app, tg_task
 
     if not BOT_TOKEN:
@@ -197,6 +279,9 @@ async def start_telegram_bot():
     tg_app = Application.builder().token(BOT_TOKEN).build()
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
+
+    # индексируем посты канала
+    tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
 
     async def run():
         await tg_app.initialize()
@@ -225,7 +310,7 @@ async def stop_telegram_bot():
             tg_app = None
 
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (React via CDN)
+# WEBAPP HTML (ВАШ ДИЗАЙН НЕ ТРОГАЕМ, ДОБАВЛЯЕМ ТОЛЬКО СПИСОК ПОСТОВ)
 # -----------------------------------------------------------------------------
 def get_webapp_html():
     return f"""<!DOCTYPE html>
@@ -276,11 +361,6 @@ def get_webapp_html():
     const openLink = (url) => {{
       if (tg?.openTelegramLink) tg.openTelegramLink(url);
       else window.open(url, "_blank");
-    }};
-
-    const searchLink = (tag) => {{
-      const clean = tag.startsWith("#") ? tag.slice(1) : tag;
-      return `https://t.me/${{CHANNEL}}?q=%23${{clean}}`;
     }};
 
     const Hero = ({{ user }}) => (
@@ -398,11 +478,62 @@ def get_webapp_html():
       </div>
     );
 
+    // ДОБАВИЛИ ТОЛЬКО КАРТОЧКУ ПОСТА (стили не ломаем)
+    const PostCard = ({{ post }}) => (
+      <div
+        onClick={{() => openLink(post.url)}}
+        style={{{{
+          marginTop: "10px",
+          padding: "12px",
+          borderRadius: "18px",
+          border: "1px solid var(--stroke)",
+          background: "rgba(255,255,255,0.06)",
+          cursor: "pointer"
+        }}}}
+      >
+        <div style={{{{ fontSize:"12px", color:"var(--muted)" }}}}>
+          {{(post.tags && post.tags.length) ? ("#" + post.tags[0]) : "Пост"}} • ID {{post.channel_message_id}}
+        </div>
+        <div style={{{{ marginTop:"8px", fontSize:"14px", lineHeight:"1.35" }}}}>
+          {{post.preview || "Открыть пост →"}}
+        </div>
+        <div style={{{{ marginTop:"8px", display:"flex", gap:"6px", flexWrap:"wrap" }}}}>
+          {{(post.tags || []).slice(0,6).map(t => (
+            <div key={t} style={{{{
+              fontSize:"12px",
+              padding:"5px 8px",
+              borderRadius:"999px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.05)"
+            }}}}>#{{t}}</div>
+          ))}}
+        </div>
+      </div>
+    );
+
     const App = () => {{
       const [activeTab, setActiveTab] = useState("home");
       const [user, setUser] = useState(null);
 
+      // ДОБАВИЛИ ТОЛЬКО СОСТОЯНИЯ ДЛЯ ТЕГОВ/ПОСТОВ
+      const [selectedTag, setSelectedTag] = useState(null);
+      const [posts, setPosts] = useState([]);
+      const [loading, setLoading] = useState(false);
+
+      const loadPosts = (tag) => {{
+        setLoading(true);
+        const url = tag ? `/api/posts?tag=${{encodeURIComponent(tag)}}` : `/api/posts`;
+        fetch(url)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setPosts(Array.isArray(data) ? data : []))
+          .catch(() => setPosts([]))
+          .finally(() => setLoading(false));
+      }};
+
       useEffect(() => {{
+        // грузим последние посты при открытии
+        loadPosts(null);
+
         if (tg?.initDataUnsafe?.user) {{
           const tgUser = tg.initDataUnsafe.user;
           fetch(`/api/user/${{tgUser.id}}`)
@@ -417,6 +548,11 @@ def get_webapp_html():
         }}
       }}, []);
 
+      const pickTag = (tag) => {{
+        setSelectedTag(tag);
+        loadPosts(tag);
+      }};
+
       const renderContent = () => {{
         switch (activeTab) {{
           case "home":
@@ -425,36 +561,85 @@ def get_webapp_html():
                 <Button icon="📂" label="Категории" onClick={{() => setActiveTab("cat")}} />
                 <Button icon="🏷" label="Бренды" onClick={{() => setActiveTab("brand")}} />
                 <Button icon="💸" label="Sephora" onClick={{() => setActiveTab("sephora")}} />
-                <Button icon="💎" label="Beauty Challenges" onClick={{() => openLink(`https://t.me/${{CHANNEL}}?q=%23Challenge`)}} />
+                <Button icon="💎" label="Beauty Challenges" onClick={{() => pickTag("Challenge")}} />
                 <Button icon="↩️" label="В канал" onClick={{() => openLink(`https://t.me/${{CHANNEL}}`)}} />
+
+                {/* В HOME показываем ленту последних постов */}
+                <div style={{{{ marginTop:"10px", color:"var(--muted)", fontSize:"12px" }}}}>
+                  Последние посты {{selectedTag ? ("по тегу #" + selectedTag) : ""}}
+                </div>
+
+                {{loading && <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>Загрузка…</div>}}
+                {{!loading && posts.length === 0 && (
+                  <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>
+                    Пока нет постов. Бот индексирует новые посты после запуска.
+                  </div>
+                )}}
+                {{!loading && posts.map(p => <PostCard key={p.id} post={p} />)}}
               </Panel>
             );
           case "cat":
             return (
               <Panel>
-                <Button icon="🆕" label="Новинка" onClick={{() => openLink(searchLink("Новинка"))}} />
-                <Button icon="💎" label="Кратко о люкс продукте" onClick={{() => openLink(searchLink("Люкс"))}} />
-                <Button icon="🔥" label="Тренд" onClick={{() => openLink(searchLink("Тренд"))}} />
-                <Button icon="🏛" label="История бренда" onClick={{() => openLink(searchLink("История"))}} />
-                <Button icon="⭐" label="Личная оценка" onClick={{() => openLink(searchLink("Оценка"))}} />
-                <Button icon="🧴" label="Тип продукта / факты" onClick={{() => openLink(searchLink("Факты"))}} />
-                <Button icon="🧪" label="Составы продуктов" onClick={{() => openLink(searchLink("Состав"))}} />
+                <Button icon="🆕" label="Новинка" onClick={{() => pickTag("Новинка")}} />
+                <Button icon="💎" label="Кратко о люкс продукте" onClick={{() => pickTag("Люкс")}} />
+                <Button icon="🔥" label="Тренд" onClick={{() => pickTag("Тренд")}} />
+                <Button icon="🏛" label="История бренда" onClick={{() => pickTag("История")}} />
+                <Button icon="⭐" label="Личная оценка" onClick={{() => pickTag("Оценка")}} />
+                <Button icon="🧴" label="Тип продукта / факты" onClick={{() => pickTag("Факты")}} />
+                <Button icon="🧪" label="Составы продуктов" onClick={{() => pickTag("Состав")}} />
+
+                <div style={{{{ marginTop:"10px", color:"var(--muted)", fontSize:"12px" }}}}>
+                  Выбран тег: {{selectedTag ? ("#" + selectedTag) : "—"}}
+                </div>
+
+                {{loading && <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>Загрузка…</div>}}
+                {{!loading && posts.length === 0 && (
+                  <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>
+                    Пока нет постов по этому тегу. Бот индексирует новые посты после запуска.
+                  </div>
+                )}}
+                {{!loading && posts.map(p => <PostCard key={p.id} post={p} />)}}
               </Panel>
             );
           case "brand":
             return (
               <Panel>
-                <Button icon="✨" label="Dior" onClick={{() => openLink(searchLink("Dior"))}} />
-                <Button icon="✨" label="Chanel" onClick={{() => openLink(searchLink("Chanel"))}} />
-                <Button icon="✨" label="Charlotte Tilbury" onClick={{() => openLink(searchLink("CharlotteTilbury"))}} />
+                <Button icon="✨" label="Dior" onClick={{() => pickTag("Dior")}} />
+                <Button icon="✨" label="Chanel" onClick={{() => pickTag("Chanel")}} />
+                <Button icon="✨" label="Charlotte Tilbury" onClick={{() => pickTag("CharlotteTilbury")}} />
+
+                <div style={{{{ marginTop:"10px", color:"var(--muted)", fontSize:"12px" }}}}>
+                  Выбран тег: {{selectedTag ? ("#" + selectedTag) : "—"}}
+                </div>
+
+                {{loading && <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>Загрузка…</div>}}
+                {{!loading && posts.length === 0 && (
+                  <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>
+                    Пока нет постов по этому тегу.
+                  </div>
+                )}}
+                {{!loading && posts.map(p => <PostCard key={p.id} post={p} />)}}
               </Panel>
             );
           case "sephora":
             return (
               <Panel>
-                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={{() => openLink(searchLink("SephoraTR"))}} />
-                <Button icon="🎁" label="Подарки / акции" onClick={{() => openLink(searchLink("SephoraPromo"))}} />
-                <Button icon="🧾" label="Гайды / как покупать" onClick={{() => openLink(searchLink("SephoraGuide"))}} />
+                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={{() => pickTag("SephoraTR")}} />
+                <Button icon="🎁" label="Подарки / акции" onClick={{() => pickTag("SephoraPromo")}} />
+                <Button icon="🧾" label="Гайды / как покупать" onClick={{() => pickTag("SephoraGuide")}} />
+
+                <div style={{{{ marginTop:"10px", color:"var(--muted)", fontSize:"12px" }}}}>
+                  Выбран тег: {{selectedTag ? ("#" + selectedTag) : "—"}}
+                </div>
+
+                {{loading && <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>Загрузка…</div>}}
+                {{!loading && posts.length === 0 && (
+                  <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>
+                    Пока нет постов по этому тегу.
+                  </div>
+                )}}
+                {{!loading && posts.map(p => <PostCard key={p.id} post={p} />)}}
               </Panel>
             );
           default:
@@ -532,6 +717,21 @@ async def add_points_api(telegram_id: int, points: int):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return {"success": True, "new_total": user.points, "tier": user.tier}
+
+@app.get("/api/posts")
+async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
+    rows = await list_posts_by_tag(tag=tag, limit=limit, offset=offset)
+    return [
+        {
+            "id": p.id,
+            "channel_message_id": p.channel_message_id,
+            "url": post_url(p.channel_message_id),
+            "tags": p.tags or [],
+            "preview": preview_text(p.text, 180),
+            "created_at": p.created_at.isoformat(),
+        }
+        for p in rows
+    ]
 
 @app.get("/health")
 async def health():
