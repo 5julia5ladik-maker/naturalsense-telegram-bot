@@ -5,7 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -32,7 +32,6 @@ logger = logging.getLogger("main")
 # CONFIG (ENV)
 # -----------------------------------------------------------------------------
 def env_get(name: str, default: str | None = None) -> str | None:
-    """Read env var."""
     v = os.getenv(name)
     if v is not None:
         return v
@@ -50,7 +49,6 @@ if DATABASE_URL:
     elif DATABASE_URL.startswith("postgresql://"):
         DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# ENV diagnostics (safe)
 tok = BOT_TOKEN or ""
 logger.info(
     "ENV CHECK: BOT_TOKEN_present=%s BOT_TOKEN_len=%s PUBLIC_BASE_URL_present=%s DATABASE_URL_present=%s",
@@ -125,7 +123,6 @@ async def add_points(telegram_id: int, points: int):
 
         user.points += points
 
-        # Auto tier upgrade
         if user.points >= 500:
             user.tier = "vip"
         elif user.points >= 100:
@@ -184,7 +181,6 @@ async def upsert_post(channel_message_id: int, text: str | None):
 
 async def list_posts_by_tag(tag: str | None, limit: int = 50, offset: int = 0):
     async with async_session_maker() as session:
-        # берём последние посты, а фильтруем по тегу уже в питоне (простая и надежная логика)
         q = select(Post).order_by(Post.channel_message_id.desc()).limit(limit).offset(offset)
         rows = (await session.execute(q)).scalars().all()
         if tag:
@@ -213,7 +209,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_user = await get_user(user.id)
 
     if not db_user:
-        db_user = await create_user(
+        await create_user(
             telegram_id=user.id,
             username=user.username,
             first_name=user.first_name
@@ -259,10 +255,6 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="Markdown")
 
 async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Срабатывает, когда бот-админ видит новый пост в канале.
-    Индексируем текст/подпись и #теги.
-    """
     msg = update.channel_post
     if not msg:
         return
@@ -280,8 +272,8 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
 
-    # индексируем посты канала
-    tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
+    # Надёжно ловим посты из канала (бот должен быть админом)
+    tg_app.add_handler(MessageHandler(filters.ChatType.CHANNEL, on_channel_post))
 
     async def run():
         await tg_app.initialize()
@@ -310,7 +302,7 @@ async def stop_telegram_bot():
             tg_app = None
 
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (ВАШ ДИЗАЙН НЕ ТРОГАЕМ, ДОБАВЛЯЕМ ТОЛЬКО СПИСОК ПОСТОВ)
+# WEBAPP HTML (ДИЗАЙН НЕ ТРОГАЕМ, ДОБАВЛЯЕМ ТОЛЬКО ЛЕНТУ ПОСТОВ)
 # -----------------------------------------------------------------------------
 def get_webapp_html():
     return f"""<!DOCTYPE html>
@@ -380,7 +372,7 @@ def get_webapp_html():
         }}}} />
         <div style={{{{ position: "relative" }}}}>
           <div style={{{{ fontSize: "20px", fontWeight: 650, letterSpacing: "0.2px" }}}}>NS · Natural Sense</div>
-          <div style={{{{ marginTop: "6px", fontSize: "13px", color: "var(--muted)" }}}}>luxury beauty magazine</div>
+          <div style={{{{ marginTop: "6px", fontSize: "13px", color: "var(--muted)" }}}}>Лента постов по тегам • нажми тег и смотри</div>
 
           {{user && (
             <div style={{{{
@@ -478,7 +470,6 @@ def get_webapp_html():
       </div>
     );
 
-    // ДОБАВИЛИ ТОЛЬКО КАРТОЧКУ ПОСТА (стили не ломаем)
     const PostCard = ({{ post }}) => (
       <div
         onClick={{() => openLink(post.url)}}
@@ -492,14 +483,14 @@ def get_webapp_html():
         }}}}
       >
         <div style={{{{ fontSize:"12px", color:"var(--muted)" }}}}>
-          {{(post.tags && post.tags.length) ? ("#" + post.tags[0]) : "Пост"}} • ID {{post.channel_message_id}}
+          {{(post.tags && post.tags.length) ? ("#" + post.tags[0]) : "Пост"}}
         </div>
         <div style={{{{ marginTop:"8px", fontSize:"14px", lineHeight:"1.35" }}}}>
           {{post.preview || "Открыть пост →"}}
         </div>
         <div style={{{{ marginTop:"8px", display:"flex", gap:"6px", flexWrap:"wrap" }}}}>
           {{(post.tags || []).slice(0,6).map(t => (
-            <div key={t} style={{{{
+            <div key={{t}} style={{{{
               fontSize:"12px",
               padding:"5px 8px",
               borderRadius:"999px",
@@ -515,7 +506,6 @@ def get_webapp_html():
       const [activeTab, setActiveTab] = useState("home");
       const [user, setUser] = useState(null);
 
-      // ДОБАВИЛИ ТОЛЬКО СОСТОЯНИЯ ДЛЯ ТЕГОВ/ПОСТОВ
       const [selectedTag, setSelectedTag] = useState(null);
       const [posts, setPosts] = useState([]);
       const [loading, setLoading] = useState(false);
@@ -531,7 +521,6 @@ def get_webapp_html():
       }};
 
       useEffect(() => {{
-        // грузим последние посты при открытии
         loadPosts(null);
 
         if (tg?.initDataUnsafe?.user) {{
@@ -553,186 +542,31 @@ def get_webapp_html():
         loadPosts(tag);
       }};
 
+      const renderPostsBlock = () => (
+        <div style={{{{ marginTop:"10px" }}}}>
+          <div style={{{{ fontSize:"12px", color:"var(--muted)", marginTop:"10px" }}}}>
+            {{selectedTag ? ("Посты по тегу: #" + selectedTag) : "Последние посты"}}
+          </div>
+
+          {{loading && (
+            <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>Загрузка…</div>
+          )}}
+
+          {{!loading && posts.length === 0 && (
+            <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>
+              Пока нет постов по этому тегу. Бот индексирует только новые посты после запуска.
+            </div>
+          )}}
+
+          {{!loading && posts.map(p => <PostCard key={{p.channel_message_id}} post={{p}} />)}}
+        </div>
+      );
+
       const renderContent = () => {{
         switch (activeTab) {{
           case "home":
             return (
               <Panel>
-                <Button icon="📂" label="Категории" onClick={{() => setActiveTab("cat")}} />
-                <Button icon="🏷" label="Бренды" onClick={{() => setActiveTab("brand")}} />
-                <Button icon="💸" label="Sephora" onClick={{() => setActiveTab("sephora")}} />
-                <Button icon="💎" label="Beauty Challenges" onClick={{() => pickTag("Challenge")}} />
-                <Button icon="↩️" label="В канал" onClick={{() => openLink(`https://t.me/${{CHANNEL}}`)}} />
-
-                {/* В HOME показываем ленту последних постов */}
-                <div style={{{{ marginTop:"10px", color:"var(--muted)", fontSize:"12px" }}}}>
-                  Последние посты {{selectedTag ? ("по тегу #" + selectedTag) : ""}}
-                </div>
-
-                {{loading && <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>Загрузка…</div>}}
-                {{!loading && posts.length === 0 && (
-                  <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>
-                    Пока нет постов. Бот индексирует новые посты после запуска.
-                  </div>
-                )}}
-                {{!loading && posts.map(p => <PostCard key={p.id} post={p} />)}}
-              </Panel>
-            );
-          case "cat":
-            return (
-              <Panel>
                 <Button icon="🆕" label="Новинка" onClick={{() => pickTag("Новинка")}} />
-                <Button icon="💎" label="Кратко о люкс продукте" onClick={{() => pickTag("Люкс")}} />
                 <Button icon="🔥" label="Тренд" onClick={{() => pickTag("Тренд")}} />
-                <Button icon="🏛" label="История бренда" onClick={{() => pickTag("История")}} />
-                <Button icon="⭐" label="Личная оценка" onClick={{() => pickTag("Оценка")}} />
-                <Button icon="🧴" label="Тип продукта / факты" onClick={{() => pickTag("Факты")}} />
-                <Button icon="🧪" label="Составы продуктов" onClick={{() => pickTag("Состав")}} />
-
-                <div style={{{{ marginTop:"10px", color:"var(--muted)", fontSize:"12px" }}}}>
-                  Выбран тег: {{selectedTag ? ("#" + selectedTag) : "—"}}
-                </div>
-
-                {{loading && <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>Загрузка…</div>}}
-                {{!loading && posts.length === 0 && (
-                  <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>
-                    Пока нет постов по этому тегу. Бот индексирует новые посты после запуска.
-                  </div>
-                )}}
-                {{!loading && posts.map(p => <PostCard key={p.id} post={p} />)}}
-              </Panel>
-            );
-          case "brand":
-            return (
-              <Panel>
-                <Button icon="✨" label="Dior" onClick={{() => pickTag("Dior")}} />
-                <Button icon="✨" label="Chanel" onClick={{() => pickTag("Chanel")}} />
-                <Button icon="✨" label="Charlotte Tilbury" onClick={{() => pickTag("CharlotteTilbury")}} />
-
-                <div style={{{{ marginTop:"10px", color:"var(--muted)", fontSize:"12px" }}}}>
-                  Выбран тег: {{selectedTag ? ("#" + selectedTag) : "—"}}
-                </div>
-
-                {{loading && <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>Загрузка…</div>}}
-                {{!loading && posts.length === 0 && (
-                  <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>
-                    Пока нет постов по этому тегу.
-                  </div>
-                )}}
-                {{!loading && posts.map(p => <PostCard key={p.id} post={p} />)}}
-              </Panel>
-            );
-          case "sephora":
-            return (
-              <Panel>
-                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={{() => pickTag("SephoraTR")}} />
-                <Button icon="🎁" label="Подарки / акции" onClick={{() => pickTag("SephoraPromo")}} />
-                <Button icon="🧾" label="Гайды / как покупать" onClick={{() => pickTag("SephoraGuide")}} />
-
-                <div style={{{{ marginTop:"10px", color:"var(--muted)", fontSize:"12px" }}}}>
-                  Выбран тег: {{selectedTag ? ("#" + selectedTag) : "—"}}
-                </div>
-
-                {{loading && <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>Загрузка…</div>}}
-                {{!loading && posts.length === 0 && (
-                  <div style={{{{ marginTop:"10px", color:"var(--muted)" }}}}>
-                    Пока нет постов по этому тегу.
-                  </div>
-                )}}
-                {{!loading && posts.map(p => <PostCard key={p.id} post={p} />)}}
-              </Panel>
-            );
-          default:
-            return null;
-        }}
-      }};
-
-      return (
-        <div style={{{{ padding:"18px 16px 26px", maxWidth:"520px", margin:"0 auto" }}}}>
-          <Hero user={{user}} />
-          <Tabs active={{activeTab}} onChange={{setActiveTab}} />
-          {{renderContent()}}
-          <div style={{{{ marginTop:"20px", color:"var(--muted)", fontSize:"12px", textAlign:"center" }}}}>
-            Открывается как Mini App внутри Telegram
-          </div>
-        </div>
-      );
-    }};
-
-    ReactDOM.render(<App />, document.getElementById("root"));
-  </script>
-</body>
-</html>
-"""
-
-# -----------------------------------------------------------------------------
-# FASTAPI
-# -----------------------------------------------------------------------------
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await init_db()
-    await start_telegram_bot()
-    logger.info("✅ NS · Natural Sense started")
-    yield
-    await stop_telegram_bot()
-    logger.info("✅ NS · Natural Sense stopped")
-
-app = FastAPI(title="NS · Natural Sense API", version="2.0.0", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.get("/")
-async def root():
-    return {"app": "NS · Natural Sense", "status": "running", "version": "2.0.0"}
-
-@app.get("/webapp", response_class=HTMLResponse)
-async def webapp():
-    return HTMLResponse(get_webapp_html())
-
-@app.get("/api/user/{telegram_id}")
-async def get_user_api(telegram_id: int):
-    user = await get_user(telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return {
-        "id": user.id,
-        "telegram_id": user.telegram_id,
-        "username": user.username,
-        "first_name": user.first_name,
-        "tier": user.tier,
-        "points": user.points,
-        "favorites": user.favorites,
-        "joined_at": user.joined_at.isoformat(),
-    }
-
-@app.post("/api/user/{telegram_id}/points")
-async def add_points_api(telegram_id: int, points: int):
-    user = await add_points(telegram_id, points)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return {"success": True, "new_total": user.points, "tier": user.tier}
-
-@app.get("/api/posts")
-async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
-    rows = await list_posts_by_tag(tag=tag, limit=limit, offset=offset)
-    return [
-        {
-            "id": p.id,
-            "channel_message_id": p.channel_message_id,
-            "url": post_url(p.channel_message_id),
-            "tags": p.tags or [],
-            "preview": preview_text(p.text, 180),
-            "created_at": p.created_at.isoformat(),
-        }
-        for p in rows
-    ]
-
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
+                <Button icon="⭐" label="Оценка" onClick={{() => pickTag("Оценка
