@@ -19,7 +19,7 @@ from telegram.ext import (
     filters,
 )
 
-from sqlalchemy import Column, Integer, String, DateTime, JSON, select, func
+from sqlalchemy import Column, Integer, String, DateTime, JSON, select, func, cast, Text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 
@@ -74,6 +74,7 @@ TAG_GROUPS = {
 def extract_hashtags(text: str) -> List[str]:
     if not text:
         return []
+    # кириллица + латиница + цифры + _
     return list(set(re.findall(r"#[\w\u0400-\u04FF]+", text)))
 
 
@@ -235,7 +236,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_user = await get_user(user.id)
 
     if not db_user:
-        db_user = await create_user(user.id, user.username, user.first_name)
+        await create_user(user.id, user.username, user.first_name)
         text = f"Добро пожаловать, {user.first_name}! 🖤\n\n+10 баллов за регистрацию ✨"
     else:
         await add_points(user.id, 5)
@@ -308,7 +309,7 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
 
-    # ✅ вот это ловит channel_post в канале
+    # ✅ Ловим посты канала
     tg_app.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_channel_post))
 
     async def run():
@@ -751,17 +752,17 @@ async def api_get_tags(group: str | None = None):
         result = await session.execute(query)
         tags = result.scalars().all()
 
-        return {
-            "tags": [{"name": t.name, "group": t.group, "count": t.count} for t in tags]
-        }
+        return {"tags": [{"name": t.name, "group": t.group, "count": t.count} for t in tags]}
 
 
 @app.get("/api/posts")
 async def api_get_posts(tag: str | None = None, page: int = 1, limit: int = 20):
     async with async_session_maker() as session:
         query = select(Post).order_by(Post.date.desc())
+
+        # ✅ Работает в Postgres/SQLite: JSON -> Text -> LIKE
         if tag:
-            query = query.where(Post.tags.like(f'%"{tag}"%'))
+            query = query.where(cast(Post.tags, Text).like(f'%"{tag}"%'))
 
         offset = (page - 1) * limit
         result = await session.execute(query.offset(offset).limit(limit))
@@ -769,7 +770,7 @@ async def api_get_posts(tag: str | None = None, page: int = 1, limit: int = 20):
 
         count_query = select(func.count(Post.id))
         if tag:
-            count_query = count_query.where(Post.tags.like(f'%"{tag}"%'))
+            count_query = count_query.where(cast(Post.tags, Text).like(f'%"{tag}"%'))
         total = await session.scalar(count_query)
 
         return {
