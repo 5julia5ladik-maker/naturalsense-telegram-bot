@@ -11,7 +11,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ChannelPostHandler
+
 
 from sqlalchemy import Column, Integer, String, DateTime, JSON, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
