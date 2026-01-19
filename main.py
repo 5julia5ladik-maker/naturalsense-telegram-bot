@@ -342,12 +342,13 @@ async def start_telegram_bot():
         logger.error("❌ BOT_TOKEN not set; starting API WITHOUT Telegram bot")
         return
 
-    tg_app = Application.builder().token(BOT_TOKEN).build()
-    tg_app.add_handler(CommandHandler("start", cmd_start))
-    tg_app.add_handler(CommandHandler("profile", cmd_profile))
+tg_app = Application.builder().token(BOT_TOKEN).build()
+tg_app.add_handler(CommandHandler("start", cmd_start))
+tg_app.add_handler(CommandHandler("profile", cmd_profile))
+tg_app.add_handler(ChannelPostHandler(handle_channel_post))
 
     # ВАЖНО: для постов канала используем update.channel_post (не обычные сообщения)
-    tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, handle_channel_post))
+    tg_app.add_handler(ChannelPostHandler(handle_channel_post))
 
     async def run():
         await tg_app.initialize()
