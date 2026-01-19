@@ -11,12 +11,17 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ChannelPostHandler
-
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    ChannelPostHandler,
+)
 
 from sqlalchemy import Column, Integer, String, DateTime, JSON, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+
 
 # -----------------------------------------------------------------------------
 # LOGGING
@@ -24,11 +29,11 @@ from sqlalchemy.orm import declarative_base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
 
+
 # -----------------------------------------------------------------------------
 # CONFIG (ENV)
 # -----------------------------------------------------------------------------
 def env_get(name: str, default: str | None = None) -> str | None:
-    """Read env var."""
     v = os.getenv(name)
     if v is not None:
         return v
@@ -54,6 +59,7 @@ logger.info(
     bool(BOT_TOKEN), len(tok), bool(PUBLIC_BASE_URL), bool(DATABASE_URL), CHANNEL_USERNAME
 )
 
+
 # -----------------------------------------------------------------------------
 # TAG CONFIGURATION
 # -----------------------------------------------------------------------------
@@ -61,7 +67,7 @@ TAG_GROUPS = {
     "categories": ["#Новинка", "#Люкс", "#Тренд", "#История", "#Оценка", "#Факты", "#Состав"],
     "brands": ["#Dior", "#Chanel", "#CharlotteTilbury"],
     "sephora": ["#SephoraTR", "#SephoraPromo", "#SephoraGuide"],
-    "challenges": ["#Challenge"]
+    "challenges": ["#Challenge"],
 }
 
 
@@ -69,8 +75,7 @@ def extract_hashtags(text: str) -> List[str]:
     """Извлечь все хештеги из текста"""
     if not text:
         return []
-    # Находим все хештеги (кириллица + латиница)
-    return list(set(re.findall(r'#[\w\u0400-\u04FF]+', text)))
+    return list(set(re.findall(r"#[\w\u0400-\u04FF]+", text)))
 
 
 def get_tag_group(tag: str) -> str:
@@ -137,19 +142,19 @@ async def init_db():
     logger.info("✅ Database initialized")
 
 
-async def get_user(telegram_id: int):
+async def get_user(telegram_id: int) -> Optional[User]:
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         return result.scalar_one_or_none()
 
 
-async def create_user(telegram_id: int, username: str | None = None, first_name: str | None = None):
+async def create_user(telegram_id: int, username: str | None = None, first_name: str | None = None) -> User:
     async with async_session_maker() as session:
         user = User(
             telegram_id=telegram_id,
             username=username,
             first_name=first_name,
-            points=10
+            points=10,
         )
         session.add(user)
         await session.commit()
@@ -158,20 +163,22 @@ async def create_user(telegram_id: int, username: str | None = None, first_name:
         return user
 
 
-async def add_points(telegram_id: int, points: int):
+async def add_points(telegram_id: int, points: int) -> Optional[User]:
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
         if not user:
             return None
 
-        user.points += points
+        user.points += int(points)
 
         # Auto tier upgrade
         if user.points >= 500:
             user.tier = "vip"
         elif user.points >= 100:
             user.tier = "premium"
+        else:
+            user.tier = "free"
 
         await session.commit()
         await session.refresh(user)
@@ -182,24 +189,19 @@ async def save_post(
     message_id: int,
     date: datetime,
     text: str,
-    media_type: Optional[str] = None,
-    media_file_id: Optional[str] = None,
+    media_type: str | None = None,
+    media_file_id: str | None = None,
 ):
     """Сохранить пост в БД"""
     async with async_session_maker() as session:
-        # Проверка: пост уже есть?
         existing = await session.execute(select(Post).where(Post.message_id == message_id))
         if existing.scalar_one_or_none():
             logger.info("Post %s already exists, skipping", message_id)
             return
 
-        # Извлечь хештеги
         tags = extract_hashtags(text)
-
-        # Создать permalink
         permalink = f"https://t.me/{CHANNEL_USERNAME}/{message_id}"
 
-        # Сохранить пост
         post = Post(
             message_id=message_id,
             date=date,
@@ -207,15 +209,14 @@ async def save_post(
             media_type=media_type,
             media_file_id=media_file_id,
             permalink=permalink,
-            tags=tags
+            tags=tags,
         )
         session.add(post)
 
-        # Обновить счетчики тегов
+        # update tag counters
         for tag in tags:
             tag_result = await session.execute(select(Tag).where(Tag.name == tag))
             tag_obj = tag_result.scalar_one_or_none()
-
             if tag_obj:
                 tag_obj.count += 1
                 tag_obj.last_seen = datetime.utcnow()
@@ -224,7 +225,7 @@ async def save_post(
                     name=tag,
                     group=get_tag_group(tag),
                     count=1,
-                    last_seen=datetime.utcnow()
+                    last_seen=datetime.utcnow(),
                 )
                 session.add(tag_obj)
 
@@ -247,22 +248,19 @@ def get_main_keyboard():
             [KeyboardButton("👤 Профиль"), KeyboardButton("🎁 Челленджи")],
             [KeyboardButton("↩️ В канал")],
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
     )
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if not update.message or not user:
-        return
-
     db_user = await get_user(user.id)
 
     if not db_user:
-        await create_user(
+        db_user = await create_user(
             telegram_id=user.id,
             username=user.username,
-            first_name=user.first_name
+            first_name=user.first_name,
         )
         text = f"Добро пожаловать, {user.first_name}! 🖤\n\n+10 баллов за регистрацию ✨"
     else:
@@ -274,9 +272,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if not update.message or not user:
-        return
-
     db_user = await get_user(user.id)
 
     if not db_user:
@@ -342,12 +337,11 @@ async def start_telegram_bot():
         logger.error("❌ BOT_TOKEN not set; starting API WITHOUT Telegram bot")
         return
 
-tg_app = Application.builder().token(BOT_TOKEN).build()
-tg_app.add_handler(CommandHandler("start", cmd_start))
-tg_app.add_handler(CommandHandler("profile", cmd_profile))
-tg_app.add_handler(ChannelPostHandler(handle_channel_post))
+    tg_app = Application.builder().token(BOT_TOKEN).build()
+    tg_app.add_handler(CommandHandler("start", cmd_start))
+    tg_app.add_handler(CommandHandler("profile", cmd_profile))
 
-    # ВАЖНО: для постов канала используем update.channel_post (не обычные сообщения)
+    # ✅ ВАЖНО: это правильный обработчик именно для постов канала
     tg_app.add_handler(ChannelPostHandler(handle_channel_post))
 
     async def run():
@@ -363,16 +357,12 @@ tg_app.add_handler(ChannelPostHandler(handle_channel_post))
 
 async def stop_telegram_bot():
     global tg_app, tg_task
-
     if tg_task:
         tg_task.cancel()
         tg_task = None
-
     if tg_app:
         try:
-            # Остановить polling и приложение
-            if tg_app.updater:
-                await tg_app.updater.stop()
+            await tg_app.updater.stop()
             await tg_app.stop()
             await tg_app.shutdown()
             logger.info("✅ Telegram bot stopped")
@@ -383,7 +373,7 @@ async def stop_telegram_bot():
 
 
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (React via CDN) — ДИЗАЙН НЕ ТРОГАЛ
+# WEBAPP HTML (React via CDN)  -- ДИЗАЙН НЕ ТРОГАЛ
 # -----------------------------------------------------------------------------
 def get_webapp_html():
     return f"""<!DOCTYPE html>
@@ -555,7 +545,7 @@ def get_webapp_html():
           {{post.text || "Пост без текста"}}
         </div>
         <div style={{{{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "8px" }}}}>
-          {{post.tags.map(tag => (
+          {{(post.tags || []).map(tag => (
             <span key={{tag}} style={{{{
               fontSize: "12px",
               padding: "4px 8px",
@@ -753,6 +743,11 @@ async def webapp():
     return HTMLResponse(get_webapp_html())
 
 
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+
 @app.get("/api/user/{telegram_id}")
 async def get_user_api(telegram_id: int):
     user = await get_user(telegram_id)
@@ -805,14 +800,13 @@ async def api_get_posts(tag: str | None = None, page: int = 1, limit: int = 20):
         query = select(Post).order_by(Post.date.desc())
 
         if tag:
-            # SQLite: LIKE по JSON-строке
+            # SQLite: LIKE по JSON строке
             query = query.where(Post.tags.like(f'%"{tag}"%'))
 
         offset = (page - 1) * limit
         result = await session.execute(query.offset(offset).limit(limit))
         posts = result.scalars().all()
 
-        # total
         count_query = select(func.count(Post.id))
         if tag:
             count_query = count_query.where(Post.tags.like(f'%"{tag}"%'))
@@ -827,16 +821,11 @@ async def api_get_posts(tag: str | None = None, page: int = 1, limit: int = 20):
                     "text": (p.text[:150] + "...") if p.text and len(p.text) > 150 else p.text,
                     "media_type": p.media_type,
                     "permalink": p.permalink,
-                    "tags": p.tags
+                    "tags": p.tags,
                 }
                 for p in posts
             ],
             "page": page,
             "limit": limit,
-            "total": int(total or 0)
+            "total": int(total or 0),
         }
-
-
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
