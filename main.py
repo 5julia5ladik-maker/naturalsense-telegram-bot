@@ -281,6 +281,9 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     message_id = post.message_id
     date = post.date
+if date and date.tzinfo is not None:
+    date = date.replace(tzinfo=None)
+
     text = post.text or post.caption or ""
 
     media_type = None
