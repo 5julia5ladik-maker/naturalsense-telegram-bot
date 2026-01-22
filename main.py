@@ -22,13 +22,11 @@ from sqlalchemy import Column, Integer, String, DateTime, JSON, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 
-
 # -----------------------------------------------------------------------------
 # LOGGING
 # -----------------------------------------------------------------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
-
 
 # -----------------------------------------------------------------------------
 # CONFIG (ENV)
@@ -36,7 +34,6 @@ logger = logging.getLogger("main")
 def env_get(name: str, default: str | None = None) -> str | None:
     v = os.getenv(name)
     return v if v is not None else default
-
 
 BOT_TOKEN = env_get("BOT_TOKEN")
 PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
@@ -55,12 +52,10 @@ logger.info(
     bool(BOT_TOKEN), len(tok), bool(PUBLIC_BASE_URL), bool(DATABASE_URL)
 )
 
-
 # -----------------------------------------------------------------------------
 # DATABASE MODELS
 # -----------------------------------------------------------------------------
 Base = declarative_base()
-
 
 class User(Base):
     __tablename__ = "users"
@@ -74,10 +69,9 @@ class User(Base):
     favorites = Column(JSON, default=list)
     joined_at = Column(DateTime, default=lambda: datetime.utcnow())
 
-
 class Post(Base):
     """
-    ВАЖНО: модель сделана под твою таблицу posts:
+    Под твою реальную таблицу Railway:
     id, message_id, date, text, media_type, media_file_id, permalink, tags, created_at
     """
     __tablename__ = "posts"
@@ -85,7 +79,7 @@ class Post(Base):
     id = Column(Integer, primary_key=True)
     message_id = Column(Integer, unique=True, index=True, nullable=False)
 
-    # TIMESTAMP WITHOUT TIME ZONE -> храним naive UTC
+    # TIMESTAMP WITHOUT TIME ZONE -> кладём naive UTC
     date = Column(DateTime, nullable=True)
 
     text = Column(String, nullable=True)
@@ -96,19 +90,16 @@ class Post(Base):
     tags = Column(JSON, default=list)
     created_at = Column(DateTime, default=lambda: datetime.utcnow())
 
-
 # -----------------------------------------------------------------------------
 # DATABASE
 # -----------------------------------------------------------------------------
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("✅ Database initialized")
-
 
 # -----------------------------------------------------------------------------
 # USER QUERIES
@@ -117,7 +108,6 @@ async def get_user(telegram_id: int):
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         return result.scalar_one_or_none()
-
 
 async def create_user(telegram_id: int, username: str | None = None, first_name: str | None = None):
     async with async_session_maker() as session:
@@ -132,7 +122,6 @@ async def create_user(telegram_id: int, username: str | None = None, first_name:
         await session.refresh(user)
         logger.info("✅ New user created: %s", telegram_id)
         return user
-
 
 async def add_points(telegram_id: int, points: int):
     async with async_session_maker() as session:
@@ -152,12 +141,10 @@ async def add_points(telegram_id: int, points: int):
         await session.refresh(user)
         return user
 
-
 # -----------------------------------------------------------------------------
 # POSTS / TAGS
 # -----------------------------------------------------------------------------
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
-
 
 def extract_tags(text: str | None) -> list[str]:
     if not text:
@@ -170,10 +157,8 @@ def extract_tags(text: str | None) -> list[str]:
             out.append(t)
     return out
 
-
 def build_permalink(message_id: int) -> str:
     return f"https://t.me/{CHANNEL_USERNAME}/{message_id}"
-
 
 def preview_text(text: str | None, limit: int = 180) -> str:
     if not text:
@@ -181,19 +166,16 @@ def preview_text(text: str | None, limit: int = 180) -> str:
     s = re.sub(r"\s+", " ", text.strip())
     return (s[:limit] + "…") if len(s) > limit else s
 
-
 def to_naive_utc(dt: datetime | None) -> datetime | None:
     """
-    Telegram msg.date обычно timezone-aware (UTC).
-    В Postgres у тебя TIMESTAMP WITHOUT TIME ZONE -> надо класть naive datetime.
+    Telegram msg.date -> timezone-aware UTC.
+    В Postgres TIMESTAMP WITHOUT TIME ZONE -> кладём naive UTC.
     """
     if dt is None:
         return None
     if dt.tzinfo is None:
-        # если вдруг уже naive — считаем что это UTC
         return dt
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
-
 
 async def upsert_post_from_channel(
     message_id: int,
@@ -204,8 +186,7 @@ async def upsert_post_from_channel(
 ):
     tags = extract_tags(text)
     permalink = build_permalink(message_id)
-    now = datetime.utcnow()  # naive utc
-
+    now = datetime.utcnow()  # naive UTC
     date_naive = to_naive_utc(date_dt)
 
     async with async_session_maker() as session:
@@ -239,26 +220,21 @@ async def upsert_post_from_channel(
         logger.info("✅ Indexed post %s tags=%s", message_id, tags)
         return p
 
-
-async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
+async def list_posts(tag: str, limit: int = 100, offset: int = 0):
     """
-    Простая логика: берём последние посты по message_id desc,
-    потом фильтруем по tag в Python (надёжно для JSON в Postgres).
+    Берём последние по message_id desc, фильтруем по tag в Python.
     """
     async with async_session_maker() as session:
         q = select(Post).order_by(Post.message_id.desc()).limit(limit).offset(offset)
         rows = (await session.execute(q)).scalars().all()
-        if tag:
-            rows = [p for p in rows if tag in (p.tags or [])]
+        rows = [p for p in rows if tag in (p.tags or [])]
         return rows
-
 
 # -----------------------------------------------------------------------------
 # TELEGRAM BOT
 # -----------------------------------------------------------------------------
 tg_app: Application | None = None
 tg_task: asyncio.Task | None = None
-
 
 def get_main_keyboard():
     webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
@@ -271,13 +247,12 @@ def get_main_keyboard():
         resize_keyboard=True
     )
 
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db_user = await get_user(user.id)
 
     if not db_user:
-        db_user = await create_user(
+        await create_user(
             telegram_id=user.id,
             username=user.username,
             first_name=user.first_name
@@ -288,7 +263,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = f"С возвращением, {user.first_name}!\n+5 баллов за визит ✨"
 
     await update.message.reply_text(text, reply_markup=get_main_keyboard())
-
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -323,11 +297,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     await update.message.reply_text(text, parse_mode="Markdown")
 
-
 async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Новый пост в канале (бот должен быть админом в канале!)
-    """
     msg = update.channel_post
     if not msg:
         return
@@ -336,7 +306,6 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     media_type = None
     media_file_id = None
 
-    # Минимально: фиксируем тип медиа (если надо)
     if msg.photo:
         media_type = "photo"
         media_file_id = msg.photo[-1].file_id
@@ -355,11 +324,7 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         media_file_id=media_file_id,
     )
 
-
 async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Редактирование поста в канале -> обновляем текст/теги
-    """
     msg = update.edited_channel_post
     if not msg:
         return
@@ -386,7 +351,6 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
         media_file_id=media_file_id,
     )
 
-
 async def start_telegram_bot():
     global tg_app, tg_task
 
@@ -395,11 +359,9 @@ async def start_telegram_bot():
         return
 
     tg_app = Application.builder().token(BOT_TOKEN).build()
-
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
 
-    # Канальные посты и редактирование
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
 
@@ -412,7 +374,6 @@ async def start_telegram_bot():
             await asyncio.sleep(3600)
 
     tg_task = asyncio.create_task(run())
-
 
 async def stop_telegram_bot():
     global tg_app, tg_task
@@ -430,9 +391,8 @@ async def stop_telegram_bot():
         finally:
             tg_app = None
 
-
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (ДИЗАЙН/РАСПОЛОЖЕНИЕ НЕ ЛОМАЕМ)
+# WEBAPP HTML (ДИЗАЙН СОХРАНЁН, ПОСТЫ ТОЛЬКО ПО НАЖАТИЮ)
 # -----------------------------------------------------------------------------
 def get_webapp_html() -> str:
     html = """<!DOCTYPE html>
@@ -632,53 +592,72 @@ def get_webapp_html() -> str:
       </div>
     );
 
-    const PostsBlock = ({ title, posts, loading }) => (
-      <div style={{ marginTop: "12px" }}>
-        <div style={{ color: "var(--muted)", fontSize: "12px" }}>{title}</div>
+    const PostsScreen = ({ title, posts, loading }) => (
+      <Panel>
+        <div style={{
+          padding: "6px 4px 10px",
+          borderBottom: "1px solid var(--stroke)",
+          marginBottom: "10px"
+        }}>
+          <div style={{ fontSize: "16px", fontWeight: 650 }}>{title}</div>
+        </div>
 
         {loading && (
-          <div style={{ marginTop: "10px", color: "var(--muted)", fontSize: "13px" }}>
+          <div style={{ color: "var(--muted)", fontSize: "13px", padding: "6px 4px" }}>
             Загрузка…
           </div>
         )}
 
         {!loading && posts.length === 0 && (
-          <div style={{ marginTop: "10px", color: "var(--muted)", fontSize: "13px" }}>
+          <div style={{ color: "var(--muted)", fontSize: "13px", padding: "6px 4px" }}>
             Пока нет постов по этому тегу.
           </div>
         )}
 
         {!loading && posts.map(p => <PostCard key={p.id || p.message_id} post={p} />)}
-      </div>
+      </Panel>
     );
 
     const App = () => {
       const [activeTab, setActiveTab] = useState("home");
       const [user, setUser] = useState(null);
 
+      // экран: "menu" или "posts"
+      const [screen, setScreen] = useState("menu");
+
       const [selectedTag, setSelectedTag] = useState(null);
+      const [selectedTitle, setSelectedTitle] = useState("");
       const [posts, setPosts] = useState([]);
       const [loading, setLoading] = useState(false);
 
       const loadPosts = (tag) => {
         setLoading(true);
-        const url = tag ? `/api/posts?tag=${encodeURIComponent(tag)}` : `/api/posts`;
-        fetch(url)
+        fetch(`/api/posts?tag=${encodeURIComponent(tag)}`)
           .then(r => r.ok ? r.json() : Promise.reject())
           .then(data => setPosts(Array.isArray(data) ? data : []))
           .catch(() => setPosts([]))
           .finally(() => setLoading(false));
       };
 
-      const pickTag = (tag) => {
+      const openPosts = (tag, title) => {
         setSelectedTag(tag);
+        setSelectedTitle(title);
+        setPosts([]);
+        setScreen("posts");
         loadPosts(tag);
       };
 
-      useEffect(() => {
-        // при старте — последние посты
-        loadPosts(null);
+      // при смене вкладки — возвращаемся в меню вкладки (без постов)
+      const changeTab = (tabId) => {
+        setActiveTab(tabId);
+        setScreen("menu");
+        setSelectedTag(null);
+        setSelectedTitle("");
+        setPosts([]);
+        setLoading(false);
+      };
 
+      useEffect(() => {
         if (tg?.initDataUnsafe?.user) {
           const tgUser = tg.initDataUnsafe.user;
           fetch(`/api/user/${tgUser.id}`)
@@ -693,71 +672,48 @@ def get_webapp_html() -> str:
         }
       }, []);
 
-      const renderContent = () => {
+      const renderMenu = () => {
         switch (activeTab) {
           case "home":
             return (
               <Panel>
-                <Button icon="📂" label="Категории" onClick={() => setActiveTab("cat")} />
-                <Button icon="🏷" label="Бренды" onClick={() => setActiveTab("brand")} />
-                <Button icon="💸" label="Sephora" onClick={() => setActiveTab("sephora")} />
-                <Button icon="💎" label="Beauty Challenges" onClick={() => pickTag("Challenge")} />
+                <Button icon="📂" label="Категории" onClick={() => changeTab("cat")} />
+                <Button icon="🏷" label="Бренды" onClick={() => changeTab("brand")} />
+                <Button icon="💸" label="Sephora" onClick={() => changeTab("sephora")} />
+                <Button icon="💎" label="Beauty Challenges" onClick={() => openPosts("Challenge", "Посты Challenge")} />
                 <Button icon="↩️" label="В канал" onClick={() => openLink(`https://t.me/${CHANNEL}`)} />
-
-                <PostsBlock
-                  title={selectedTag ? `Посты по тегу #${selectedTag}` : "Последние посты"}
-                  posts={posts}
-                  loading={loading}
-                />
               </Panel>
             );
 
           case "cat":
             return (
               <Panel>
-                <Button icon="🆕" label="Новинка" onClick={() => pickTag("Новинка")} />
-                <Button icon="💎" label="Кратко о люкс продукте" onClick={() => pickTag("Люкс")} />
-                <Button icon="🔥" label="Тренд" onClick={() => pickTag("Тренд")} />
-                <Button icon="🏛" label="История бренда" onClick={() => pickTag("История")} />
-                <Button icon="⭐" label="Личная оценка" onClick={() => pickTag("Оценка")} />
-                <Button icon="🧴" label="Тип продукта / факты" onClick={() => pickTag("Факты")} />
-                <Button icon="🧪" label="Составы продуктов" onClick={() => pickTag("Состав")} />
-
-                <PostsBlock
-                  title={selectedTag ? `Посты по тегу #${selectedTag}` : "Выбери категорию — и ниже появятся посты"}
-                  posts={posts}
-                  loading={loading}
-                />
+                <Button icon="🆕" label="Новинка" onClick={() => openPosts("Новинка", "Посты Новинка")} />
+                <Button icon="💎" label="Кратко о люкс продукте" onClick={() => openPosts("Люкс", "Посты Люкс")} />
+                <Button icon="🔥" label="Тренд" onClick={() => openPosts("Тренд", "Посты Тренд")} />
+                <Button icon="🏛" label="История бренда" onClick={() => openPosts("История", "Посты История")} />
+                <Button icon="⭐" label="Личная оценка" onClick={() => openPosts("Оценка", "Посты Оценка")} />
+                <Button icon="🧴" label="Тип продукта / факты" onClick={() => openPosts("Факты", "Посты Факты")} />
+                <Button icon="🧪" label="Составы продуктов" onClick={() => openPosts("Состав", "Посты Состав")} />
               </Panel>
             );
 
           case "brand":
             return (
               <Panel>
-                <Button icon="✨" label="Dior" onClick={() => pickTag("Dior")} />
-                <Button icon="✨" label="Chanel" onClick={() => pickTag("Chanel")} />
-                <Button icon="✨" label="Charlotte Tilbury" onClick={() => pickTag("CharlotteTilbury")} />
-
-                <PostsBlock
-                  title={selectedTag ? `Посты по тегу #${selectedTag}` : "Выбери бренд — и ниже появятся посты"}
-                  posts={posts}
-                  loading={loading}
-                />
+                <Button icon="✨" label="Dior" onClick={() => openPosts("Dior", "Посты Dior")} />
+                <Button icon="✨" label="Chanel" onClick={() => openPosts("Chanel", "Посты Chanel")} />
+                <Button icon="✨" label="Charlotte Tilbury" onClick={() => openPosts("CharlotteTilbury", "Посты Charlotte Tilbury")} />
               </Panel>
             );
 
           case "sephora":
             return (
               <Panel>
-                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={() => pickTag("SephoraTR")} />
-                <Button icon="🎁" label="Подарки / акции" onClick={() => pickTag("SephoraPromo")} />
-                <Button icon="🧾" label="Гайды / как покупать" onClick={() => pickTag("SephoraGuide")} />
-
-                <PostsBlock
-                  title={selectedTag ? `Посты по тегу #${selectedTag}` : "Выбери раздел Sephora — и ниже появятся посты"}
-                  posts={posts}
-                  loading={loading}
-                />
+                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление"
+                  onClick={() => openPosts("SephoraTR", "Посты Sephora TR")} />
+                <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo", "Посты Sephora Promo")} />
+                <Button icon="🧾" label="Гайды / как покупать" onClick={() => openPosts("SephoraGuide", "Посты Sephora Guide")} />
               </Panel>
             );
 
@@ -769,8 +725,18 @@ def get_webapp_html() -> str:
       return (
         <div style={{ padding:"18px 16px 26px", maxWidth:"520px", margin:"0 auto" }}>
           <Hero user={user} />
-          <Tabs active={activeTab} onChange={setActiveTab} />
-          {renderContent()}
+          <Tabs active={activeTab} onChange={changeTab} />
+
+          {screen === "menu" && renderMenu()}
+
+          {screen === "posts" && (
+            <PostsScreen
+              title={selectedTitle || (selectedTag ? ("Посты " + selectedTag) : "Посты")}
+              posts={posts}
+              loading={loading}
+            />
+          )}
+
           <div style={{ marginTop:"20px", color:"var(--muted)", fontSize:"12px", textAlign:"center" }}>
             Открывается как Mini App внутри Telegram
           </div>
@@ -785,7 +751,6 @@ def get_webapp_html() -> str:
 """
     return html.replace("__CHANNEL__", CHANNEL_USERNAME)
 
-
 # -----------------------------------------------------------------------------
 # FASTAPI
 # -----------------------------------------------------------------------------
@@ -798,8 +763,7 @@ async def lifespan(app: FastAPI):
     await stop_telegram_bot()
     logger.info("✅ NS · Natural Sense stopped")
 
-
-app = FastAPI(title="NS · Natural Sense API", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="NS · Natural Sense API", version="3.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -809,16 +773,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.get("/")
 async def root():
-    return {"app": "NS · Natural Sense", "status": "running", "version": "3.0.0"}
-
+    return {"app": "NS · Natural Sense", "status": "running", "version": "3.1.0"}
 
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp():
     return HTMLResponse(get_webapp_html())
-
 
 @app.get("/api/user/{telegram_id}")
 async def get_user_api(telegram_id: int):
@@ -836,19 +797,10 @@ async def get_user_api(telegram_id: int):
         "joined_at": user.joined_at.isoformat(),
     }
 
-
-@app.post("/api/user/{telegram_id}/points")
-async def add_points_api(telegram_id: int, points: int):
-    user = await add_points(telegram_id, points)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return {"success": True, "new_total": user.points, "tier": user.tier}
-
-
 @app.get("/api/posts")
 async def api_posts(
-    tag: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
+    tag: str = Query(..., description="Tag without #, example: Dior"),
+    limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
     rows = await list_posts(tag=tag, limit=limit, offset=offset)
@@ -868,7 +820,6 @@ async def api_posts(
         }
         for p in rows
     ]
-
 
 @app.get("/health")
 async def health():
