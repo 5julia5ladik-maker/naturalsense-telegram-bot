@@ -79,10 +79,10 @@ class Post(Base):
 
     id = Column(Integer, primary_key=True)
 
-    # ВАЖНО: используем message_id (как у тебя в текущей схеме)
+    # используем message_id
     message_id = Column(Integer, unique=True, index=True, nullable=False)
 
-    # дата поста (из Telegram), храним naive UTC (без tz), чтобы Postgres не ругался
+    # naive UTC
     date = Column(DateTime, nullable=True)
 
     text = Column(String, nullable=True)
@@ -93,7 +93,7 @@ class Post(Base):
     tags = Column(JSON, default=list)
     created_at = Column(DateTime, default=lambda: datetime.utcnow())  # naive UTC
 
-    # ✅ ТОЛЬКО ДЛЯ УДАЛЕНИЯ (то, что обсуждали)
+    # УДАЛЕНИЕ
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
 
@@ -107,8 +107,7 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-        # ✅ Добавляем колонки для удаления, если их ещё нет (без миграций вручную)
-        # SQLite тоже проглотит (или бросит), мы ловим исключение и продолжаем.
+        # добавляем колонки, если их нет
         try:
             await conn.execute(sql_text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;"))
         except Exception:
@@ -186,10 +185,6 @@ def make_permalink(message_id: int) -> str:
     return f"https://t.me/{CHANNEL_USERNAME}/{message_id}"
 
 def to_naive_utc(dt: datetime | None) -> datetime | None:
-    """
-    Telegram даёт aware UTC (tzinfo=UTC). Postgres у тебя TIMESTAMP WITHOUT TIME ZONE.
-    Поэтому делаем naive UTC.
-    """
     if dt is None:
         return None
     if dt.tzinfo is None:
@@ -219,7 +214,7 @@ async def upsert_post_from_channel(
             p.permalink = permalink
             p.tags = tags
 
-            # ✅ если пост снова появился/обновился — считаем, что он НЕ удалён
+            # если пост снова виден — считаем не удалён
             p.is_deleted = False
             p.deleted_at = None
 
@@ -234,7 +229,7 @@ async def upsert_post_from_channel(
             media_file_id=media_file_id,
             permalink=permalink,
             tags=tags,
-            created_at=datetime.utcnow(),  # naive
+            created_at=datetime.utcnow(),
             is_deleted=False,
             deleted_at=None,
         )
@@ -257,18 +252,12 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
 
     if tag:
         rows = [p for p in rows if tag in (p.tags or [])]
-
     return rows
 
 # -----------------------------------------------------------------------------
-# ✅ DELETE SWEEPER (AUTO CHECK)
+# DELETE SWEEPER (AUTO CHECK)
 # -----------------------------------------------------------------------------
 async def message_exists_public(message_id: int) -> bool:
-    """
-    Проверяем существование поста по публичной странице Telegram.
-    Работает только для ПУБЛИЧНОГО канала.
-    """
-    # embed=1 отдаёт html-виджет; если пост удалён часто будет 404
     url = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
     try:
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
@@ -276,26 +265,19 @@ async def message_exists_public(message_id: int) -> bool:
             if r.status_code == 404:
                 return False
             if r.status_code != 200:
-                # неуверенный ответ — НЕ удаляем
                 return True
 
             html = (r.text or "").lower()
-
-            # грубые маркеры отсутствия/ошибки
             if "message not found" in html or "post not found" in html:
                 return False
-
-            # если это приватный канал/недоступно — проверить нельзя, НЕ удаляем
             if "join channel" in html or "this channel is private" in html:
                 return True
-
             return True
     except Exception as e:
         logger.warning("Sweeper check failed for %s: %s", message_id, e)
         return True
 
 async def sweep_deleted_posts(batch: int = 80):
-    # берём последние посты (не удалённые) и проверяем их
     async with async_session_maker() as session:
         q = (
             select(Post)
@@ -471,11 +453,9 @@ async def stop_telegram_bot():
             tg_app = None
 
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (ДИЗАЙН/КНОПКИ/ЛОГИКА ВКЛАДОК НЕ МЕНЯЕМ)
+# WEBAPP HTML (ДИЗАЙН/КНОПКИ НЕ ТРОГАЕМ — ТОЛЬКО УБИРАЕМ ПОСТЫ "СНИЗУ")
 # -----------------------------------------------------------------------------
 def get_webapp_html() -> str:
-    # ВАЖНО: чтобы не ловить SyntaxError из-за { } внутри f-string — НЕ используем f-string.
-    # Просто вставляем канал через replace.
     html = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -673,24 +653,34 @@ def get_webapp_html() -> str:
       const [activeTab, setActiveTab] = useState("home");
       const [user, setUser] = useState(null);
 
-      // НЕ показываем посты "сами" — только после нажатия кнопки
+      // ✅ ВАЖНО: отдельный режим экрана "ПОСТЫ"
+      const [postsMode, setPostsMode] = useState(false);
       const [selectedTag, setSelectedTag] = useState(null);
       const [posts, setPosts] = useState([]);
       const [loading, setLoading] = useState(false);
 
       const loadPosts = (tag) => {
         setLoading(true);
-        const url = `/api/posts?tag=${encodeURIComponent(tag)}`;
-        fetch(url)
+        fetch(`/api/posts?tag=${encodeURIComponent(tag)}`)
           .then(r => r.ok ? r.json() : Promise.reject())
           .then(data => setPosts(Array.isArray(data) ? data : []))
           .catch(() => setPosts([]))
           .finally(() => setLoading(false));
       };
 
-      const pickTag = (tag) => {
+      const openPosts = (tag) => {
         setSelectedTag(tag);
+        setPostsMode(true);      // ✅ показываем отдельный экран постов
         loadPosts(tag);
+      };
+
+      const changeTab = (tabId) => {
+        // ✅ при смене вкладки — выходим из "экрана постов"
+        setActiveTab(tabId);
+        setPostsMode(false);
+        setSelectedTag(null);
+        setPosts([]);
+        setLoading(false);
       };
 
       useEffect(() => {
@@ -708,78 +698,72 @@ def get_webapp_html() -> str:
         }
       }, []);
 
-      const PostsBlock = () => {
-        if (!selectedTag) return null;
-
-        return (
-          <div style={{ marginTop: "14px" }}>
-            <div style={{ fontSize: "14px", color: "var(--muted)" }}>
-              Посты #{selectedTag}
-            </div>
-            {loading && (
-              <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
-                Загрузка…
-              </div>
-            )}
-            {!loading && posts.length === 0 && (
-              <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
-                Постов с этим тегом пока нет.
-              </div>
-            )}
-            {!loading && posts.map(p => <PostCard key={p.message_id} post={p} />)}
+      const PostsScreen = () => (
+        <Panel>
+          <div style={{ fontSize: "14px", color: "var(--muted)" }}>
+            Посты {selectedTag ? ("#" + selectedTag) : ""}
           </div>
-        );
-      };
+
+          {loading && (
+            <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
+              Загрузка…
+            </div>
+          )}
+
+          {!loading && posts.length === 0 && (
+            <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
+              Постов с этим тегом пока нет.
+            </div>
+          )}
+
+          {!loading && posts.map(p => <PostCard key={p.message_id} post={p} />)}
+        </Panel>
+      );
 
       const renderContent = () => {
+        // ✅ если режим постов включён — показываем ТОЛЬКО экран постов (никаких "постов снизу")
+        if (postsMode) return <PostsScreen />;
+
         switch (activeTab) {
           case "home":
             return (
               <Panel>
-                <Button icon="📂" label="Категории" onClick={() => setActiveTab("cat")} />
-                <Button icon="🏷" label="Бренды" onClick={() => setActiveTab("brand")} />
-                <Button icon="💸" label="Sephora" onClick={() => setActiveTab("sephora")} />
-                <Button icon="💎" label="Beauty Challenges" onClick={() => pickTag("Challenge")} />
+                <Button icon="📂" label="Категории" onClick={() => changeTab("cat")} />
+                <Button icon="🏷" label="Бренды" onClick={() => changeTab("brand")} />
+                <Button icon="💸" label="Sephora" onClick={() => changeTab("sephora")} />
+                <Button icon="💎" label="Beauty Challenges" onClick={() => openPosts("Challenge")} />
                 <Button icon="↩️" label="В канал" onClick={() => openLink(`https://t.me/${CHANNEL}`)} />
-
-                <PostsBlock />
               </Panel>
             );
 
           case "cat":
             return (
               <Panel>
-                <Button icon="🆕" label="Новинка" onClick={() => pickTag("Новинка")} />
-                <Button icon="💎" label="Кратко о люкс продукте" onClick={() => pickTag("Люкс")} />
-                <Button icon="🔥" label="Тренд" onClick={() => pickTag("Тренд")} />
-                <Button icon="🏛" label="История бренда" onClick={() => pickTag("История")} />
-                <Button icon="⭐" label="Личная оценка" onClick={() => pickTag("Оценка")} />
-                <Button icon="🧴" label="Тип продукта / факты" onClick={() => pickTag("Факты")} />
-                <Button icon="🧪" label="Составы продуктов" onClick={() => pickTag("Состав")} />
-
-                <PostsBlock />
+                <Button icon="🆕" label="Новинка" onClick={() => openPosts("Новинка")} />
+                <Button icon="💎" label="Кратко о люкс продукте" onClick={() => openPosts("Люкс")} />
+                <Button icon="🔥" label="Тренд" onClick={() => openPosts("Тренд")} />
+                <Button icon="🏛" label="История бренда" onClick={() => openPosts("История")} />
+                <Button icon="⭐" label="Личная оценка" onClick={() => openPosts("Оценка")} />
+                <Button icon="🧴" label="Тип продукта / факты" onClick={() => openPosts("Факты")} />
+                <Button icon="🧪" label="Составы продуктов" onClick={() => openPosts("Состав")} />
               </Panel>
             );
 
           case "brand":
             return (
               <Panel>
-                <Button icon="✨" label="Dior" onClick={() => pickTag("Dior")} />
-                <Button icon="✨" label="Chanel" onClick={() => pickTag("Chanel")} />
-                <Button icon="✨" label="Charlotte Tilbury" onClick={() => pickTag("CharlotteTilbury")} />
-
-                <PostsBlock />
+                <Button icon="✨" label="Dior" onClick={() => openPosts("Dior")} />
+                <Button icon="✨" label="Chanel" onClick={() => openPosts("Chanel")} />
+                <Button icon="✨" label="Charlotte Tilbury" onClick={() => openPosts("CharlotteTilbury")} />
               </Panel>
             );
 
           case "sephora":
             return (
               <Panel>
-                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={() => pickTag("SephoraTR")} />
-                <Button icon="🎁" label="Подарки / акции" onClick={() => pickTag("SephoraPromo")} />
-                <Button icon="🧾" label="Гайды / как покупать" onClick={() => pickTag("SephoraGuide")} />
-
-                <PostsBlock />
+                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={() => openPosts("SephoraTR")} />
+                <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo")} />
+                <Button icon="🧾" label="Гайды / как покупать" onClick={() => openPosts("SephoraGuide")} />
               </Panel>
             );
 
@@ -791,7 +775,7 @@ def get_webapp_html() -> str:
       return (
         <div style={{ padding:"18px 16px 26px", maxWidth:"520px", margin:"0 auto" }}>
           <Hero user={user} />
-          <Tabs active={activeTab} onChange={setActiveTab} />
+          <Tabs active={activeTab} onChange={changeTab} />
           {renderContent()}
           <div style={{ marginTop:"20px", color:"var(--muted)", fontSize:"12px", textAlign:"center" }}>
             Открывается как Mini App внутри Telegram
@@ -816,7 +800,6 @@ async def lifespan(app: FastAPI):
     await init_db()
     await start_telegram_bot()
 
-    # ✅ автопроверка удалений (ТОЛЬКО это из нового)
     sweeper_task = asyncio.create_task(sweeper_loop())
 
     logger.info("✅ NS · Natural Sense started")
@@ -872,6 +855,10 @@ async def add_points_api(telegram_id: int, points: int):
 
 @app.get("/api/posts")
 async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
+    if not tag:
+        # без тега не отдаём ничего — чтобы случайно нигде не показывались
+        return []
+
     rows = await list_posts(tag=tag, limit=limit, offset=offset)
     out = []
     for p in rows:
