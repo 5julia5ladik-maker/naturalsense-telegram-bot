@@ -4,18 +4,24 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
-from sqlalchemy import Column, Integer, String, DateTime, JSON, select, text as sql_text
+from sqlalchemy import Column, Integer, String, DateTime, JSON, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+
 
 # -----------------------------------------------------------------------------
 # LOGGING
@@ -23,12 +29,14 @@ from sqlalchemy.orm import declarative_base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
 
+
 # -----------------------------------------------------------------------------
 # CONFIG (ENV)
 # -----------------------------------------------------------------------------
 def env_get(name: str, default: str | None = None) -> str | None:
     v = os.getenv(name)
     return v if v is not None else default
+
 
 BOT_TOKEN = env_get("BOT_TOKEN")
 PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
@@ -41,28 +49,18 @@ if DATABASE_URL.startswith("postgres://"):
 elif DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
+tok = BOT_TOKEN or ""
 logger.info(
     "ENV CHECK: BOT_TOKEN_present=%s BOT_TOKEN_len=%s PUBLIC_BASE_URL_present=%s DATABASE_URL_present=%s",
-    bool(BOT_TOKEN), len(BOT_TOKEN or ""), bool(PUBLIC_BASE_URL), bool(DATABASE_URL)
+    bool(BOT_TOKEN), len(tok), bool(PUBLIC_BASE_URL), bool(DATABASE_URL)
 )
 
-# -----------------------------------------------------------------------------
-# TIME HELPERS
-# -----------------------------------------------------------------------------
-def utcnow_naive() -> datetime:
-    return datetime.utcnow()
-
-def to_naive_utc(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
 
 # -----------------------------------------------------------------------------
 # DATABASE MODELS
 # -----------------------------------------------------------------------------
 Base = declarative_base()
+
 
 class User(Base):
     __tablename__ = "users"
@@ -74,24 +72,30 @@ class User(Base):
     tier = Column(String, default="free")
     points = Column(Integer, default=10)
     favorites = Column(JSON, default=list)
-    joined_at = Column(DateTime, default=utcnow_naive)
+    joined_at = Column(DateTime, default=lambda: datetime.utcnow())
+
 
 class Post(Base):
     """
-    Под твой Postgres (как у тебя на скрине):
+    ВАЖНО: модель сделана под твою таблицу posts:
     id, message_id, date, text, media_type, media_file_id, permalink, tags, created_at
     """
     __tablename__ = "posts"
 
     id = Column(Integer, primary_key=True)
     message_id = Column(Integer, unique=True, index=True, nullable=False)
+
+    # TIMESTAMP WITHOUT TIME ZONE -> храним naive UTC
     date = Column(DateTime, nullable=True)
+
     text = Column(String, nullable=True)
     media_type = Column(String, nullable=True)
     media_file_id = Column(String, nullable=True)
     permalink = Column(String, nullable=True)
+
     tags = Column(JSON, default=list)
-    created_at = Column(DateTime, default=utcnow_naive)
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+
 
 # -----------------------------------------------------------------------------
 # DATABASE
@@ -99,39 +103,12 @@ class Post(Base):
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-async def ensure_columns_postgres():
-    """
-    Если таблица posts уже существует (Railway),
-    то create_all НЕ добавляет новые колонки.
-    Поэтому безопасно догоняем схему через ALTER TABLE IF NOT EXISTS.
-    """
-    if not DATABASE_URL.startswith("postgresql+asyncpg://"):
-        return
-
-    required = [
-        ("message_id", "INTEGER"),
-        ("date", "TIMESTAMP WITHOUT TIME ZONE"),
-        ("text", "TEXT"),
-        ("media_type", "TEXT"),
-        ("media_file_id", "TEXT"),
-        ("permalink", "TEXT"),
-        ("tags", "JSON"),
-        ("created_at", "TIMESTAMP WITHOUT TIME ZONE"),
-    ]
-
-    async with engine.begin() as conn:
-        for col, coltype in required:
-            await conn.execute(sql_text(f'ALTER TABLE posts ADD COLUMN IF NOT EXISTS {col} {coltype};'))
-        await conn.execute(sql_text("CREATE UNIQUE INDEX IF NOT EXISTS ix_posts_message_id ON posts (message_id);"))
 
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    try:
-        await ensure_columns_postgres()
-    except Exception as e:
-        logger.warning("ensure_columns_postgres warning: %s", e)
     logger.info("✅ Database initialized")
+
 
 # -----------------------------------------------------------------------------
 # USER QUERIES
@@ -141,14 +118,21 @@ async def get_user(telegram_id: int):
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         return result.scalar_one_or_none()
 
+
 async def create_user(telegram_id: int, username: str | None = None, first_name: str | None = None):
     async with async_session_maker() as session:
-        user = User(telegram_id=telegram_id, username=username, first_name=first_name, points=10)
+        user = User(
+            telegram_id=telegram_id,
+            username=username,
+            first_name=first_name,
+            points=10
+        )
         session.add(user)
         await session.commit()
         await session.refresh(user)
         logger.info("✅ New user created: %s", telegram_id)
         return user
+
 
 async def add_points(telegram_id: int, points: int):
     async with async_session_maker() as session:
@@ -158,6 +142,7 @@ async def add_points(telegram_id: int, points: int):
             return None
 
         user.points += points
+
         if user.points >= 500:
             user.tier = "vip"
         elif user.points >= 100:
@@ -167,10 +152,12 @@ async def add_points(telegram_id: int, points: int):
         await session.refresh(user)
         return user
 
+
 # -----------------------------------------------------------------------------
-# POSTS INDEX (TAGS)
+# POSTS / TAGS
 # -----------------------------------------------------------------------------
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
+
 
 def extract_tags(text: str | None) -> list[str]:
     if not text:
@@ -183,14 +170,30 @@ def extract_tags(text: str | None) -> list[str]:
             out.append(t)
     return out
 
+
 def build_permalink(message_id: int) -> str:
     return f"https://t.me/{CHANNEL_USERNAME}/{message_id}"
+
 
 def preview_text(text: str | None, limit: int = 180) -> str:
     if not text:
         return ""
     s = re.sub(r"\s+", " ", text.strip())
     return (s[:limit] + "…") if len(s) > limit else s
+
+
+def to_naive_utc(dt: datetime | None) -> datetime | None:
+    """
+    Telegram msg.date обычно timezone-aware (UTC).
+    В Postgres у тебя TIMESTAMP WITHOUT TIME ZONE -> надо класть naive datetime.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        # если вдруг уже naive — считаем что это UTC
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
 
 async def upsert_post_from_channel(
     message_id: int,
@@ -201,9 +204,9 @@ async def upsert_post_from_channel(
 ):
     tags = extract_tags(text)
     permalink = build_permalink(message_id)
+    now = datetime.utcnow()  # naive utc
 
     date_naive = to_naive_utc(date_dt)
-    now_naive = utcnow_naive()
 
     async with async_session_maker() as session:
         res = await session.execute(select(Post).where(Post.message_id == message_id))
@@ -216,24 +219,32 @@ async def upsert_post_from_channel(
             p.media_file_id = media_file_id
             p.permalink = permalink
             p.tags = tags
-        else:
-            p = Post(
-                message_id=message_id,
-                date=date_naive,
-                text=text,
-                media_type=media_type,
-                media_file_id=media_file_id,
-                permalink=permalink,
-                tags=tags,
-                created_at=now_naive,
-            )
-            session.add(p)
+            p.created_at = now
+            await session.commit()
+            return p
 
+        p = Post(
+            message_id=message_id,
+            date=date_naive,
+            text=text,
+            media_type=media_type,
+            media_file_id=media_file_id,
+            permalink=permalink,
+            tags=tags,
+            created_at=now,
+        )
+        session.add(p)
         await session.commit()
+        await session.refresh(p)
         logger.info("✅ Indexed post %s tags=%s", message_id, tags)
         return p
 
-async def list_posts(tag: str | None, limit: int = 50, offset: int = 0) -> list[Post]:
+
+async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
+    """
+    Простая логика: берём последние посты по message_id desc,
+    потом фильтруем по tag в Python (надёжно для JSON в Postgres).
+    """
     async with async_session_maker() as session:
         q = select(Post).order_by(Post.message_id.desc()).limit(limit).offset(offset)
         rows = (await session.execute(q)).scalars().all()
@@ -241,11 +252,13 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0) -> list[
             rows = [p for p in rows if tag in (p.tags or [])]
         return rows
 
+
 # -----------------------------------------------------------------------------
 # TELEGRAM BOT
 # -----------------------------------------------------------------------------
 tg_app: Application | None = None
 tg_task: asyncio.Task | None = None
+
 
 def get_main_keyboard():
     webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
@@ -255,21 +268,27 @@ def get_main_keyboard():
             [KeyboardButton("👤 Профиль"), KeyboardButton("🎁 Челленджи")],
             [KeyboardButton("↩️ В канал")],
         ],
-        resize_keyboard=True,
+        resize_keyboard=True
     )
+
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db_user = await get_user(user.id)
 
     if not db_user:
-        await create_user(telegram_id=user.id, username=user.username, first_name=user.first_name)
+        db_user = await create_user(
+            telegram_id=user.id,
+            username=user.username,
+            first_name=user.first_name
+        )
         text = f"Добро пожаловать, {user.first_name}! 🖤\n\n+10 баллов за регистрацию ✨"
     else:
         await add_points(user.id, 5)
         text = f"С возвращением, {user.first_name}!\n+5 баллов за визит ✨"
 
     await update.message.reply_text(text, reply_markup=get_main_keyboard())
+
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -304,26 +323,29 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     await update.message.reply_text(text, parse_mode="Markdown")
 
-async def index_channel_message(msg):
+
+async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Новый пост в канале (бот должен быть админом в канале!)
+    """
+    msg = update.channel_post
     if not msg:
         return
-    text = msg.text or msg.caption or ""
+
+    text = msg.text or msg.caption or None
     media_type = None
     media_file_id = None
 
-    # медиа — аккуратно (не ломаемся)
-    if getattr(msg, "photo", None):
-        if msg.photo:
-            media_type = "photo"
-            media_file_id = msg.photo[-1].file_id
-    elif getattr(msg, "video", None):
-        if msg.video:
-            media_type = "video"
-            media_file_id = msg.video.file_id
-    elif getattr(msg, "document", None):
-        if msg.document:
-            media_type = "document"
-            media_file_id = msg.document.file_id
+    # Минимально: фиксируем тип медиа (если надо)
+    if msg.photo:
+        media_type = "photo"
+        media_file_id = msg.photo[-1].file_id
+    elif msg.video:
+        media_type = "video"
+        media_file_id = msg.video.file_id
+    elif msg.document:
+        media_type = "document"
+        media_file_id = msg.document.file_id
 
     await upsert_post_from_channel(
         message_id=msg.message_id,
@@ -333,12 +355,37 @@ async def index_channel_message(msg):
         media_file_id=media_file_id,
     )
 
-async def on_any_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # НЕ используем filters.UpdateType.* чтобы не падать от версий
-    if update.channel_post:
-        await index_channel_message(update.channel_post)
-    if update.edited_channel_post:
-        await index_channel_message(update.edited_channel_post)
+
+async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Редактирование поста в канале -> обновляем текст/теги
+    """
+    msg = update.edited_channel_post
+    if not msg:
+        return
+
+    text = msg.text or msg.caption or None
+    media_type = None
+    media_file_id = None
+
+    if msg.photo:
+        media_type = "photo"
+        media_file_id = msg.photo[-1].file_id
+    elif msg.video:
+        media_type = "video"
+        media_file_id = msg.video.file_id
+    elif msg.document:
+        media_type = "document"
+        media_file_id = msg.document.file_id
+
+    await upsert_post_from_channel(
+        message_id=msg.message_id,
+        date_dt=msg.date,
+        text=text,
+        media_type=media_type,
+        media_file_id=media_file_id,
+    )
+
 
 async def start_telegram_bot():
     global tg_app, tg_task
@@ -348,11 +395,13 @@ async def start_telegram_bot():
         return
 
     tg_app = Application.builder().token(BOT_TOKEN).build()
+
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
 
-    # Один надежный handler на всё (и channel_post и edited_channel_post)
-    tg_app.add_handler(MessageHandler(filters.ALL, on_any_update))
+    # Канальные посты и редактирование
+    tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
+    tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
 
     async def run():
         await tg_app.initialize()
@@ -363,6 +412,7 @@ async def start_telegram_bot():
             await asyncio.sleep(3600)
 
     tg_task = asyncio.create_task(run())
+
 
 async def stop_telegram_bot():
     global tg_app, tg_task
@@ -380,10 +430,12 @@ async def stop_telegram_bot():
         finally:
             tg_app = None
 
+
 # -----------------------------------------------------------------------------
-# WEBAPP HTML  (ВАЖНО: НЕ f-string, иначе ты снова получишь SyntaxError)
+# WEBAPP HTML (ДИЗАЙН/РАСПОЛОЖЕНИЕ НЕ ЛОМАЕМ)
 # -----------------------------------------------------------------------------
-WEBAPP_HTML = r"""<!DOCTYPE html>
+def get_webapp_html() -> str:
+    html = """<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -426,7 +478,7 @@ WEBAPP_HTML = r"""<!DOCTYPE html>
       tg.setBackgroundColor("#0c0f14");
     }
 
-    const CHANNEL = "__CHANNEL_USERNAME__";
+    const CHANNEL = "__CHANNEL__";
 
     const openLink = (url) => {
       if (tg?.openTelegramLink) tg.openTelegramLink(url);
@@ -550,7 +602,7 @@ WEBAPP_HTML = r"""<!DOCTYPE html>
 
     const PostCard = ({ post }) => (
       <div
-        onClick={() => openLink(post.url)}
+        onClick={() => openLink(post.permalink || post.url)}
         style={{
           marginTop: "10px",
           padding: "12px",
@@ -580,11 +632,30 @@ WEBAPP_HTML = r"""<!DOCTYPE html>
       </div>
     );
 
+    const PostsBlock = ({ title, posts, loading }) => (
+      <div style={{ marginTop: "12px" }}>
+        <div style={{ color: "var(--muted)", fontSize: "12px" }}>{title}</div>
+
+        {loading && (
+          <div style={{ marginTop: "10px", color: "var(--muted)", fontSize: "13px" }}>
+            Загрузка…
+          </div>
+        )}
+
+        {!loading && posts.length === 0 && (
+          <div style={{ marginTop: "10px", color: "var(--muted)", fontSize: "13px" }}>
+            Пока нет постов по этому тегу.
+          </div>
+        )}
+
+        {!loading && posts.map(p => <PostCard key={p.id || p.message_id} post={p} />)}
+      </div>
+    );
+
     const App = () => {
       const [activeTab, setActiveTab] = useState("home");
       const [user, setUser] = useState(null);
 
-      const [view, setView] = useState("menu"); // menu | list
       const [selectedTag, setSelectedTag] = useState(null);
       const [posts, setPosts] = useState([]);
       const [loading, setLoading] = useState(false);
@@ -599,7 +670,15 @@ WEBAPP_HTML = r"""<!DOCTYPE html>
           .finally(() => setLoading(false));
       };
 
+      const pickTag = (tag) => {
+        setSelectedTag(tag);
+        loadPosts(tag);
+      };
+
       useEffect(() => {
+        // при старте — последние посты
+        loadPosts(null);
+
         if (tg?.initDataUnsafe?.user) {
           const tgUser = tg.initDataUnsafe.user;
           fetch(`/api/user/${tgUser.id}`)
@@ -614,37 +693,7 @@ WEBAPP_HTML = r"""<!DOCTYPE html>
         }
       }, []);
 
-      const openTag = (tag) => {
-        setSelectedTag(tag);
-        setView("list");
-        loadPosts(tag);
-      };
-
-      const backToMenu = () => {
-        setView("menu");
-      };
-
-      const ListScreen = () => (
-        <Panel>
-          <Button icon="←" label="Назад" onClick={backToMenu} subtitle={selectedTag ? ("#" + selectedTag) : ""} />
-
-          {loading && (
-            <div style={{ padding:"10px", color:"var(--muted)", fontSize:"13px" }}>Загрузка…</div>
-          )}
-
-          {!loading && posts.length === 0 && (
-            <div style={{ padding:"10px", color:"var(--muted)", fontSize:"13px" }}>
-              Пока нет постов по этому тегу. Бот индексирует новые посты после запуска.
-            </div>
-          )}
-
-          {!loading && posts.map(p => <PostCard key={p.message_id} post={p} />)}
-        </Panel>
-      );
-
       const renderContent = () => {
-        if (view === "list") return <ListScreen />;
-
         switch (activeTab) {
           case "home":
             return (
@@ -652,38 +701,66 @@ WEBAPP_HTML = r"""<!DOCTYPE html>
                 <Button icon="📂" label="Категории" onClick={() => setActiveTab("cat")} />
                 <Button icon="🏷" label="Бренды" onClick={() => setActiveTab("brand")} />
                 <Button icon="💸" label="Sephora" onClick={() => setActiveTab("sephora")} />
-                <Button icon="💎" label="Beauty Challenges" onClick={() => openTag("Challenge")} />
+                <Button icon="💎" label="Beauty Challenges" onClick={() => pickTag("Challenge")} />
                 <Button icon="↩️" label="В канал" onClick={() => openLink(`https://t.me/${CHANNEL}`)} />
+
+                <PostsBlock
+                  title={selectedTag ? `Посты по тегу #${selectedTag}` : "Последние посты"}
+                  posts={posts}
+                  loading={loading}
+                />
               </Panel>
             );
+
           case "cat":
             return (
               <Panel>
-                <Button icon="🆕" label="Новинка" onClick={() => openTag("Новинка")} />
-                <Button icon="💎" label="Кратко о люкс продукте" onClick={() => openTag("Люкс")} />
-                <Button icon="🔥" label="Тренд" onClick={() => openTag("Тренд")} />
-                <Button icon="🏛" label="История бренда" onClick={() => openTag("История")} />
-                <Button icon="⭐" label="Личная оценка" onClick={() => openTag("Оценка")} />
-                <Button icon="🧴" label="Тип продукта / факты" onClick={() => openTag("Факты")} />
-                <Button icon="🧪" label="Составы продуктов" onClick={() => openTag("Состав")} />
+                <Button icon="🆕" label="Новинка" onClick={() => pickTag("Новинка")} />
+                <Button icon="💎" label="Кратко о люкс продукте" onClick={() => pickTag("Люкс")} />
+                <Button icon="🔥" label="Тренд" onClick={() => pickTag("Тренд")} />
+                <Button icon="🏛" label="История бренда" onClick={() => pickTag("История")} />
+                <Button icon="⭐" label="Личная оценка" onClick={() => pickTag("Оценка")} />
+                <Button icon="🧴" label="Тип продукта / факты" onClick={() => pickTag("Факты")} />
+                <Button icon="🧪" label="Составы продуктов" onClick={() => pickTag("Состав")} />
+
+                <PostsBlock
+                  title={selectedTag ? `Посты по тегу #${selectedTag}` : "Выбери категорию — и ниже появятся посты"}
+                  posts={posts}
+                  loading={loading}
+                />
               </Panel>
             );
+
           case "brand":
             return (
               <Panel>
-                <Button icon="✨" label="Dior" onClick={() => openTag("Dior")} />
-                <Button icon="✨" label="Chanel" onClick={() => openTag("Chanel")} />
-                <Button icon="✨" label="Charlotte Tilbury" onClick={() => openTag("CharlotteTilbury")} />
+                <Button icon="✨" label="Dior" onClick={() => pickTag("Dior")} />
+                <Button icon="✨" label="Chanel" onClick={() => pickTag("Chanel")} />
+                <Button icon="✨" label="Charlotte Tilbury" onClick={() => pickTag("CharlotteTilbury")} />
+
+                <PostsBlock
+                  title={selectedTag ? `Посты по тегу #${selectedTag}` : "Выбери бренд — и ниже появятся посты"}
+                  posts={posts}
+                  loading={loading}
+                />
               </Panel>
             );
+
           case "sephora":
             return (
               <Panel>
-                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={() => openTag("SephoraTR")} />
-                <Button icon="🎁" label="Подарки / акции" onClick={() => openTag("SephoraPromo")} />
-                <Button icon="🧾" label="Гайды / как покупать" onClick={() => openTag("SephoraGuide")} />
+                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={() => pickTag("SephoraTR")} />
+                <Button icon="🎁" label="Подарки / акции" onClick={() => pickTag("SephoraPromo")} />
+                <Button icon="🧾" label="Гайды / как покупать" onClick={() => pickTag("SephoraGuide")} />
+
+                <PostsBlock
+                  title={selectedTag ? `Посты по тегу #${selectedTag}` : "Выбери раздел Sephora — и ниже появятся посты"}
+                  posts={posts}
+                  loading={loading}
+                />
               </Panel>
             );
+
           default:
             return null;
         }
@@ -706,9 +783,8 @@ WEBAPP_HTML = r"""<!DOCTYPE html>
 </body>
 </html>
 """
+    return html.replace("__CHANNEL__", CHANNEL_USERNAME)
 
-def get_webapp_html() -> str:
-    return WEBAPP_HTML.replace("__CHANNEL_USERNAME__", CHANNEL_USERNAME)
 
 # -----------------------------------------------------------------------------
 # FASTAPI
@@ -722,7 +798,8 @@ async def lifespan(app: FastAPI):
     await stop_telegram_bot()
     logger.info("✅ NS · Natural Sense stopped")
 
-app = FastAPI(title="NS · Natural Sense API", version="2.0.0", lifespan=lifespan)
+
+app = FastAPI(title="NS · Natural Sense API", version="3.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -732,13 +809,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 async def root():
-    return {"app": "NS · Natural Sense", "status": "running", "version": "2.0.0"}
+    return {"app": "NS · Natural Sense", "status": "running", "version": "3.0.0"}
+
 
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp():
     return HTMLResponse(get_webapp_html())
+
 
 @app.get("/api/user/{telegram_id}")
 async def get_user_api(telegram_id: int):
@@ -753,32 +833,42 @@ async def get_user_api(telegram_id: int):
         "tier": user.tier,
         "points": user.points,
         "favorites": user.favorites,
-        "joined_at": user.joined_at.isoformat() if user.joined_at else None,
+        "joined_at": user.joined_at.isoformat(),
     }
+
+
+@app.post("/api/user/{telegram_id}/points")
+async def add_points_api(telegram_id: int, points: int):
+    user = await add_points(telegram_id, points)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"success": True, "new_total": user.points, "tier": user.tier}
+
 
 @app.get("/api/posts")
 async def api_posts(
-    tag: Optional[str] = Query(default=None),
+    tag: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
-    try:
-        rows = await list_posts(tag=tag, limit=limit, offset=offset)
-        out = []
-        for p in rows:
-            out.append({
-                "message_id": p.message_id,
-                "date": p.date.isoformat() if p.date else None,
-                "text": p.text,
-                "preview": preview_text(p.text),
-                "tags": p.tags or [],
-                "url": p.permalink or build_permalink(p.message_id),
-                "media_type": p.media_type,
-            })
-        return JSONResponse(out)
-    except Exception as e:
-        logger.exception("api_posts error: %s", e)
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+    rows = await list_posts(tag=tag, limit=limit, offset=offset)
+    return [
+        {
+            "id": p.id,
+            "message_id": p.message_id,
+            "date": p.date.isoformat() if p.date else None,
+            "text": p.text,
+            "preview": preview_text(p.text),
+            "media_type": p.media_type,
+            "media_file_id": p.media_file_id,
+            "permalink": p.permalink or build_permalink(p.message_id),
+            "url": p.permalink or build_permalink(p.message_id),
+            "tags": p.tags or [],
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in rows
+    ]
+
 
 @app.get("/health")
 async def health():
