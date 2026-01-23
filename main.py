@@ -3,7 +3,7 @@ import re
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import httpx
 
@@ -79,6 +79,9 @@ class User(Base):
     favorites = Column(JSON, default=list)
     joined_at = Column(DateTime, default=lambda: datetime.utcnow())  # naive UTC
 
+    # ✅ анти-фарм: бонус раз в сутки
+    last_daily_bonus_at = Column(DateTime, nullable=True)  # naive UTC
+
 class Post(Base):
     __tablename__ = "posts"
 
@@ -112,7 +115,7 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-        # добавляем колонки, если их нет
+        # posts columns
         try:
             await conn.execute(sql_text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;"))
         except Exception:
@@ -121,6 +124,16 @@ async def init_db():
             await conn.execute(sql_text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;"))
         except Exception:
             pass
+
+        # users column (anti-farm)
+        # Postgres supports IF NOT EXISTS; sqlite may not, so fallback is try/except
+        try:
+            await conn.execute(sql_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_daily_bonus_at TIMESTAMP NULL;"))
+        except Exception:
+            try:
+                await conn.execute(sql_text("ALTER TABLE users ADD COLUMN last_daily_bonus_at TIMESTAMP NULL;"))
+            except Exception:
+                pass
 
     logger.info("✅ Database initialized")
 
@@ -132,14 +145,25 @@ async def get_user(telegram_id: int):
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         return result.scalar_one_or_none()
 
+def _recalc_tier(user: User):
+    if user.points >= 500:
+        user.tier = "vip"
+    elif user.points >= 100:
+        user.tier = "premium"
+    else:
+        user.tier = "free"
+
 async def create_user(telegram_id: int, username: str | None = None, first_name: str | None = None):
     async with async_session_maker() as session:
+        now = datetime.utcnow()
         user = User(
             telegram_id=telegram_id,
             username=username,
             first_name=first_name,
-            points=10
+            points=10,
+            last_daily_bonus_at=now,  # ✅ бонус за регистрацию сегодня уже получен
         )
+        _recalc_tier(user)
         session.add(user)
         await session.commit()
         await session.refresh(user)
@@ -154,15 +178,39 @@ async def add_points(telegram_id: int, points: int):
             return None
 
         user.points += points
-
-        if user.points >= 500:
-            user.tier = "vip"
-        elif user.points >= 100:
-            user.tier = "premium"
+        _recalc_tier(user)
 
         await session.commit()
         await session.refresh(user)
         return user
+
+async def add_daily_bonus_if_available(telegram_id: int, points: int = 5) -> tuple[User | None, bool, int]:
+    """
+    Возвращает: (user, granted, hours_left)
+    granted=True если начислили сегодня (прошло >=24ч с last_daily_bonus_at)
+    hours_left - сколько часов осталось до следующего бонуса (если не начислили)
+    """
+    async with async_session_maker() as session:
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            return None, False, 0
+
+        now = datetime.utcnow()
+        last = user.last_daily_bonus_at
+
+        if last is None or (now - last) >= timedelta(days=1):
+            user.points += points
+            user.last_daily_bonus_at = now
+            _recalc_tier(user)
+            await session.commit()
+            await session.refresh(user)
+            return user, True, 0
+
+        # бонус уже был — считаем сколько ждать
+        delta = timedelta(days=1) - (now - last)
+        hours_left = max(0, int(delta.total_seconds() // 3600) + (1 if (delta.total_seconds() % 3600) > 0 else 0))
+        return user, False, hours_left
 
 # -----------------------------------------------------------------------------
 # POSTS INDEX (TAGS)
@@ -335,15 +383,48 @@ tg_task: asyncio.Task | None = None
 sweeper_task: asyncio.Task | None = None
 
 def get_main_keyboard():
+    # ❗️МИНИ АПП НЕ ТРОГАЕМ — меняем только клавиатуру бота:
+    # ✅ убрали "🎁 Челленджи"
     webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
-            [KeyboardButton("👤 Профиль"), KeyboardButton("🎁 Челленджи")],
+            [KeyboardButton("👤 Профиль")],
             [KeyboardButton("↩️ В канал")],
         ],
         resize_keyboard=True
     )
+
+def build_welcome_text(first_name: str | None, is_new: bool, daily_granted: bool, hours_left: int) -> str:
+    name = first_name or "друг"
+
+    # 1) Полностью новый приветственный текст
+    # 2) Мини-инструкция
+    # 4) Бонус раз в сутки
+    if is_new:
+        bonus_line = "✅ +10 баллов за регистрацию ✨"
+    else:
+        if daily_granted:
+            bonus_line = "✅ +5 баллов за визит ✨ (раз в сутки)"
+        else:
+            bonus_line = f"ℹ️ Бонус за визит уже получен. Следующий — примерно через {hours_left} ч."
+
+    return f"""\
+Привет, {name}! 🖤
+
+Я — Natural Sense Assistant.
+Что я умею:
+• открываю мини-журнал внутри Telegram (вкладки, бренды, категории)
+• показываю твой профиль и баллы
+• веду в канал одним нажатием
+
+Как пользоваться:
+1) Нажми «📲 Открыть журнал»
+2) Листай категории/бренды и открывай нужные посты
+3) «👤 Профиль» — твои баллы и уровень
+
+{bonus_line}
+"""
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -355,11 +436,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             username=user.username,
             first_name=user.first_name
         )
-        text_ = f"Добро пожаловать, {user.first_name}! 🖤\n\n+10 баллов за регистрацию ✨"
+        text_ = build_welcome_text(user.first_name, is_new=True, daily_granted=True, hours_left=0)
     else:
-        await add_points(user.id, 5)
-        text_ = f"С возвращением, {user.first_name}!\n+5 баллов за визит ✨"
+        # ✅ +5 только раз в сутки
+        db_user2, granted, hours_left = await add_daily_bonus_if_available(user.id, points=5)
+        _ = db_user2  # чтобы не ругалось линтером
+        text_ = build_welcome_text(user.first_name, is_new=False, daily_granted=granted, hours_left=hours_left)
 
+    # ✅ предлагаем начать общение и показываем правильную клавиатуру без "Челленджи"
     await update.message.reply_text(text_, reply_markup=get_main_keyboard())
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -462,9 +546,10 @@ async def stop_telegram_bot():
             tg_app = None
 
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (ДИЗАЙН/КНОПКИ НЕ ТРОГАЕМ — только:
-# 1) убрали SephoraTR и SephoraGuide
-# 2) добавили бренды
+# WEBAPP HTML (МИНИ АПП НЕ МЕНЯЕМ)
+# Внутри уже:
+# - убраны SephoraTR и SephoraGuide + API их блокирует
+# - добавлены бренды
 # -----------------------------------------------------------------------------
 def get_webapp_html() -> str:
     html = r"""<!DOCTYPE html>
@@ -664,7 +749,6 @@ def get_webapp_html() -> str:
       const [activeTab, setActiveTab] = useState("home");
       const [user, setUser] = useState(null);
 
-      // ✅ отдельный режим экрана "ПОСТЫ"
       const [postsMode, setPostsMode] = useState(false);
       const [selectedTag, setSelectedTag] = useState(null);
       const [posts, setPosts] = useState([]);
