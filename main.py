@@ -22,6 +22,7 @@ from telegram import (
 from telegram.ext import (
     Application,
     CommandHandler,
+    CallbackQueryHandler,  # ✅ FIX
     ContextTypes,
     MessageHandler,
     filters,
@@ -228,7 +229,6 @@ async def create_user_with_referral(
     referral_paid = False
 
     async with async_session_maker() as session:
-        # safety: если вдруг уже есть
         existing = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
         if existing:
             return existing, False
@@ -239,7 +239,7 @@ async def create_user_with_referral(
             first_name=first_name,
             points=REGISTER_BONUS_POINTS,
             joined_at=now,
-            last_daily_bonus_at=now,  # регистрационный бонус засчитываем как "сегодня"
+            last_daily_bonus_at=now,
             daily_streak=1,
             best_streak=1,
             referred_by=None,
@@ -247,7 +247,6 @@ async def create_user_with_referral(
             ref_bonus_paid=False,
         )
 
-        # referral: только если referred_by валиден и не сам себя
         inviter: User | None = None
         if referred_by and referred_by != telegram_id:
             inviter = (await session.execute(select(User).where(User.telegram_id == referred_by))).scalar_one_or_none()
@@ -256,14 +255,12 @@ async def create_user_with_referral(
 
         _recalc_tier(user)
         session.add(user)
-        await session.flush()  # чтобы user точно появился
+        await session.flush()
 
-        # если есть inviter — платим ему 1 раз за этого юзера (сразу при создании)
         if inviter and not user.ref_bonus_paid:
             inviter.points += REFERRAL_BONUS_POINTS
             inviter.referral_count = (inviter.referral_count or 0) + 1
             _recalc_tier(inviter)
-
             user.ref_bonus_paid = True
             referral_paid = True
 
@@ -299,7 +296,6 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[User | No
         now = datetime.utcnow()
         last = user.last_daily_bonus_at
 
-        # если бонус ещё не доступен — тихий режим (D)
         if last is not None and (now - last) < timedelta(days=1):
             delta = timedelta(days=1) - (now - last)
             hours_left = max(
@@ -308,11 +304,8 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[User | No
             )
             return user, False, hours_left, 0
 
-        # начисляем дневной бонус
         user.points += DAILY_BONUS_POINTS
 
-        # обновляем стрик
-        # если пришёл в пределах 48 часов от прошлого бонуса — продолжаем стрик, иначе сброс
         if last is None:
             user.daily_streak = 1
         else:
@@ -324,7 +317,6 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[User | No
         user.best_streak = max(user.best_streak or 0, user.daily_streak or 0)
         user.last_daily_bonus_at = now
 
-        # бонус за milestone (A) — выдаём в тот день, когда ровно достиг milestone
         streak_bonus = 0
         if user.daily_streak in STREAK_MILESTONES:
             streak_bonus = STREAK_MILESTONES[user.daily_streak]
@@ -516,7 +508,6 @@ sweeper_task: asyncio.Task | None = None
 
 
 def get_main_keyboard():
-    # ✅ убрали "Челленджи"
     webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
     return ReplyKeyboardMarkup(
         [
@@ -570,7 +561,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    # получаем username бота
     me = await context.bot.get_me()
     bot_username = me.username or ""
     if not bot_username:
@@ -652,7 +642,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db_user = await get_user(user.id)
 
-    # referral param: /start <ref_id>
     referred_by: int | None = None
     if context.args:
         arg0 = (context.args[0] or "").strip()
@@ -669,7 +658,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_ = build_welcome_text(
             first_name=user.first_name,
             is_new=True,
-            daily_granted=True,  # регистрация уже дала бонус
+            daily_granted=True,
             hours_left=0,
             streak=created_user.daily_streak or 1,
             streak_bonus=0,
@@ -678,13 +667,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text_, reply_markup=get_main_keyboard())
         return
 
-    # existing user: daily bonus + streak
     user2, granted, hours_left, streak_bonus = await add_daily_bonus_and_update_streak(user.id)
     if not user2:
         await update.message.reply_text("Ошибка пользователя. Нажми /start ещё раз.", reply_markup=get_main_keyboard())
         return
 
-    # D: тихий старт если сегодня бонус уже был
     if not granted:
         text_ = build_quiet_text(user.first_name, hours_left=hours_left, streak=user2.daily_streak or 0)
         await update.message.reply_text(text_, reply_markup=get_main_keyboard())
@@ -897,7 +884,6 @@ async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Начислено {pts}. Теперь у юзера {u.points} баллов.", reply_markup=get_main_keyboard())
 
 
-# --- CallbackQuery для inline админ-меню ---
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not q:
@@ -923,7 +909,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-# --- Обработчик текстовых кнопок ---
 async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -941,8 +926,6 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_channel_button(update, context)
         return
 
-    # остальное не трогаем
-
 
 async def start_telegram_bot():
     global tg_app, tg_task
@@ -958,19 +941,17 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("help", cmd_help))
     tg_app.add_handler(CommandHandler("invite", cmd_invite))
 
-    # admin
     tg_app.add_handler(CommandHandler("admin", cmd_admin))
     tg_app.add_handler(CommandHandler("admin_stats", cmd_admin_stats))
     tg_app.add_handler(CommandHandler("admin_sweep", cmd_admin_sweep))
     tg_app.add_handler(CommandHandler("admin_user", cmd_admin_user))
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
-    tg_app.add_handler(MessageHandler(filters.UpdateType.CALLBACK_QUERY, on_callback))
 
-    # channel posts indexing
+    tg_app.add_handler(CallbackQueryHandler(on_callback))  # ✅ FIX
+
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
 
-    # text buttons
     tg_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), on_text_button))
 
     async def run():
@@ -1357,7 +1338,7 @@ def get_webapp_html() -> str:
             );
 
           default:
-            return null;
+            return null
         }
       };
 
@@ -1406,7 +1387,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="NS · Natural Sense API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
-    CORSMiddleware,
+    CORSMIDDLEWARE := CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
@@ -1455,10 +1436,8 @@ async def add_points_api(telegram_id: int, points: int):
 @app.get("/api/posts")
 async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     if not tag:
-        # без тега не отдаём ничего — чтобы случайно нигде не показывались
         return []
 
-    # полностью запрещаем эти два тега
     if tag in BLOCKED_TAGS:
         return []
 
