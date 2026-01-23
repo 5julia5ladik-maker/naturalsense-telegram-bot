@@ -58,9 +58,9 @@ logger.info(
 )
 
 # -----------------------------------------------------------------------------
-# TAGS BLOCKLIST (НЕ МЕНЯЕМ ЛОГИКУ — ПРОСТО УБИРАЕМ ЭТИ 2 ТЕГА)
+# TAGS BLOCKLIST (убираем "Актуальные цены (TR)" и "Гайды/как покупать" + их теги)
 # -----------------------------------------------------------------------------
-BLOCKED_TAGS = {"SephoraTR", "SephoraGuide"}  # Актуальные цены (TR) + Гайды/как покупать
+BLOCKED_TAGS = {"SephoraTR", "SephoraGuide"}
 
 # -----------------------------------------------------------------------------
 # DATABASE MODELS
@@ -245,7 +245,7 @@ async def upsert_post_from_channel(
         return p
 
 async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
-    # ✅ эти два тега полностью убираем (чтобы нигде не отображались)
+    # полностью блокируем эти 2 тега
     if tag and tag in BLOCKED_TAGS:
         return []
 
@@ -462,7 +462,9 @@ async def stop_telegram_bot():
             tg_app = None
 
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (ДИЗАЙН/КНОПКИ НЕ ТРОГАЕМ — ТОЛЬКО УБИРАЕМ 2 КНОПКИ В SEPHORA)
+# WEBAPP HTML (ДИЗАЙН/КНОПКИ НЕ ТРОГАЕМ — только:
+# 1) убрали SephoraTR и SephoraGuide
+# 2) добавили бренды
 # -----------------------------------------------------------------------------
 def get_webapp_html() -> str:
     html = r"""<!DOCTYPE html>
@@ -759,22 +761,60 @@ def get_webapp_html() -> str:
           case "brand":
             return (
               <Panel>
+                <Button icon="✨" label="The Ordinary" onClick={() => openPosts("TheOrdinary")} />
                 <Button icon="✨" label="Dior" onClick={() => openPosts("Dior")} />
                 <Button icon="✨" label="Chanel" onClick={() => openPosts("Chanel")} />
+                <Button icon="✨" label="Kylie Cosmetics" onClick={() => openPosts("KylieCosmetics")} />
+                <Button icon="✨" label="Gisou" onClick={() => openPosts("Gisou")} />
+                <Button icon="✨" label="Rare Beauty" onClick={() => openPosts("RareBeauty")} />
+                <Button icon="✨" label="Yves Saint Laurent" onClick={() => openPosts("YSL")} />
+                <Button icon="✨" label="Givenchy" onClick={() => openPosts("Givenchy")} />
                 <Button icon="✨" label="Charlotte Tilbury" onClick={() => openPosts("CharlotteTilbury")} />
+                <Button icon="✨" label="NARS" onClick={() => openPosts("NARS")} />
+                <Button icon="✨" label="Sol de Janeiro" onClick={() => openPosts("SolDeJaneiro")} />
+                <Button icon="✨" label="Huda Beauty" onClick={() => openPosts("HudaBeauty")} />
+                <Button icon="✨" label="Rhode" onClick={() => openPosts("Rhode")} />
+                <Button icon="✨" label="Tower 28 Beauty" onClick={() => openPosts("Tower28Beauty")} />
+                <Button icon="✨" label="Benefit Cosmetics" onClick={() => openPosts("BenefitCosmetics")} />
+                <Button icon="✨" label="Estée Lauder" onClick={() => openPosts("EsteeLauder")} />
+                <Button icon="✨" label="Sisley" onClick={() => openPosts("Sisley")} />
+                <Button icon="✨" label="Kérastase" onClick={() => openPosts("Kerastase")} />
+                <Button icon="✨" label="Armani Beauty" onClick={() => openPosts("ArmaniBeauty")} />
+                <Button icon="✨" label="Hourglass" onClick={() => openPosts("Hourglass")} />
+                <Button icon="✨" label="Shiseido" onClick={() => openPosts("Shiseido")} />
+                <Button icon="✨" label="Tom Ford Beauty" onClick={() => openPosts("TomFordBeauty")} />
+                <Button icon="✨" label="Tarte" onClick={() => openPosts("Tarte")} />
+                <Button icon="✨" label="Sephora Collection" onClick={() => openPosts("SephoraCollection")} />
+                <Button icon="✨" label="Clinique" onClick={() => openPosts("Clinique")} />
+                <Button icon="✨" label="Dolce & Gabbana" onClick={() => openPosts("DolceGabbana")} />
+                <Button icon="✨" label="Kayali" onClick={() => openPosts("Kayali")} />
+                <Button icon="✨" label="Guerlain" onClick={() => openPosts("Guerlain")} />
+                <Button icon="✨" label="Fenty Beauty" onClick={() => openPosts("FentyBeauty")} />
+                <Button icon="✨" label="Too Faced" onClick={() => openPosts("TooFaced")} />
+                <Button icon="✨" label="MAKE UP FOR EVER" onClick={() => openPosts("MakeUpForEver")} />
+                <Button icon="✨" label="Erborian" onClick={() => openPosts("Erborian")} />
+                <Button icon="✨" label="Natasha Denona" onClick={() => openPosts("NatashaDenona")} />
+                <Button icon="✨" label="Lancôme" onClick={() => openPosts("Lancome")} />
+                <Button icon="✨" label="Kosas" onClick={() => openPosts("Kosas")} />
+                <Button icon="✨" label="ONE/SIZE" onClick={() => openPosts("OneSize")} />
+                <Button icon="✨" label="Laneige" onClick={() => openPosts("Laneige")} />
+                <Button icon="✨" label="Makeup by Mario" onClick={() => openPosts("MakeupByMario")} />
+                <Button icon="✨" label="Valentino Beauty" onClick={() => openPosts("ValentinoBeauty")} />
+                <Button icon="✨" label="Drunk Elephant" onClick={() => openPosts("DrunkElephant")} />
+                <Button icon="✨" label="Olaplex" onClick={() => openPosts("Olaplex")} />
+                <Button icon="✨" label="Anastasia Beverly Hills" onClick={() => openPosts("AnastasiaBeverlyHills")} />
+                <Button icon="✨" label="Amika" onClick={() => openPosts("Amika")} />
+                <Button icon="✨" label="BYOMA" onClick={() => openPosts("BYOMA")} />
+                <Button icon="✨" label="Glow Recipe" onClick={() => openPosts("GlowRecipe")} />
+                <Button icon="✨" label="Milk Makeup" onClick={() => openPosts("MilkMakeup")} />
+                <Button icon="✨" label="Summer Fridays" onClick={() => openPosts("SummerFridays")} />
+                <Button icon="✨" label="K18" onClick={() => openPosts("K18")} />
               </Panel>
             );
 
           case "sephora":
             return (
               <Panel>
-                {/*
-                  ✅ УБРАНО:
-                  - 🇹🇷 Актуальные цены (TR)  -> tag SephoraTR
-                  - 🧾 Гайды / как покупать    -> tag SephoraGuide
-                  Оставили только:
-                  - 🎁 Подарки / акции         -> tag SephoraPromo
-                */}
                 <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo")} />
               </Panel>
             );
@@ -867,11 +907,11 @@ async def add_points_api(telegram_id: int, points: int):
 
 @app.get("/api/posts")
 async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
-    # без тега не отдаём ничего — чтобы случайно нигде не показывались
     if not tag:
+        # без тега не отдаём ничего — чтобы случайно нигде не показывались
         return []
 
-    # ✅ эти два тега полностью запрещены
+    # полностью запрещаем эти два тега
     if tag in BLOCKED_TAGS:
         return []
 
