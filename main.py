@@ -58,6 +58,11 @@ logger.info(
 )
 
 # -----------------------------------------------------------------------------
+# TAGS BLOCKLIST (НЕ МЕНЯЕМ ЛОГИКУ — ПРОСТО УБИРАЕМ ЭТИ 2 ТЕГА)
+# -----------------------------------------------------------------------------
+BLOCKED_TAGS = {"SephoraTR", "SephoraGuide"}  # Актуальные цены (TR) + Гайды/как покупать
+
+# -----------------------------------------------------------------------------
 # DATABASE MODELS
 # -----------------------------------------------------------------------------
 Base = declarative_base()
@@ -240,6 +245,10 @@ async def upsert_post_from_channel(
         return p
 
 async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
+    # ✅ эти два тега полностью убираем (чтобы нигде не отображались)
+    if tag and tag in BLOCKED_TAGS:
+        return []
+
     async with async_session_maker() as session:
         q = (
             select(Post)
@@ -453,7 +462,7 @@ async def stop_telegram_bot():
             tg_app = None
 
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (ДИЗАЙН/КНОПКИ НЕ ТРОГАЕМ — ТОЛЬКО УБИРАЕМ ПОСТЫ "СНИЗУ")
+# WEBAPP HTML (ДИЗАЙН/КНОПКИ НЕ ТРОГАЕМ — ТОЛЬКО УБИРАЕМ 2 КНОПКИ В SEPHORA)
 # -----------------------------------------------------------------------------
 def get_webapp_html() -> str:
     html = r"""<!DOCTYPE html>
@@ -653,7 +662,7 @@ def get_webapp_html() -> str:
       const [activeTab, setActiveTab] = useState("home");
       const [user, setUser] = useState(null);
 
-      // ✅ ВАЖНО: отдельный режим экрана "ПОСТЫ"
+      // ✅ отдельный режим экрана "ПОСТЫ"
       const [postsMode, setPostsMode] = useState(false);
       const [selectedTag, setSelectedTag] = useState(null);
       const [posts, setPosts] = useState([]);
@@ -670,12 +679,11 @@ def get_webapp_html() -> str:
 
       const openPosts = (tag) => {
         setSelectedTag(tag);
-        setPostsMode(true);      // ✅ показываем отдельный экран постов
+        setPostsMode(true);
         loadPosts(tag);
       };
 
       const changeTab = (tabId) => {
-        // ✅ при смене вкладки — выходим из "экрана постов"
         setActiveTab(tabId);
         setPostsMode(false);
         setSelectedTag(null);
@@ -721,7 +729,6 @@ def get_webapp_html() -> str:
       );
 
       const renderContent = () => {
-        // ✅ если режим постов включён — показываем ТОЛЬКО экран постов (никаких "постов снизу")
         if (postsMode) return <PostsScreen />;
 
         switch (activeTab) {
@@ -761,9 +768,14 @@ def get_webapp_html() -> str:
           case "sephora":
             return (
               <Panel>
-                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={() => openPosts("SephoraTR")} />
+                {/*
+                  ✅ УБРАНО:
+                  - 🇹🇷 Актуальные цены (TR)  -> tag SephoraTR
+                  - 🧾 Гайды / как покупать    -> tag SephoraGuide
+                  Оставили только:
+                  - 🎁 Подарки / акции         -> tag SephoraPromo
+                */}
                 <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo")} />
-                <Button icon="🧾" label="Гайды / как покупать" onClick={() => openPosts("SephoraGuide")} />
               </Panel>
             );
 
@@ -855,8 +867,12 @@ async def add_points_api(telegram_id: int, points: int):
 
 @app.get("/api/posts")
 async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
+    # без тега не отдаём ничего — чтобы случайно нигде не показывались
     if not tag:
-        # без тега не отдаём ничего — чтобы случайно нигде не показывались
+        return []
+
+    # ✅ эти два тега полностью запрещены
+    if tag in BLOCKED_TAGS:
         return []
 
     rows = await list_posts(tag=tag, limit=limit, offset=offset)
