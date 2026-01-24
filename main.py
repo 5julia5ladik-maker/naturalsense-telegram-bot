@@ -3,7 +3,7 @@ import re
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import httpx
 
@@ -11,36 +11,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from telegram import (
-    Update,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    WebAppInfo,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from telegram.ext import (
     Application,
     CommandHandler,
-    CallbackQueryHandler,
     ContextTypes,
     MessageHandler,
     filters,
 )
 
-from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    DateTime,
-    JSON,
-    Boolean,
-    BigInteger,  # ✅ FIX for Telegram IDs (int64)
-    select,
-    text as sql_text,
-    update,
-    func,
-)
+from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean, select, text as sql_text, update
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 
@@ -63,7 +43,6 @@ BOT_TOKEN = env_get("BOT_TOKEN")
 PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
 CHANNEL_USERNAME = env_get("CHANNEL_USERNAME", "NaturalSense") or "NaturalSense"
 DATABASE_URL = env_get("DATABASE_URL", "sqlite+aiosqlite:///./ns.db") or "sqlite+aiosqlite:///./ns.db"
-ADMIN_CHAT_ID = int(env_get("ADMIN_CHAT_ID", "5443870760") or "5443870760")
 
 # Fix Railway postgres schemes for async SQLAlchemy
 if DATABASE_URL:
@@ -74,88 +53,9 @@ if DATABASE_URL:
 
 tok = BOT_TOKEN or ""
 logger.info(
-    "ENV CHECK: BOT_TOKEN_present=%s BOT_TOKEN_len=%s PUBLIC_BASE_URL_present=%s DATABASE_URL_present=%s CHANNEL=%s ADMIN=%s",
-    bool(BOT_TOKEN),
-    len(tok),
-    bool(PUBLIC_BASE_URL),
-    bool(DATABASE_URL),
-    CHANNEL_USERNAME,
-    ADMIN_CHAT_ID,
+    "ENV CHECK: BOT_TOKEN_present=%s BOT_TOKEN_len=%s PUBLIC_BASE_URL_present=%s DATABASE_URL_present=%s CHANNEL=%s",
+    bool(BOT_TOKEN), len(tok), bool(PUBLIC_BASE_URL), bool(DATABASE_URL), CHANNEL_USERNAME
 )
-
-# -----------------------------------------------------------------------------
-# BLOCKED TAGS (убираем TR цены и гайды, и теги тоже)
-# -----------------------------------------------------------------------------
-BLOCKED_TAGS = {"SephoraTR", "SephoraGuide"}
-
-# -----------------------------------------------------------------------------
-# GAMIFICATION CONFIG
-# -----------------------------------------------------------------------------
-DAILY_BONUS_POINTS = 5
-REGISTER_BONUS_POINTS = 10
-REFERRAL_BONUS_POINTS = 20
-
-# Бонусы за стрик
-STREAK_MILESTONES = {
-    3: 10,
-    7: 30,
-    14: 80,
-    30: 250,
-}
-
-# -----------------------------------------------------------------------------
-# BRAND TAG MAP (чтобы ты понимал, как писать теги в постах)
-# -----------------------------------------------------------------------------
-BRAND_TAGS: dict[str, str] = {
-    "The Ordinary": "TheOrdinary",
-    "Dior": "Dior",
-    "Chanel": "Chanel",
-    "Kylie Cosmetics": "KylieCosmetics",
-    "Gisou": "Gisou",
-    "Rare Beauty": "RareBeauty",
-    "Yves Saint Laurent": "YSL",
-    "Givenchy": "Givenchy",
-    "Charlotte Tilbury": "CharlotteTilbury",
-    "NARS": "NARS",
-    "Sol de Janeiro": "SolDeJaneiro",
-    "Huda Beauty": "HudaBeauty",
-    "Rhode": "Rhode",
-    "Tower 28 Beauty": "Tower28Beauty",
-    "Benefit Cosmetics": "BenefitCosmetics",
-    "Estée Lauder": "EsteeLauder",
-    "Sisley": "Sisley",
-    "Kérastase": "Kerastase",
-    "Armani Beauty": "ArmaniBeauty",
-    "Hourglass": "Hourglass",
-    "Shiseido": "Shiseido",
-    "Tom Ford Beauty": "TomFordBeauty",
-    "Tarte": "Tarte",
-    "Sephora Collection": "SephoraCollection",
-    "Clinique": "Clinique",
-    "Dolce & Gabbana": "DolceGabbana",
-    "Kayali": "Kayali",
-    "Guerlain": "Guerlain",
-    "Fenty Beauty": "FentyBeauty",
-    "Too Faced": "TooFaced",
-    "MAKE UP FOR EVER": "MakeUpForEver",
-    "Erborian": "Erborian",
-    "Natasha Denona": "NatashaDenona",
-    "Lancôme": "Lancome",
-    "Kosas": "Kosas",
-    "ONE/SIZE": "OneSize",
-    "Laneige": "Laneige",
-    "Makeup by Mario": "MakeupByMario",
-    "Valentino Beauty": "ValentinoBeauty",
-    "Drunk Elephant": "DrunkElephant",
-    "Olaplex": "Olaplex",
-    "Anastasia Beverly Hills": "AnastasiaBeverlyHills",
-    "Amika": "Amika",
-    "BYOMA": "BYOMA",
-    "Glow Recipe": "GlowRecipe",
-    "Milk Makeup": "MilkMakeup",
-    "Summer Fridays": "SummerFridays",
-    "K18": "K18",
-}
 
 # -----------------------------------------------------------------------------
 # DATABASE MODELS
@@ -166,35 +66,25 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-
-    # ✅ BIGINT иначе у многих людей (и у тебя) будет int32 overflow
-    telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
-
+    telegram_id = Column(Integer, unique=True, index=True, nullable=False)
     username = Column(String, nullable=True)
     first_name = Column(String, nullable=True)
-
     tier = Column(String, default="free")
     points = Column(Integer, default=10)
     favorites = Column(JSON, default=list)
     joined_at = Column(DateTime, default=lambda: datetime.utcnow())  # naive UTC
 
-    # анти-фарм + стрик
-    last_daily_bonus_at = Column(DateTime, nullable=True)  # naive UTC
-    daily_streak = Column(Integer, default=0)
-    best_streak = Column(Integer, default=0)
-
-    # рефералка (кто пригласил)
-    referred_by = Column(BigInteger, nullable=True)
-    referral_count = Column(Integer, default=0)
-    ref_bonus_paid = Column(Boolean, default=False, nullable=False)
-
 class Post(Base):
     __tablename__ = "posts"
 
     id = Column(Integer, primary_key=True)
-    message_id = Column(BigInteger, unique=True, index=True, nullable=False)  # ✅ safe
 
-    date = Column(DateTime, nullable=True)  # naive UTC
+    # используем message_id
+    message_id = Column(Integer, unique=True, index=True, nullable=False)
+
+    # naive UTC
+    date = Column(DateTime, nullable=True)
+
     text = Column(String, nullable=True)
     media_type = Column(String, nullable=True)
     media_file_id = Column(String, nullable=True)
@@ -203,6 +93,7 @@ class Post(Base):
     tags = Column(JSON, default=list)
     created_at = Column(DateTime, default=lambda: datetime.utcnow())  # naive UTC
 
+    # УДАЛЕНИЕ
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
 
@@ -212,162 +103,61 @@ class Post(Base):
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-async def _safe_exec(conn, sql: str):
-    try:
-        await conn.execute(sql_text(sql))
-    except Exception as e:
-        logger.info("DB migration skipped/failed (ok in some DBs): %s | %s", sql, e)
-
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-        # posts columns
-        await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;")
-        await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;")
-
-        # users columns (для старой базы)
-        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_daily_bonus_at TIMESTAMP NULL;")
-        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_streak INTEGER NOT NULL DEFAULT 0;")
-        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak INTEGER NOT NULL DEFAULT 0;")
-        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT NULL;")
-        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_count INTEGER NOT NULL DEFAULT 0;")
-        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
-
-        # ✅ FIX Postgres int32 overflow -> BIGINT
-        await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;")
-        await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN referred_by TYPE BIGINT;")
-        await _safe_exec(conn, "ALTER TABLE posts ALTER COLUMN message_id TYPE BIGINT;")
+        # добавляем колонки, если их нет
+        try:
+            await conn.execute(sql_text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;"))
+        except Exception:
+            pass
+        try:
+            await conn.execute(sql_text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;"))
+        except Exception:
+            pass
 
     logger.info("✅ Database initialized")
 
 # -----------------------------------------------------------------------------
-# USER / POINTS / STREAK / REFERRAL
+# USER QUERIES
 # -----------------------------------------------------------------------------
-def _recalc_tier(user: User):
-    if (user.points or 0) >= 500:
-        user.tier = "vip"
-    elif (user.points or 0) >= 100:
-        user.tier = "premium"
-    else:
-        user.tier = "free"
-
 async def get_user(telegram_id: int):
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         return result.scalar_one_or_none()
 
-async def find_user_by_username(username: str) -> User | None:
-    u = (username or "").strip()
-    if not u:
-        return None
-    if u.startswith("@"):
-        u = u[1:]
-    u = u.lower()
+async def create_user(telegram_id: int, username: str | None = None, first_name: str | None = None):
     async with async_session_maker() as session:
-        res = await session.execute(select(User).where(func.lower(User.username) == u))
-        return res.scalar_one_or_none()
-
-async def create_user_with_referral(
-    telegram_id: int,
-    username: str | None,
-    first_name: str | None,
-    referred_by: int | None,
-) -> tuple[User, bool]:
-    now = datetime.utcnow()
-    referral_paid = False
-
-    async with async_session_maker() as session:
-        existing = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
-        if existing:
-            return existing, False
-
-        inviter: User | None = None
-        if referred_by and referred_by != telegram_id:
-            inviter = (await session.execute(select(User).where(User.telegram_id == referred_by))).scalar_one_or_none()
-
         user = User(
             telegram_id=telegram_id,
             username=username,
             first_name=first_name,
-            points=REGISTER_BONUS_POINTS,
-            joined_at=now,
-            last_daily_bonus_at=now,
-            daily_streak=1,
-            best_streak=1,
-            referred_by=(referred_by if inviter else None),
-            referral_count=0,
-            ref_bonus_paid=False,
+            points=10
         )
-        _recalc_tier(user)
         session.add(user)
-        await session.flush()
-
-        if inviter and not user.ref_bonus_paid:
-            inviter.points = (inviter.points or 0) + REFERRAL_BONUS_POINTS
-            inviter.referral_count = (inviter.referral_count or 0) + 1
-            _recalc_tier(inviter)
-            user.ref_bonus_paid = True
-            referral_paid = True
-
         await session.commit()
         await session.refresh(user)
         logger.info("✅ New user created: %s", telegram_id)
-        return user, referral_paid
+        return user
 
 async def add_points(telegram_id: int, points: int):
     async with async_session_maker() as session:
-        user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
         if not user:
             return None
-        user.points = (user.points or 0) + points
-        _recalc_tier(user)
+
+        user.points += points
+
+        if user.points >= 500:
+            user.tier = "vip"
+        elif user.points >= 100:
+            user.tier = "premium"
+
         await session.commit()
         await session.refresh(user)
         return user
-
-async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[User | None, bool, int, int]:
-    async with async_session_maker() as session:
-        user: User | None = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
-        if not user:
-            return None, False, 0, 0
-
-        now = datetime.utcnow()
-        last = user.last_daily_bonus_at
-
-        # антифарм: строго 1 раз в 24 часа
-        if last is not None and (now - last) < timedelta(days=1):
-            delta = timedelta(days=1) - (now - last)
-            hours_left = max(
-                0,
-                int(delta.total_seconds() // 3600) + (1 if (delta.total_seconds() % 3600) > 0 else 0),
-            )
-            return user, False, hours_left, 0
-
-        user.points = (user.points or 0) + DAILY_BONUS_POINTS
-
-        if last is None:
-            user.daily_streak = 1
-        else:
-            # если зашёл в пределах 48 часов — продолжает стрик, иначе сброс
-            if (now - last) <= timedelta(days=2):
-                user.daily_streak = (user.daily_streak or 0) + 1
-            else:
-                user.daily_streak = 1
-
-        user.best_streak = max(user.best_streak or 0, user.daily_streak or 0)
-        user.last_daily_bonus_at = now
-
-        streak_bonus = 0
-        if user.daily_streak in STREAK_MILESTONES:
-            streak_bonus = STREAK_MILESTONES[user.daily_streak]
-            user.points = (user.points or 0) + streak_bonus
-
-        _recalc_tier(user)
-
-        await session.commit()
-        await session.refresh(user)
-        return user, True, 0, streak_bonus
 
 # -----------------------------------------------------------------------------
 # POSTS INDEX (TAGS)
@@ -413,7 +203,8 @@ async def upsert_post_from_channel(
     date_naive = to_naive_utc(date)
 
     async with async_session_maker() as session:
-        p = (await session.execute(select(Post).where(Post.message_id == message_id))).scalar_one_or_none()
+        res = await session.execute(select(Post).where(Post.message_id == message_id))
+        p = res.scalar_one_or_none()
 
         if p:
             p.date = date_naive
@@ -422,8 +213,11 @@ async def upsert_post_from_channel(
             p.media_file_id = media_file_id
             p.permalink = permalink
             p.tags = tags
+
+            # если пост снова виден — считаем не удалён
             p.is_deleted = False
             p.deleted_at = None
+
             await session.commit()
             return p
 
@@ -446,9 +240,6 @@ async def upsert_post_from_channel(
         return p
 
 async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
-    if tag and tag in BLOCKED_TAGS:
-        return []
-
     async with async_session_maker() as session:
         q = (
             select(Post)
@@ -488,26 +279,25 @@ async def message_exists_public(message_id: int) -> bool:
 
 async def sweep_deleted_posts(batch: int = 80):
     async with async_session_maker() as session:
-        posts = (
-            await session.execute(
-                select(Post)
-                .where(Post.is_deleted == False)  # noqa: E712
-                .order_by(Post.message_id.desc())
-                .limit(batch)
-            )
-        ).scalars().all()
+        q = (
+            select(Post)
+            .where(Post.is_deleted == False)  # noqa: E712
+            .order_by(Post.message_id.desc())
+            .limit(batch)
+        )
+        posts = (await session.execute(q)).scalars().all()
 
     if not posts:
-        return []
+        return
 
     to_mark: list[int] = []
     for p in posts:
-        ok = await message_exists_public(int(p.message_id))
+        ok = await message_exists_public(p.message_id)
         if not ok:
-            to_mark.append(int(p.message_id))
+            to_mark.append(p.message_id)
 
     if not to_mark:
-        return []
+        return
 
     async with async_session_maker() as session:
         now = datetime.utcnow()
@@ -519,7 +309,6 @@ async def sweep_deleted_posts(batch: int = 80):
         await session.commit()
 
     logger.info("🧹 Marked deleted posts: %s", to_mark)
-    return to_mark
 
 async def sweeper_loop():
     while True:
@@ -536,180 +325,32 @@ tg_app: Application | None = None
 tg_task: asyncio.Task | None = None
 sweeper_task: asyncio.Task | None = None
 
-def is_admin(user_id: int) -> bool:
-    return int(user_id) == int(ADMIN_CHAT_ID)
-
 def get_main_keyboard():
     webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
-            [KeyboardButton("👤 Профиль"), KeyboardButton("ℹ️ Помощь")],
+            [KeyboardButton("👤 Профиль"), KeyboardButton("🎁 Челленджи")],
             [KeyboardButton("↩️ В канал")],
         ],
-        resize_keyboard=True,
+        resize_keyboard=True
     )
-
-def build_help_text() -> str:
-    return """\
-ℹ️ *Помощь / Как пользоваться*
-
-1) Нажми *📲 Открыть журнал* — откроется Mini App внутри Telegram.
-2) Во вкладках выбирай категории/бренды и открывай посты.
-3) *👤 Профиль* — твои баллы, уровень, стрик.
-4) *↩️ В канал* — откроет канал в 1 клик.
-
-💎 *Баллы и антифарм*
-• Первый /start: +10 за регистрацию
-• Далее: +5 за визит, строго 1 раз в 24 часа
-
-🔥 *Стрик (серия дней)*
-За ежедневный вход растёт стрик. Бонусы:
-• 3 дня: +10
-• 7 дней: +30
-• 14 дней: +80
-• 30 дней: +250
-
-🎟 *Рефералка*
-Команда /invite даёт твою ссылку.
-За каждого нового пользователя по ссылке: +20 (1 раз за каждого).
-"""
-
-async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.exception("Telegram handler error: %s", context.error)
-    try:
-        if ADMIN_CHAT_ID:
-            await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=f"❌ Ошибка в боте:\n{repr(context.error)}"
-            )
-    except Exception:
-        pass
-
-async def send_channel_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = f"https://t.me/{CHANNEL_USERNAME}"
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Открыть канал ↗️", url=url)]])
-    await update.message.reply_text("↩️ Открыть канал:", reply_markup=kb)
-
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(build_help_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
-
-async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    me = await context.bot.get_me()
-    bot_username = me.username or ""
-    if not bot_username:
-        await update.message.reply_text("Не удалось получить username бота. Проверь настройки.", reply_markup=get_main_keyboard())
-        return
-
-    link = f"https://t.me/{bot_username}?start={user.id}"
-    text = f"""\
-🎟 Твоя реферальная ссылка:
-
-{link}
-
-За каждого нового пользователя по этой ссылке: +{REFERRAL_BONUS_POINTS} баллов (1 раз за каждого).
-"""
-    await update.message.reply_text(text, reply_markup=get_main_keyboard())
-
-async def cmd_brandtags(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # просто справка, чтобы ты копировал теги
-    lines = ["🏷 Теги брендов (пиши в постах так: #TAG):\n"]
-    for name, tag in BRAND_TAGS.items():
-        lines.append(f"• {name} — #{tag}")
-    await update.message.reply_text("\n".join(lines), reply_markup=get_main_keyboard())
-
-def build_welcome_text(
-    first_name: str | None,
-    is_new: bool,
-    daily_granted: bool,
-    hours_left: int,
-    streak: int,
-    streak_bonus: int,
-    referral_paid: bool,
-) -> str:
-    name = first_name or "друг"
-
-    if is_new:
-        bonus_line = f"✅ +{REGISTER_BONUS_POINTS} баллов за регистрацию ✨"
-    else:
-        if daily_granted:
-            bonus_line = f"✅ +{DAILY_BONUS_POINTS} баллов за визит ✨ (раз в 24 часа)"
-        else:
-            bonus_line = f"ℹ️ Бонус за визит уже получен. Следующий — примерно через {hours_left} ч."
-
-    streak_line = f"🔥 Стрик: {streak} день(дней) подряд"
-    if streak_bonus > 0:
-        streak_line += f"\n🎉 Бонус за стрик: +{streak_bonus}"
-
-    ref_line = ""
-    if referral_paid:
-        ref_line = f"\n🎁 Тебя пригласили — твой друг получил +{REFERRAL_BONUS_POINTS} баллов."
-
-    return f"""\
-Привет, {name}! 🖤
-
-Я — Natural Sense Assistant.
-Что я умею:
-• открываю мини-журнал внутри Telegram (категории / бренды / посты)
-• показываю твой профиль и баллы
-• веду в канал одним нажатием
-• даю бонусы за ежедневные визиты и стрик
-
-Как пользоваться:
-1) Нажми «📲 Открыть журнал»
-2) Выбирай категории/бренды и открывай посты
-3) «👤 Профиль» — баллы, уровень, стрик
-4) «ℹ️ Помощь» — правила и фишки
-
-{bonus_line}
-{streak_line}{ref_line}
-"""
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-
-    referred_by: int | None = None
-    if context.args:
-        arg0 = (context.args[0] or "").strip()
-        if arg0.isdigit():
-            referred_by = int(arg0)
-
     db_user = await get_user(user.id)
 
     if not db_user:
-        created_user, referral_paid = await create_user_with_referral(
+        await create_user(
             telegram_id=user.id,
             username=user.username,
-            first_name=user.first_name,
-            referred_by=referred_by,
+            first_name=user.first_name
         )
-        text_ = build_welcome_text(
-            first_name=user.first_name,
-            is_new=True,
-            daily_granted=True,
-            hours_left=0,
-            streak=created_user.daily_streak or 1,
-            streak_bonus=0,
-            referral_paid=referral_paid,
-        )
-        await update.message.reply_text(text_, reply_markup=get_main_keyboard())
-        return
+        text_ = f"Добро пожаловать, {user.first_name}! 🖤\n\n+10 баллов за регистрацию ✨"
+    else:
+        await add_points(user.id, 5)
+        text_ = f"С возвращением, {user.first_name}!\n+5 баллов за визит ✨"
 
-    user2, granted, hours_left, streak_bonus = await add_daily_bonus_and_update_streak(user.id)
-    if not user2:
-        await update.message.reply_text("Ошибка пользователя. Нажми /start ещё раз.", reply_markup=get_main_keyboard())
-        return
-
-    text_ = build_welcome_text(
-        first_name=user.first_name,
-        is_new=False,
-        daily_granted=granted,
-        hours_left=hours_left,
-        streak=user2.daily_streak or 0,
-        streak_bonus=streak_bonus,
-        referral_paid=False,
-    )
     await update.message.reply_text(text_, reply_markup=get_main_keyboard())
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -717,7 +358,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_user = await get_user(user.id)
 
     if not db_user:
-        await update.message.reply_text("Нажми /start для регистрации", reply_markup=get_main_keyboard())
+        await update.message.reply_text("Нажми /start для регистрации")
         return
 
     tier_emoji = {"free": "🥉", "premium": "🥈", "vip": "🥇"}
@@ -730,26 +371,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     next_points, next_name = next_tier_points.get(db_user.tier, (0, "Max"))
-    remaining = max(0, next_points - (db_user.points or 0))
-
-    streak = db_user.daily_streak or 0
-    best = db_user.best_streak or 0
-    refs = db_user.referral_count or 0
-
-    last_bonus = db_user.last_daily_bonus_at
-    if last_bonus:
-        now = datetime.utcnow()
-        if (now - last_bonus) >= timedelta(days=1):
-            bonus_hint = "✅ Доступен ежедневный бонус — нажми /start"
-        else:
-            delta = timedelta(days=1) - (now - last_bonus)
-            hours_left = max(
-                0,
-                int(delta.total_seconds() // 3600) + (1 if (delta.total_seconds() % 3600) > 0 else 0),
-            )
-            bonus_hint = f"ℹ️ Ежедневный бонус через ~{hours_left} ч"
-    else:
-        bonus_hint = "ℹ️ Нажми /start для бонуса"
+    remaining = max(0, next_points - db_user.points)
 
     text_ = f"""\
 👤 **Твой профиль**
@@ -757,205 +379,13 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {tier_emoji.get(db_user.tier, "🥉")} Уровень: {tier_name.get(db_user.tier, "Bronze")}
 💎 Баллы: **{db_user.points}**
 
-🔥 Стрик: **{streak}** • Лучший: **{best}**
-🎟 Приглашено: **{refs}**
-
 📊 До {next_name}: {remaining} баллов
 📅 С нами: {db_user.joined_at.strftime("%d.%m.%Y")}
 
-{bonus_hint}
+Продолжай активничать! 🚀
 """
-    await update.message.reply_text(text_, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    await update.message.reply_text(text_, parse_mode="Markdown")
 
-async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    await update.message.reply_text(f"Твой telegram_id: {u.id}", reply_markup=get_main_keyboard())
-
-async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-    if not update.message.reply_to_message:
-        await update.message.reply_text("Ответь на сообщение человека и напиши /id", reply_markup=get_main_keyboard())
-        return
-    target = update.message.reply_to_message.from_user
-    await update.message.reply_text(
-        f"ID пользователя: {target.id}\nusername: @{target.username or '-'}\nname: {target.first_name or '-'}",
-        reply_markup=get_main_keyboard()
-    )
-
-# --- admin ---
-async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
-        return
-
-    kb = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
-            [InlineKeyboardButton("🧹 Sweep (проверить удалённые посты)", callback_data="admin_sweep")],
-        ]
-    )
-    await update.message.reply_text("👑 Админ-панель:", reply_markup=kb)
-
-async def admin_stats_text() -> str:
-    async with async_session_maker() as session:
-        total_users = (await session.execute(select(func.count(User.id)))).scalar() or 0
-        total_posts = (await session.execute(select(func.count(Post.id)))).scalar() or 0
-        deleted_posts = (
-            (await session.execute(select(func.count(Post.id)).where(Post.is_deleted == True)))  # noqa: E712
-        ).scalar() or 0
-
-        since = datetime.utcnow() - timedelta(days=1)
-        users_24h = (await session.execute(select(func.count(User.id)).where(User.joined_at >= since))).scalar() or 0
-
-    return f"""\
-📊 *Статистика*
-
-👥 Пользователей всего: *{total_users}*
-👥 Новых за 24ч: *{users_24h}*
-
-📝 Постов в базе: *{total_posts}*
-🗑 Помечено удалённых: *{deleted_posts}*
-"""
-
-async def cmd_admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
-        return
-    await update.message.reply_text(await admin_stats_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
-
-async def cmd_admin_sweep(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
-        return
-    marked = await sweep_deleted_posts(batch=120)
-    if not marked:
-        await update.message.reply_text("🧹 Sweep: ничего не найдено.", reply_markup=get_main_keyboard())
-    else:
-        await update.message.reply_text(f"🧹 Sweep: помечены удалёнными: {marked}", reply_markup=get_main_keyboard())
-
-async def cmd_admin_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
-        return
-
-    if not context.args or not (context.args[0] or "").isdigit():
-        await update.message.reply_text("Используй: /admin_user <telegram_id>", reply_markup=get_main_keyboard())
-        return
-
-    tid = int(context.args[0])
-    u = await get_user(tid)
-    if not u:
-        await update.message.reply_text("Юзер не найден.", reply_markup=get_main_keyboard())
-        return
-
-    text = f"""\
-👤 Пользователь: {u.telegram_id}
-Имя: {u.first_name or "-"} @{u.username or "-"}
-Tier: {u.tier}
-Баллы: {u.points}
-
-Стрик: {u.daily_streak} (best {u.best_streak})
-Last bonus: {u.last_daily_bonus_at}
-
-Referred_by: {u.referred_by}
-Referral_count: {u.referral_count}
-Ref_paid: {u.ref_bonus_paid}
-"""
-    await update.message.reply_text(text, reply_markup=get_main_keyboard())
-
-async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
-        return
-
-    if len(context.args) < 2 or not context.args[0].isdigit() or not re.match(r"^-?\d+$", context.args[1]):
-        await update.message.reply_text("Используй: /admin_add <telegram_id> <points>", reply_markup=get_main_keyboard())
-        return
-
-    tid = int(context.args[0])
-    pts = int(context.args[1])
-
-    u = await add_points(tid, pts)
-    if not u:
-        await update.message.reply_text("Юзер не найден.", reply_markup=get_main_keyboard())
-        return
-
-    await update.message.reply_text(f"✅ Начислено {pts}. Теперь у юзера {u.points} баллов.", reply_markup=get_main_keyboard())
-
-async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
-        return
-
-    if not context.args:
-        await update.message.reply_text("Используй: /find @username", reply_markup=get_main_keyboard())
-        return
-
-    username = context.args[0]
-    u = await find_user_by_username(username)
-    if not u:
-        await update.message.reply_text("Не найдено. Этот человек ещё не писал боту (/start).", reply_markup=get_main_keyboard())
-        return
-
-    await update.message.reply_text(
-        f"✅ Найден:\n"
-        f"telegram_id: {u.telegram_id}\n"
-        f"username: @{u.username or '-'}\n"
-        f"name: {u.first_name or '-'}\n"
-        f"points: {u.points}\n"
-        f"tier: {u.tier}",
-        reply_markup=get_main_keyboard()
-    )
-
-async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    if not q:
-        return
-    await q.answer()
-
-    uid = q.from_user.id
-    if not is_admin(uid):
-        await q.edit_message_text("⛔️ Нет доступа.")
-        return
-
-    data = q.data or ""
-    if data == "admin_stats":
-        await q.edit_message_text((await admin_stats_text()), parse_mode="Markdown")
-        return
-
-    if data == "admin_sweep":
-        marked = await sweep_deleted_posts(batch=120)
-        if not marked:
-            await q.edit_message_text("🧹 Sweep: ничего не найдено.")
-        else:
-            await q.edit_message_text(f"🧹 Sweep: помечены удалёнными: {marked}")
-        return
-
-async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        return
-    txt = update.message.text.strip()
-
-    if txt == "👤 Профиль":
-        await cmd_profile(update, context)
-        return
-
-    if txt == "ℹ️ Помощь":
-        await cmd_help(update, context)
-        return
-
-    if txt == "↩️ В канал":
-        await send_channel_button(update, context)
-        return
-
-# channel indexing
 async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
     if not msg:
@@ -990,30 +420,11 @@ async def start_telegram_bot():
         return
 
     tg_app = Application.builder().token(BOT_TOKEN).build()
-
-    tg_app.add_error_handler(tg_error_handler)
-
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
-    tg_app.add_handler(CommandHandler("help", cmd_help))
-    tg_app.add_handler(CommandHandler("invite", cmd_invite))
-    tg_app.add_handler(CommandHandler("brandtags", cmd_brandtags))
-    tg_app.add_handler(CommandHandler("myid", cmd_myid))
-    tg_app.add_handler(CommandHandler("id", cmd_id))
-
-    tg_app.add_handler(CommandHandler("admin", cmd_admin))
-    tg_app.add_handler(CommandHandler("admin_stats", cmd_admin_stats))
-    tg_app.add_handler(CommandHandler("admin_sweep", cmd_admin_sweep))
-    tg_app.add_handler(CommandHandler("admin_user", cmd_admin_user))
-    tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
-    tg_app.add_handler(CommandHandler("find", cmd_admin_find))
-
-    tg_app.add_handler(CallbackQueryHandler(on_callback))
 
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
-
-    tg_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), on_text_button))
 
     async def run():
         await tg_app.initialize()
@@ -1042,7 +453,10 @@ async def stop_telegram_bot():
             tg_app = None
 
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (МИНИ АПП НЕ ТРОГАЕМ, ТОЛЬКО УБРАЛИ 2 КНОПКИ В SEPHORA + ДОБАВИЛИ БРЕНДЫ)
+# WEBAPP HTML (МИНИМАЛЬНЫЕ ПРАВКИ ПО ТВОЕМУ ТЗ)
+# 1) "Тип продукта / факты" -> "Факты" (tag: Факты)
+# 2) Новая вкладка в Tabs: "Тип продукта"
+# 3) Экран "Тип продукта" с кнопками по тегам
 # -----------------------------------------------------------------------------
 def get_webapp_html() -> str:
     html = r"""<!DOCTYPE html>
@@ -1135,11 +549,13 @@ def get_webapp_html() -> str:
     );
 
     const Tabs = ({ active, onChange }) => {
+      // ✅ добавили вкладку "Тип продукта"
       const tabs = [
         { id: "home", label: "Главное" },
         { id: "cat", label: "Категории" },
         { id: "brand", label: "Бренды" },
-        { id: "sephora", label: "Sephora" }
+        { id: "sephora", label: "Sephora" },
+        { id: "ptype", label: "Тип продукта" },
       ];
       return (
         <div style={{ display: "flex", gap: "8px", marginTop: "14px" }}>
@@ -1318,6 +734,7 @@ def get_webapp_html() -> str:
                 <Button icon="📂" label="Категории" onClick={() => changeTab("cat")} />
                 <Button icon="🏷" label="Бренды" onClick={() => changeTab("brand")} />
                 <Button icon="💸" label="Sephora" onClick={() => changeTab("sephora")} />
+                <Button icon="🧴" label="Тип продукта" onClick={() => changeTab("ptype")} />
                 <Button icon="💎" label="Beauty Challenges" onClick={() => openPosts("Challenge")} />
                 <Button icon="↩️" label="В канал" onClick={() => openLink(`https://t.me/${CHANNEL}`)} />
               </Panel>
@@ -1331,7 +748,10 @@ def get_webapp_html() -> str:
                 <Button icon="🔥" label="Тренд" onClick={() => openPosts("Тренд")} />
                 <Button icon="🏛" label="История бренда" onClick={() => openPosts("История")} />
                 <Button icon="⭐" label="Личная оценка" onClick={() => openPosts("Оценка")} />
-                <Button icon="🧴" label="Тип продукта / факты" onClick={() => openPosts("Факты")} />
+
+                {/* ✅ было "Тип продукта / факты" — стало ОДНО "Факты" */}
+                <Button icon="🧾" label="Факты" onClick={() => openPosts("Факты")} />
+
                 <Button icon="🧪" label="Составы продуктов" onClick={() => openPosts("Состав")} />
               </Panel>
             );
@@ -1339,61 +759,40 @@ def get_webapp_html() -> str:
           case "brand":
             return (
               <Panel>
-                <Button icon="✨" label="The Ordinary" onClick={() => openPosts("TheOrdinary")} />
                 <Button icon="✨" label="Dior" onClick={() => openPosts("Dior")} />
                 <Button icon="✨" label="Chanel" onClick={() => openPosts("Chanel")} />
-                <Button icon="✨" label="Kylie Cosmetics" onClick={() => openPosts("KylieCosmetics")} />
-                <Button icon="✨" label="Gisou" onClick={() => openPosts("Gisou")} />
-                <Button icon="✨" label="Rare Beauty" onClick={() => openPosts("RareBeauty")} />
-                <Button icon="✨" label="Yves Saint Laurent" onClick={() => openPosts("YSL")} />
-                <Button icon="✨" label="Givenchy" onClick={() => openPosts("Givenchy")} />
                 <Button icon="✨" label="Charlotte Tilbury" onClick={() => openPosts("CharlotteTilbury")} />
-                <Button icon="✨" label="NARS" onClick={() => openPosts("NARS")} />
-                <Button icon="✨" label="Sol de Janeiro" onClick={() => openPosts("SolDeJaneiro")} />
-                <Button icon="✨" label="Huda Beauty" onClick={() => openPosts("HudaBeauty")} />
-                <Button icon="✨" label="Rhode" onClick={() => openPosts("Rhode")} />
-                <Button icon="✨" label="Tower 28 Beauty" onClick={() => openPosts("Tower28Beauty")} />
-                <Button icon="✨" label="Benefit Cosmetics" onClick={() => openPosts("BenefitCosmetics")} />
-                <Button icon="✨" label="Estée Lauder" onClick={() => openPosts("EsteeLauder")} />
-                <Button icon="✨" label="Sisley" onClick={() => openPosts("Sisley")} />
-                <Button icon="✨" label="Kérastase" onClick={() => openPosts("Kerastase")} />
-                <Button icon="✨" label="Armani Beauty" onClick={() => openPosts("ArmaniBeauty")} />
-                <Button icon="✨" label="Hourglass" onClick={() => openPosts("Hourglass")} />
-                <Button icon="✨" label="Shiseido" onClick={() => openPosts("Shiseido")} />
-                <Button icon="✨" label="Tom Ford Beauty" onClick={() => openPosts("TomFordBeauty")} />
-                <Button icon="✨" label="Tarte" onClick={() => openPosts("Tarte")} />
-                <Button icon="✨" label="Sephora Collection" onClick={() => openPosts("SephoraCollection")} />
-                <Button icon="✨" label="Clinique" onClick={() => openPosts("Clinique")} />
-                <Button icon="✨" label="Dolce & Gabbana" onClick={() => openPosts("DolceGabbana")} />
-                <Button icon="✨" label="Kayali" onClick={() => openPosts("Kayali")} />
-                <Button icon="✨" label="Guerlain" onClick={() => openPosts("Guerlain")} />
-                <Button icon="✨" label="Fenty Beauty" onClick={() => openPosts("FentyBeauty")} />
-                <Button icon="✨" label="Too Faced" onClick={() => openPosts("TooFaced")} />
-                <Button icon="✨" label="MAKE UP FOR EVER" onClick={() => openPosts("MakeUpForEver")} />
-                <Button icon="✨" label="Erborian" onClick={() => openPosts("Erborian")} />
-                <Button icon="✨" label="Natasha Denona" onClick={() => openPosts("NatashaDenona")} />
-                <Button icon="✨" label="Lancôme" onClick={() => openPosts("Lancome")} />
-                <Button icon="✨" label="Kosas" onClick={() => openPosts("Kosas")} />
-                <Button icon="✨" label="ONE/SIZE" onClick={() => openPosts("OneSize")} />
-                <Button icon="✨" label="Laneige" onClick={() => openPosts("Laneige")} />
-                <Button icon="✨" label="Makeup by Mario" onClick={() => openPosts("MakeupByMario")} />
-                <Button icon="✨" label="Valentino Beauty" onClick={() => openPosts("ValentinoBeauty")} />
-                <Button icon="✨" label="Drunk Elephant" onClick={() => openPosts("DrunkElephant")} />
-                <Button icon="✨" label="Olaplex" onClick={() => openPosts("Olaplex")} />
-                <Button icon="✨" label="Anastasia Beverly Hills" onClick={() => openPosts("AnastasiaBeverlyHills")} />
-                <Button icon="✨" label="Amika" onClick={() => openPosts("Amika")} />
-                <Button icon="✨" label="BYOMA" onClick={() => openPosts("BYOMA")} />
-                <Button icon="✨" label="Glow Recipe" onClick={() => openPosts("GlowRecipe")} />
-                <Button icon="✨" label="Milk Makeup" onClick={() => openPosts("MilkMakeup")} />
-                <Button icon="✨" label="Summer Fridays" onClick={() => openPosts("SummerFridays")} />
-                <Button icon="✨" label="K18" onClick={() => openPosts("K18")} />
               </Panel>
             );
 
           case "sephora":
             return (
               <Panel>
+                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={() => openPosts("SephoraTR")} />
                 <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo")} />
+                <Button icon="🧾" label="Гайды / как покупать" onClick={() => openPosts("SephoraGuide")} />
+              </Panel>
+            );
+
+          // ✅ новый экран "Тип продукта"
+          case "ptype":
+            return (
+              <Panel>
+                <Button icon="🧴" label="Праймер" onClick={() => openPosts("Праймер")} />
+                <Button icon="🧴" label="Тональная основа" onClick={() => openPosts("ТональнаяОснова")} />
+                <Button icon="🧴" label="Консилер" onClick={() => openPosts("Консилер")} />
+                <Button icon="🧴" label="Пудра" onClick={() => openPosts("Пудра")} />
+                <Button icon="🧴" label="Румяна" onClick={() => openPosts("Румяна")} />
+                <Button icon="🧴" label="Скульптор" onClick={() => openPosts("Скульптор")} />
+                <Button icon="🧴" label="Бронзер" onClick={() => openPosts("Бронзер")} />
+                <Button icon="🧴" label="Продукт для бровей" onClick={() => openPosts("ПродуктДляБровей")} />
+                <Button icon="🧴" label="Хайлайтер" onClick={() => openPosts("Хайлайтер")} />
+                <Button icon="🧴" label="Тушь" onClick={() => openPosts("Тушь")} />
+                <Button icon="🧴" label="Тени" onClick={() => openPosts("Тени")} />
+                <Button icon="🧴" label="Помада" onClick={() => openPosts("Помада")} />
+                <Button icon="🧴" label="Карандаш для губ" onClick={() => openPosts("КарандашДляГуб")} />
+                <Button icon="🧴" label="Палетка" onClick={() => openPosts("Палетка")} />
+                <Button icon="🧴" label="Фиксатор" onClick={() => openPosts("Фиксатор")} />
               </Panel>
             );
 
@@ -1467,16 +866,13 @@ async def get_user_api(telegram_id: int):
         raise HTTPException(status_code=404, detail="User not found")
     return {
         "id": user.id,
-        "telegram_id": int(user.telegram_id),
+        "telegram_id": user.telegram_id,
         "username": user.username,
         "first_name": user.first_name,
         "tier": user.tier,
         "points": user.points,
         "favorites": user.favorites,
         "joined_at": user.joined_at.isoformat(),
-        "daily_streak": user.daily_streak,
-        "best_streak": user.best_streak,
-        "referral_count": user.referral_count,
     }
 
 @app.post("/api/user/{telegram_id}/points")
@@ -1489,16 +885,15 @@ async def add_points_api(telegram_id: int, points: int):
 @app.get("/api/posts")
 async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     if not tag:
-        return []
-    if tag in BLOCKED_TAGS:
+        # без тега не отдаём ничего — чтобы случайно нигде не показывались
         return []
 
     rows = await list_posts(tag=tag, limit=limit, offset=offset)
     out = []
     for p in rows:
         out.append({
-            "message_id": int(p.message_id),
-            "url": p.permalink or make_permalink(int(p.message_id)),
+            "message_id": p.message_id,
+            "url": p.permalink or make_permalink(p.message_id),
             "tags": p.tags or [],
             "preview": preview_text(p.text),
         })
