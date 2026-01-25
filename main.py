@@ -1,4 +1,4 @@
-# /app/main.py  (single-file монолит, обновлён только по требованиям)
+# main.py
 
 import os
 import re
@@ -175,7 +175,7 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;")
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;")
 
-        # users (для старой базы)
+        # users
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_daily_bonus_at TIMESTAMP NULL;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_streak INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak INTEGER NOT NULL DEFAULT 0;")
@@ -183,7 +183,7 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_count INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
 
-        # ✅ Postgres: int32 -> bigint
+        # Postgres: int32 -> bigint
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN referred_by TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE posts ALTER COLUMN message_id TYPE BIGINT;")
@@ -499,24 +499,24 @@ tg_app: Application | None = None
 tg_task: asyncio.Task | None = None
 sweeper_task: asyncio.Task | None = None
 
-_last_channel_msg_id: dict[int, int] = {}
-
 
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
 
 def get_main_keyboard():
-    webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
+    # Важно: web_app кнопки корректно работают только с https публичным доменом.
+    if not PUBLIC_BASE_URL or not PUBLIC_BASE_URL.startswith("https://"):
+        logger.warning("PUBLIC_BASE_URL must be https://... for ReplyKeyboard WebApp buttons to work reliably")
 
-    # ✅ Требование: "↩️ В канал" не пишет сообщений и не создаёт/редактирует сообщений.
-    # Делается через WebApp-кнопку, которая открывает /open-channel и мгновенно вызывает tg.openTelegramLink().
-    open_channel_url = f"{PUBLIC_BASE_URL}/open-channel" if PUBLIC_BASE_URL else "/open-channel"
+    webapp_url = f"{PUBLIC_BASE_URL}/webapp"
+    open_channel_url = f"{PUBLIC_BASE_URL}/open-channel"
 
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
             [KeyboardButton("👤 Профиль"), KeyboardButton("ℹ️ Помощь")],
+            # ✅ Никаких сообщений в чат: это web_app кнопка
             [KeyboardButton("↩️ В канал", web_app=WebAppInfo(url=open_channel_url))],
         ],
         resize_keyboard=True,
@@ -531,21 +531,6 @@ def build_help_text() -> str:
 2) Выбирай категории/бренды и открывай посты.
 3) *👤 Профиль* — баллы, уровень, стрик.
 4) *↩️ В канал* — откроет канал в 1 клик.
-
-💎 *Баллы и антифарм*
-• Первый /start: +10 за регистрацию
-• Далее: +5 за визит, строго 1 раз в 24 часа
-
-🔥 *Стрик (серия дней)*
-За ежедневный вход растёт стрик. Бонусы:
-• 3 дня: +10
-• 7 дней: +30
-• 14 дней: +80
-• 30 дней: +250
-
-🎟 *Рефералка*
-Команда /invite даёт твою ссылку.
-За каждого нового пользователя по ссылке: +20 (1 раз за каждого).
 """
 
 
@@ -559,29 +544,6 @@ async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -
             )
     except Exception:
         pass
-
-
-async def open_channel_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = f"https://t.me/{CHANNEL_USERNAME}"
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Открыть канал ↗️", url=url)]])
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-
-    prev_id = _last_channel_msg_id.get(user_id)
-    if prev_id:
-        try:
-            await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=prev_id,
-                text="↩️ В канал:",
-                reply_markup=kb,
-            )
-            return
-        except Exception:
-            _last_channel_msg_id.pop(user_id, None)
-
-    msg = await update.message.reply_text("↩️ В канал:", reply_markup=kb)
-    _last_channel_msg_id[user_id] = msg.message_id
 
 
 def build_welcome_text(
@@ -613,18 +575,6 @@ def build_welcome_text(
 
     return f"""\
 Привет, {name}! 🖤
-
-Я — Natural Sense Assistant.
-• открываю мини-журнал внутри Telegram
-• показываю профиль и баллы
-• даю бонусы за ежедневные визиты и стрик
-• веду в канал одним нажатием
-
-Как пользоваться:
-1) Нажми «📲 Открыть журнал»
-2) Выбирай категории/бренды и открывай посты
-3) «👤 Профиль» — баллы, уровень, стрик
-4) «ℹ️ Помощь» — правила и фишки
 
 {bonus_line}
 {streak_line}{ref_line}
@@ -954,8 +904,7 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_help(update, context)
         return
 
-    # ✅ "↩️ В канал" теперь WebApp-кнопка и не шлёт текст.
-    # Если пользователь вручную напечатает — ничего не отвечаем (требование: не писать сообщений).
+    # "↩️ В канал" — web_app кнопка, текст не прилетает; если вручную ввели — молчим.
     if txt == "↩️ В канал":
         return
 
@@ -1031,7 +980,6 @@ async def start_telegram_bot():
 
     tg_app.add_error_handler(tg_error_handler)
 
-    # user commands
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("help", cmd_help))
     tg_app.add_handler(CommandHandler("invite", cmd_invite))
@@ -1039,7 +987,6 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("myid", cmd_myid))
     tg_app.add_handler(CommandHandler("id", cmd_id))
 
-    # admin commands
     tg_app.add_handler(CommandHandler("admin", cmd_admin))
     tg_app.add_handler(CommandHandler("admin_stats", cmd_admin_stats))
     tg_app.add_handler(CommandHandler("admin_sweep", cmd_admin_sweep))
@@ -1047,13 +994,9 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
-    # callbacks
     tg_app.add_handler(CallbackQueryHandler(on_callback))
-
-    # text buttons
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
 
-    # channel indexing
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
 
@@ -1122,6 +1065,7 @@ def get_webapp_html() -> str:
 
     const openLink = (url) => {
       if (tg?.openTelegramLink) tg.openTelegramLink(url);
+      else if (tg?.openLink) tg.openLink(url);
       else window.open(url, "_blank");
     };
 
@@ -1481,43 +1425,78 @@ def get_webapp_html() -> str:
 
 
 def get_open_channel_html() -> str:
-    # Минимальная WebApp-страница: 1 тап -> открыть канал -> закрыть webview.
-    channel_url = f"https://t.me/{CHANNEL_USERNAME}"
+    """
+    Максимально "1 тап":
+    - WebApp открывается по кнопке (это уже user gesture)
+    - сразу пытаемся открыть канал через openTelegramLink/openLink
+    - затем tg://resolve
+    - затем https fallback
+    - делаем несколько попыток с задержками
+    """
+    channel_username = CHANNEL_USERNAME
+    https_url = f"https://t.me/{channel_username}"
+    tg_scheme = f"tg://resolve?domain={channel_username}"
+
     return f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Open Channel</title>
+  <title>Open</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     body {{
       margin: 0;
       background: #0c0f14;
-      color: rgba(255,255,255,0.7);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
     }}
   </style>
 </head>
 <body>
-  <div>Открываем канал…</div>
-  <script>
-    (function() {{
-      try {{
-        const tg = window.Telegram && window.Telegram.WebApp;
-        const url = {channel_url!r};
-        if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
-        else window.location.href = url;
-        if (tg && tg.close) setTimeout(() => tg.close(), 200);
-      }} catch (e) {{
-        window.location.href = {channel_url!r};
+<script>
+(function() {{
+  const httpsUrl = {https_url!r};
+  const tgScheme = {tg_scheme!r};
+  const tg = window.Telegram && window.Telegram.WebApp;
+
+  try {{ tg && tg.ready && tg.ready(); }} catch (e) {{}}
+
+  function attempt() {{
+    try {{
+      if (tg && typeof tg.openTelegramLink === "function") {{
+        tg.openTelegramLink(httpsUrl);
+        return;
       }}
-    }})();
-  </script>
+    }} catch (e) {{}}
+
+    try {{
+      if (tg && typeof tg.openLink === "function") {{
+        tg.openLink(httpsUrl);
+        return;
+      }}
+    }} catch (e) {{}}
+
+    try {{
+      window.location.replace(tgScheme);
+      return;
+    }} catch (e) {{}}
+
+    try {{
+      window.location.replace(httpsUrl);
+    }} catch (e) {{}}
+  }}
+
+  // несколько попыток — на части клиентов первый вызов игнорится
+  attempt();
+  setTimeout(attempt, 120);
+  setTimeout(attempt, 350);
+  setTimeout(attempt, 800);
+
+  // закрываем WebView чуть позже (раньше может ломать переход)
+  setTimeout(function() {{
+    try {{ tg && tg.close && tg.close(); }} catch (e) {{}}
+  }}, 1500);
+}})();
+</script>
 </body>
 </html>"""
 
@@ -1569,7 +1548,6 @@ async def webapp():
     return HTMLResponse(get_webapp_html())
 
 
-# ✅ Новый endpoint для "↩️ В канал" без сообщений в чате
 @app.get("/open-channel", response_class=HTMLResponse)
 async def open_channel():
     return HTMLResponse(get_open_channel_html())
