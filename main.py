@@ -1,3 +1,4 @@
+# main.py
 import os
 import re
 import asyncio
@@ -505,24 +506,55 @@ sweeper_task: asyncio.Task | None = None
 
 _last_channel_msg_id: dict[int, int] = {}
 
+# ✅ ДОБАВЛЕНО (по договорённости): для inline "↩️ В канал"
+_last_channel_inline_msg_id: dict[int, int] = {}
+
 
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
 
-# ✅ ИЗМЕНЕНО: "↩️ В канал" открывает /open-channel (без сообщений, /start не ломается)
+# ✅ ИЗМЕНЕНО (по договорённости): снизу только Профиль/Помощь
 def get_main_keyboard():
-    webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
-    open_channel_url = f"{PUBLIC_BASE_URL}/open-channel" if PUBLIC_BASE_URL else "/open-channel"
-
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
             [KeyboardButton("👤 Профиль"), KeyboardButton("ℹ️ Помощь")],
-            [KeyboardButton("↩️ В канал", web_app=WebAppInfo(url=open_channel_url))],
         ],
         resize_keyboard=True,
     )
+
+
+# ✅ ДОБАВЛЕНО (по договорённости): inline-кнопка "↩️ В канал" под сообщением
+def build_channel_inline_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("↩️ В канал", url=f"https://t.me/{CHANNEL_USERNAME}")]]
+    )
+
+
+async def send_or_update_channel_inline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not update.effective_user:
+        return
+
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    kb = build_channel_inline_kb()
+    text = "↩️ Открыть канал:"
+
+    prev_id = _last_channel_inline_msg_id.get(user_id)
+    if prev_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=prev_id,
+                text=text,
+                reply_markup=kb,
+            )
+            return
+        except Exception:
+            _last_channel_inline_msg_id.pop(user_id, None)
+
+    msg = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
+    _last_channel_inline_msg_id[user_id] = msg.message_id
 
 
 def build_help_text() -> str:
@@ -661,11 +693,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             referral_paid=referral_paid,
         )
         await update.message.reply_text(text_, reply_markup=get_main_keyboard())
+        await send_or_update_channel_inline(update, context)
         return
 
     user2, granted, hours_left, streak_bonus = await add_daily_bonus_and_update_streak(user.id)
     if not user2:
         await update.message.reply_text("Ошибка пользователя. Нажми /start ещё раз.", reply_markup=get_main_keyboard())
+        await send_or_update_channel_inline(update, context)
         return
 
     text_ = build_welcome_text(
@@ -678,6 +712,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         referral_paid=False,
     )
     await update.message.reply_text(text_, reply_markup=get_main_keyboard())
+    await send_or_update_channel_inline(update, context)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -954,10 +989,6 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if txt == "ℹ️ Помощь":
         await cmd_help(update, context)
-        return
-
-    # ✅ ИЗМЕНЕНО: если вдруг текстом прилетит — ничего не отправляем
-    if txt == "↩️ В канал":
         return
 
 
@@ -1431,52 +1462,6 @@ def get_webapp_html() -> str:
     return html.replace("__CHANNEL__", CHANNEL_USERNAME)
 
 
-# ✅ ДОБАВЛЕНО: страница редиректа в канал (без сообщений)
-def get_open_channel_html() -> str:
-    channel_url = f"https://t.me/{CHANNEL_USERNAME}"
-    return f"""<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Open channel</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <style>html,body{{margin:0;background:#0c0f14;}}</style>
-</head>
-<body>
-<script>
-(function() {{
-  const tg = window.Telegram && window.Telegram.WebApp;
-  const url = {channel_url!r};
-
-  try {{ tg && tg.ready && tg.ready(); }} catch (e) {{}}
-
-  function go() {{
-    try {{
-      if (tg && typeof tg.openTelegramLink === "function") {{
-        tg.openTelegramLink(url);
-        return;
-      }}
-    }} catch (e) {{}}
-
-    try {{ window.location.replace(url); }} catch (e) {{
-      try {{ window.location.href = url; }} catch (e2) {{}}
-    }}
-  }}
-
-  go();
-  setTimeout(go, 120);
-  setTimeout(go, 350);
-
-  setTimeout(function() {{
-    try {{ tg && tg.close && tg.close(); }} catch (e) {{}}
-  }}, 800);
-}})();
-</script>
-</body>
-</html>"""
-
-
 # -----------------------------------------------------------------------------
 # FASTAPI LIFESPAN
 # -----------------------------------------------------------------------------
@@ -1520,11 +1505,6 @@ async def root():
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp():
     return HTMLResponse(get_webapp_html())
-
-# ✅ ДОБАВЛЕНО: endpoint для кнопки "↩️ В канал"
-@app.get("/open-channel", response_class=HTMLResponse)
-async def open_channel():
-    return HTMLResponse(get_open_channel_html())
 
 @app.get("/api/user/{telegram_id}")
 async def get_user_api(telegram_id: int):
