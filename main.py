@@ -1,4 +1,3 @@
-# main.py
 import os
 import re
 import asyncio
@@ -114,7 +113,6 @@ class User(Base):
 
     id = Column(Integer, primary_key=True)
 
-    # ✅ BIGINT чтобы не было overflow
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
 
     username = Column(String, nullable=True)
@@ -125,12 +123,10 @@ class User(Base):
     favorites = Column(JSON, default=list)
     joined_at = Column(DateTime, default=lambda: datetime.utcnow())  # naive UTC
 
-    # антифарм + стрик
     last_daily_bonus_at = Column(DateTime, nullable=True)  # naive UTC
     daily_streak = Column(Integer, default=0)
     best_streak = Column(Integer, default=0)
 
-    # рефералка
     referred_by = Column(BigInteger, nullable=True)
     referral_count = Column(Integer, default=0)
     ref_bonus_paid = Column(Boolean, default=False, nullable=False)
@@ -173,11 +169,9 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-        # posts
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;")
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;")
 
-        # users (для старой базы)
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_daily_bonus_at TIMESTAMP NULL;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_streak INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak INTEGER NOT NULL DEFAULT 0;")
@@ -185,7 +179,6 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_count INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
 
-        # ✅ Postgres: int32 -> bigint
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN referred_by TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE posts ALTER COLUMN message_id TYPE BIGINT;")
@@ -258,7 +251,6 @@ async def create_user_with_referral(
         session.add(user)
         await session.flush()
 
-        # платим пригласившему 1 раз за нового
         if inviter and not user.ref_bonus_paid:
             inviter.points = (inviter.points or 0) + REFERRAL_BONUS_POINTS
             inviter.referral_count = (inviter.referral_count or 0) + 1
@@ -293,7 +285,6 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
         now = datetime.utcnow()
         last = user.last_daily_bonus_at
 
-        # антифарм: строго 24ч
         if last is not None and (now - last) < timedelta(days=1):
             delta = timedelta(days=1) - (now - last)
             hours_left = max(
@@ -304,7 +295,6 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
 
         user.points = (user.points or 0) + DAILY_BONUS_POINTS
 
-        # стрик: окно 48ч
         if last is None:
             user.daily_streak = 1
         else:
@@ -494,7 +484,7 @@ async def sweeper_loop():
             await sweep_deleted_posts(batch=80)
         except Exception as e:
             logger.error("Sweeper error: %s", e)
-        await asyncio.sleep(300)  # 5 минут
+        await asyncio.sleep(300)
 
 
 # -----------------------------------------------------------------------------
@@ -506,15 +496,12 @@ sweeper_task: asyncio.Task | None = None
 
 _last_channel_msg_id: dict[int, int] = {}
 
-# ✅ ДОБАВЛЕНО (по договорённости): для inline "↩️ В канал"
-_last_channel_inline_msg_id: dict[int, int] = {}
-
 
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
 
-# ✅ ИЗМЕНЕНО (по договорённости): снизу только Профиль/Помощь
+# ✅ ИЗМЕНЕНО: ReplyKeyboard теперь ТОЛЬКО "Профиль" и "Помощь"
 def get_main_keyboard():
     return ReplyKeyboardMarkup(
         [
@@ -524,37 +511,29 @@ def get_main_keyboard():
     )
 
 
-# ✅ ДОБАВЛЕНО (по договорённости): inline-кнопка "↩️ В канал" под сообщением
-def build_channel_inline_kb() -> InlineKeyboardMarkup:
+# ✅ ДОБАВЛЕНО: inline-кнопка "↩️ В канал" прикрепляется к сообщению /start
+def build_start_inline_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("↩️ В канал", url=f"https://t.me/{CHANNEL_USERNAME}")]]
     )
 
 
-async def send_or_update_channel_inline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_chat or not update.effective_user:
+async def ensure_reply_keyboard_visible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Telegram не позволяет одновременно InlineKeyboard и ReplyKeyboard в одном сообщении.
+    Поэтому "Профиль/Помощь" показываем отдельным коротким сообщением и сразу удаляем.
+    """
+    if not update.effective_chat:
         return
-
     chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    kb = build_channel_inline_kb()
-    text = "↩️ Открыть канал:"
-
-    prev_id = _last_channel_inline_msg_id.get(user_id)
-    if prev_id:
+    try:
+        m = await context.bot.send_message(chat_id=chat_id, text="\u200b", reply_markup=get_main_keyboard())
         try:
-            await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=prev_id,
-                text=text,
-                reply_markup=kb,
-            )
-            return
+            await context.bot.delete_message(chat_id=chat_id, message_id=m.message_id)
         except Exception:
-            _last_channel_inline_msg_id.pop(user_id, None)
-
-    msg = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
-    _last_channel_inline_msg_id[user_id] = msg.message_id
+            pass
+    except Exception:
+        pass
 
 
 def build_help_text() -> str:
@@ -692,14 +671,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             streak_bonus=0,
             referral_paid=referral_paid,
         )
-        await update.message.reply_text(text_, reply_markup=get_main_keyboard())
-        await send_or_update_channel_inline(update, context)
+        # ✅ ИЗМЕНЕНО: inline "↩️ В канал" прикреплён к сообщению /start
+        await update.message.reply_text(text_, reply_markup=build_start_inline_kb())
+        await ensure_reply_keyboard_visible(update, context)
         return
 
     user2, granted, hours_left, streak_bonus = await add_daily_bonus_and_update_streak(user.id)
     if not user2:
-        await update.message.reply_text("Ошибка пользователя. Нажми /start ещё раз.", reply_markup=get_main_keyboard())
-        await send_or_update_channel_inline(update, context)
+        await update.message.reply_text("Ошибка пользователя. Нажми /start ещё раз.", reply_markup=build_start_inline_kb())
+        await ensure_reply_keyboard_visible(update, context)
         return
 
     text_ = build_welcome_text(
@@ -711,8 +691,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         streak_bonus=streak_bonus,
         referral_paid=False,
     )
-    await update.message.reply_text(text_, reply_markup=get_main_keyboard())
-    await send_or_update_channel_inline(update, context)
+    # ✅ ИЗМЕНЕНО: inline "↩️ В канал" прикреплён к сообщению /start
+    await update.message.reply_text(text_, reply_markup=build_start_inline_kb())
+    await ensure_reply_keyboard_visible(update, context)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -814,7 +795,6 @@ async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# --- admin ---
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_admin(uid):
@@ -1063,7 +1043,6 @@ async def start_telegram_bot():
 
     tg_app.add_error_handler(tg_error_handler)
 
-    # user commands
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("help", cmd_help))
     tg_app.add_handler(CommandHandler("invite", cmd_invite))
@@ -1071,7 +1050,6 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("myid", cmd_myid))
     tg_app.add_handler(CommandHandler("id", cmd_id))
 
-    # admin commands
     tg_app.add_handler(CommandHandler("admin", cmd_admin))
     tg_app.add_handler(CommandHandler("admin_stats", cmd_admin_stats))
     tg_app.add_handler(CommandHandler("admin_sweep", cmd_admin_sweep))
@@ -1079,13 +1057,9 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
-    # callbacks
     tg_app.add_handler(CallbackQueryHandler(on_callback))
-
-    # text buttons
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
 
-    # channel indexing
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
 
@@ -1202,7 +1176,7 @@ def get_webapp_html() -> str:
         { id: "cat", label: "Категории" },
         { id: "brand", label: "Бренды" },
         { id: "sephora", label: "Sephora" },
-        { id: "ptype", label: "Тип продукта" },
+        { id: "ptype", label: "Продукт" }, // ✅ ИЗМЕНЕНО: было "Тип продукта"
       ];
       return (
         <div style={{ display: "flex", gap: "8px", marginTop: "14px" }}>
@@ -1380,7 +1354,7 @@ def get_webapp_html() -> str:
                 <Button icon="📂" label="Категории" onClick={() => changeTab("cat")} />
                 <Button icon="🏷" label="Бренды" onClick={() => changeTab("brand")} />
                 <Button icon="💸" label="Sephora" onClick={() => changeTab("sephora")} />
-                <Button icon="🧴" label="Тип продукта" onClick={() => changeTab("ptype")} />
+                <Button icon="🧴" label="Продукт" onClick={() => changeTab("ptype")} /> {/* ✅ ИЗМЕНЕНО */}
                 <Button icon="💎" label="Beauty Challenges" onClick={() => openPosts("Challenge")} />
                 <Button icon="↩️" label="В канал" onClick={() => openLink(`https://t.me/${CHANNEL}`)} />
               </Panel>
@@ -1411,7 +1385,6 @@ def get_webapp_html() -> str:
           case "sephora":
             return (
               <Panel>
-                {/* ✅ ОСТАЁТСЯ ТОЛЬКО: Подарки / акции */}
                 <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo")} />
               </Panel>
             );
@@ -1498,13 +1471,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 async def root():
     return {"app": "NS · Natural Sense", "status": "running", "version": "FINAL"}
 
+
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp():
     return HTMLResponse(get_webapp_html())
+
 
 @app.get("/api/user/{telegram_id}")
 async def get_user_api(telegram_id: int):
@@ -1525,6 +1501,7 @@ async def get_user_api(telegram_id: int):
         "referral_count": user.referral_count or 0,
         "last_daily_bonus_at": user.last_daily_bonus_at.isoformat() if user.last_daily_bonus_at else None,
     }
+
 
 @app.get("/api/posts")
 async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
@@ -1548,6 +1525,7 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
             "preview": preview_text(p.text),
         })
     return out
+
 
 @app.get("/health")
 async def health():
