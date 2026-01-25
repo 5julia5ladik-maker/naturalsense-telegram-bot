@@ -58,7 +58,6 @@ def env_get(name: str, default: str | None = None) -> str | None:
     v = os.getenv(name)
     return v if v is not None else default
 
-
 BOT_TOKEN = env_get("BOT_TOKEN")
 PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
 CHANNEL_USERNAME = env_get("CHANNEL_USERNAME", "NaturalSense") or "NaturalSense"
@@ -107,7 +106,6 @@ STREAK_MILESTONES = {
 # -----------------------------------------------------------------------------
 Base = declarative_base()
 
-
 class User(Base):
     __tablename__ = "users"
 
@@ -134,7 +132,6 @@ class User(Base):
     referral_count = Column(Integer, default=0)
     ref_bonus_paid = Column(Boolean, default=False, nullable=False)
 
-
 class Post(Base):
     __tablename__ = "posts"
 
@@ -153,20 +150,17 @@ class Post(Base):
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
 
-
 # -----------------------------------------------------------------------------
 # DATABASE
 # -----------------------------------------------------------------------------
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-
 async def _safe_exec(conn, sql: str):
     try:
         await conn.execute(sql_text(sql))
     except Exception as e:
         logger.info("DB migration skipped/failed (ok in some DBs): %s | %s", sql, e)
-
 
 async def init_db():
     async with engine.begin() as conn:
@@ -191,7 +185,6 @@ async def init_db():
 
     logger.info("✅ Database initialized")
 
-
 # -----------------------------------------------------------------------------
 # USER / POINTS / STREAK / REFERRAL
 # -----------------------------------------------------------------------------
@@ -203,12 +196,10 @@ def _recalc_tier(user: User):
     else:
         user.tier = "free"
 
-
 async def get_user(telegram_id: int) -> Optional[User]:
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         return result.scalar_one_or_none()
-
 
 async def find_user_by_username(username: str) -> Optional[User]:
     u = (username or "").strip()
@@ -220,7 +211,6 @@ async def find_user_by_username(username: str) -> Optional[User]:
     async with async_session_maker() as session:
         res = await session.execute(select(User).where(func.lower(User.username) == u))
         return res.scalar_one_or_none()
-
 
 async def create_user_with_referral(
     telegram_id: int,
@@ -270,7 +260,6 @@ async def create_user_with_referral(
         logger.info("✅ New user created: %s", telegram_id)
         return user, referral_paid
 
-
 async def add_points(telegram_id: int, points: int) -> Optional[User]:
     async with async_session_maker() as session:
         user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
@@ -281,7 +270,6 @@ async def add_points(telegram_id: int, points: int) -> Optional[User]:
         await session.commit()
         await session.refresh(user)
         return user
-
 
 async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[User], bool, int, int]:
     async with async_session_maker() as session:
@@ -325,12 +313,10 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
         await session.refresh(user)
         return user, True, 0, streak_bonus
 
-
 # -----------------------------------------------------------------------------
 # POSTS INDEX (TAGS)
 # -----------------------------------------------------------------------------
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
-
 
 def extract_tags(text_: str | None) -> list[str]:
     if not text_:
@@ -343,17 +329,14 @@ def extract_tags(text_: str | None) -> list[str]:
             out.append(t)
     return out
 
-
 def preview_text(text_: str | None, limit: int = 180) -> str:
     if not text_:
         return ""
     s = re.sub(r"\s+", " ", text_.strip())
     return (s[:limit] + "…") if len(s) > limit else s
 
-
 def make_permalink(message_id: int) -> str:
     return f"https://t.me/{CHANNEL_USERNAME}/{message_id}"
-
 
 def to_naive_utc(dt: datetime | None) -> datetime | None:
     if dt is None:
@@ -361,7 +344,6 @@ def to_naive_utc(dt: datetime | None) -> datetime | None:
     if dt.tzinfo is None:
         return dt
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
-
 
 async def upsert_post_from_channel(
     message_id: int,
@@ -407,7 +389,6 @@ async def upsert_post_from_channel(
         logger.info("✅ Indexed post %s tags=%s", message_id, tags)
         return p
 
-
 async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
     if tag and tag in BLOCKED_TAGS:
         return []
@@ -425,7 +406,6 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
     if tag:
         rows = [p for p in rows if tag in (p.tags or [])]
     return rows
-
 
 # -----------------------------------------------------------------------------
 # DELETE SWEEPER (AUTO CHECK)
@@ -449,7 +429,6 @@ async def message_exists_public(message_id: int) -> bool:
     except Exception as e:
         logger.warning("Sweeper check failed for %s: %s", message_id, e)
         return True
-
 
 async def sweep_deleted_posts(batch: int = 80):
     async with async_session_maker() as session:
@@ -486,7 +465,6 @@ async def sweep_deleted_posts(batch: int = 80):
     logger.info("🧹 Marked deleted posts: %s", to_mark)
     return to_mark
 
-
 async def sweeper_loop():
     while True:
         try:
@@ -494,7 +472,6 @@ async def sweeper_loop():
         except Exception as e:
             logger.error("Sweeper error: %s", e)
         await asyncio.sleep(300)  # 5 минут
-
 
 # -----------------------------------------------------------------------------
 # TELEGRAM BOT
@@ -505,17 +482,13 @@ sweeper_task: asyncio.Task | None = None
 
 _last_channel_msg_id: dict[int, int] = {}
 
-
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
-
+# ✅ ИЗМЕНЕНО ТОЛЬКО ТУТ: кнопка "↩️ В канал" стала web_app и не пишет в чат
 def get_main_keyboard():
     webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
-
-    # ✅ ИЗМЕНЕНО: "↩️ В канал" -> web_app, чтобы не писало сообщений и открыло канал
     open_channel_url = f"{PUBLIC_BASE_URL}/open-channel" if PUBLIC_BASE_URL else "/open-channel"
-
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
@@ -524,7 +497,6 @@ def get_main_keyboard():
         ],
         resize_keyboard=True,
     )
-
 
 def build_help_text() -> str:
     return """\
@@ -551,7 +523,6 @@ def build_help_text() -> str:
 За каждого нового пользователя по ссылке: +20 (1 раз за каждого).
 """
 
-
 async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.exception("Telegram handler error: %s", context.error)
     try:
@@ -562,7 +533,6 @@ async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -
             )
     except Exception:
         pass
-
 
 async def open_channel_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = f"https://t.me/{CHANNEL_USERNAME}"
@@ -585,7 +555,6 @@ async def open_channel_clean(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     msg = await update.message.reply_text("↩️ В канал:", reply_markup=kb)
     _last_channel_msg_id[user_id] = msg.message_id
-
 
 def build_welcome_text(
     first_name: str | None,
@@ -633,7 +602,6 @@ def build_welcome_text(
 {streak_line}{ref_line}
 """
 
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
@@ -680,10 +648,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text_, reply_markup=get_main_keyboard())
 
-
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(build_help_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
-
 
 async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -702,7 +668,6 @@ async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
 За каждого нового пользователя по этой ссылке: +{REFERRAL_BONUS_POINTS} баллов (1 раз за каждого).
 """
     await update.message.reply_text(text, reply_markup=get_main_keyboard())
-
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -761,11 +726,9 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     await update.message.reply_text(text_, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
-
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     await update.message.reply_text(f"Твой telegram_id: {u.id}", reply_markup=get_main_keyboard())
-
 
 async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -778,7 +741,6 @@ async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"ID пользователя: {target.id}\nusername: @{target.username or '-'}\nname: {target.first_name or '-'}",
         reply_markup=get_main_keyboard()
     )
-
 
 # --- admin ---
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -794,7 +756,6 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     )
     await update.message.reply_text("👑 Админ-панель:", reply_markup=kb)
-
 
 async def admin_stats_text() -> str:
     async with async_session_maker() as session:
@@ -817,14 +778,12 @@ async def admin_stats_text() -> str:
 🗑 Помечено удалённых: *{deleted_posts}*
 """
 
-
 async def cmd_admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_admin(uid):
         await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
         return
     await update.message.reply_text(await admin_stats_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
-
 
 async def cmd_admin_sweep(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -836,7 +795,6 @@ async def cmd_admin_sweep(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🧹 Sweep: ничего не найдено.", reply_markup=get_main_keyboard())
     else:
         await update.message.reply_text(f"🧹 Sweep: помечены удалёнными: {marked}", reply_markup=get_main_keyboard())
-
 
 async def cmd_admin_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -870,7 +828,6 @@ Ref_paid: {u.ref_bonus_paid}
 """
     await update.message.reply_text(text, reply_markup=get_main_keyboard())
 
-
 async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_admin(uid):
@@ -890,7 +847,6 @@ async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(f"✅ Начислено {pts}. Теперь у юзера {u.points} баллов.", reply_markup=get_main_keyboard())
-
 
 async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -918,7 +874,6 @@ async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_main_keyboard()
     )
 
-
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not q:
@@ -943,7 +898,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text(f"🧹 Sweep: помечены удалёнными: {marked}")
         return
 
-
 async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -957,10 +911,9 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_help(update, context)
         return
 
-    # ✅ ИЗМЕНЕНО: ничего не отправляем и не отвечаем (никаких сообщений в чат)
+    # ✅ ИЗМЕНЕНО ТОЛЬКО ДЛЯ "↩️ В канал": не писать/не отправлять сообщений
     if txt == "↩️ В канал":
         return
-
 
 # -----------------------------------------------------------------------------
 # CHANNEL INDEXING
@@ -978,7 +931,6 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         media_file_id=None,
     )
 
-
 async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.edited_channel_post
     if not msg:
@@ -991,7 +943,6 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
         media_type=None,
         media_file_id=None,
     )
-
 
 # -----------------------------------------------------------------------------
 # TELEGRAM RUNNER (polling)
@@ -1020,7 +971,6 @@ async def _telegram_runner():
                 await tg_app.shutdown()
         except Exception:
             pass
-
 
 async def start_telegram_bot():
     global tg_app, tg_task
@@ -1061,7 +1011,6 @@ async def start_telegram_bot():
 
     tg_task = asyncio.create_task(_telegram_runner())
 
-
 async def stop_telegram_bot():
     global tg_task
     if tg_task:
@@ -1071,7 +1020,6 @@ async def stop_telegram_bot():
         except Exception:
             pass
         tg_task = None
-
 
 # -----------------------------------------------------------------------------
 # WEBAPP HTML (Mini App)
@@ -1213,7 +1161,7 @@ def get_webapp_html() -> str:
           borderRadius: "18px",
           border: "1px solid var(--stroke)",
           background: "rgba(255,255,255,0.06)",
-          color: var(--text),
+          color: "var(--text)",
           fontSize: "15px",
           margin: "10px 0",
           cursor: "pointer"
@@ -1381,6 +1329,7 @@ def get_webapp_html() -> str:
           case "sephora":
             return (
               <Panel>
+                {/* ✅ ОСТАЁТСЯ ТОЛЬКО: Подарки / акции */}
                 <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo")} />
               </Panel>
             );
@@ -1430,8 +1379,7 @@ def get_webapp_html() -> str:
 """
     return html.replace("__CHANNEL__", CHANNEL_USERNAME)
 
-
-# ✅ ДОБАВЛЕНО: страница, которая открывает канал без сообщений в чат
+# ✅ ДОБАВЛЕНО: HTML для мгновенного открытия канала (без сообщений)
 def get_open_channel_html() -> str:
     channel = CHANNEL_USERNAME
     https_url = f"https://t.me/{channel}"
@@ -1487,7 +1435,6 @@ def get_open_channel_html() -> str:
 </body>
 </html>"""
 
-
 # -----------------------------------------------------------------------------
 # FASTAPI LIFESPAN
 # -----------------------------------------------------------------------------
@@ -1510,7 +1457,6 @@ async def lifespan(app_: FastAPI):
         await stop_telegram_bot()
         logger.info("✅ NS · Natural Sense stopped")
 
-
 # -----------------------------------------------------------------------------
 # FASTAPI
 # -----------------------------------------------------------------------------
@@ -1524,22 +1470,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.get("/")
 async def root():
     return {"app": "NS · Natural Sense", "status": "running", "version": "FINAL"}
-
 
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp():
     return HTMLResponse(get_webapp_html())
 
-
 # ✅ ДОБАВЛЕНО: endpoint для кнопки "↩️ В канал"
 @app.get("/open-channel", response_class=HTMLResponse)
 async def open_channel():
     return HTMLResponse(get_open_channel_html())
-
 
 @app.get("/api/user/{telegram_id}")
 async def get_user_api(telegram_id: int):
@@ -1560,7 +1502,6 @@ async def get_user_api(telegram_id: int):
         "referral_count": user.referral_count or 0,
         "last_daily_bonus_at": user.last_daily_bonus_at.isoformat() if user.last_daily_bonus_at else None,
     }
-
 
 @app.get("/api/posts")
 async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
@@ -1584,7 +1525,6 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
             "preview": preview_text(p.text),
         })
     return out
-
 
 @app.get("/health")
 async def health():
