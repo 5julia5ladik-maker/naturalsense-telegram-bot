@@ -111,7 +111,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True)
 
-    # ✅ BIGINT чтобы не было overflow в Postgres и в целом
+    # ✅ BIGINT чтобы не было overflow
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
 
     username = Column(String, nullable=True)
@@ -136,7 +136,7 @@ class Post(Base):
     __tablename__ = "posts"
 
     id = Column(Integer, primary_key=True)
-    message_id = Column(BigInteger, unique=True, index=True, nullable=False)  # ✅ BIGINT
+    message_id = Column(BigInteger, unique=True, index=True, nullable=False)
 
     date = Column(DateTime, nullable=True)  # naive UTC
     text = Column(String, nullable=True)
@@ -236,7 +236,7 @@ async def create_user_with_referral(
             first_name=first_name,
             points=REGISTER_BONUS_POINTS,
             joined_at=now,
-            last_daily_bonus_at=now,   # считаем “визит” в момент регистрации
+            last_daily_bonus_at=now,
             daily_streak=1,
             best_streak=1,
             referred_by=(referred_by if inviter else None),
@@ -480,7 +480,6 @@ tg_app: Application | None = None
 tg_task: asyncio.Task | None = None
 sweeper_task: asyncio.Task | None = None
 
-# “В канал” чисто — редактируем одно и то же сообщение
 _last_channel_msg_id: dict[int, int] = {}
 
 def is_admin(user_id: int) -> bool:
@@ -534,10 +533,8 @@ async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -
         pass
 
 async def open_channel_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Не спамим сообщениями: редактируем одно и то же."""
     url = f"https://t.me/{CHANNEL_USERNAME}"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("Открыть канал ↗️", url=url)]])
-
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
 
@@ -1023,10 +1020,9 @@ async def stop_telegram_bot():
         tg_task = None
 
 # -----------------------------------------------------------------------------
-# WEBAPP HTML (ВОЗВРАЩАЕМ ВСТРОЕННЫЙ MINI APP КАК У ТЕБЯ)
+# WEBAPP HTML (Mini App)
 # -----------------------------------------------------------------------------
 def get_webapp_html() -> str:
-    # ✅ ВАЖНО: это твой HTML. Я НЕ МЕНЯЮ ЕГО ЛОГИКУ/ЭКРАНЫ.
     html = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -1331,9 +1327,8 @@ def get_webapp_html() -> str:
           case "sephora":
             return (
               <Panel>
-                <Button icon="🇹🇷" label="Актуальные цены (TR)" subtitle="Ежедневное обновление" onClick={() => openPosts("SephoraTR")} />
+                {/* ✅ ОСТАЁТСЯ ТОЛЬКО: Подарки / акции */}
                 <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo")} />
-                <Button icon="🧾" label="Гайды / как покупать" onClick={() => openPosts("SephoraGuide")} />
               </Panel>
             );
 
@@ -1447,7 +1442,6 @@ async def get_user_api(telegram_id: int):
 
 @app.get("/api/posts")
 async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
-    # ✅ как у тебя: без тега — ничего не отдаём
     if not tag:
         return []
 
