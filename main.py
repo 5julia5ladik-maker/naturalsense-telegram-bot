@@ -112,7 +112,6 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
 
     username = Column(String, nullable=True)
@@ -501,7 +500,7 @@ def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
 
-# ✅ ИЗМЕНЕНО: ReplyKeyboard теперь ТОЛЬКО "Профиль" и "Помощь"
+# ✅ ReplyKeyboard снизу: ТОЛЬКО "Профиль" и "Помощь"
 def get_main_keyboard():
     return ReplyKeyboardMarkup(
         [
@@ -511,23 +510,22 @@ def get_main_keyboard():
     )
 
 
-# ✅ ДОБАВЛЕНО: inline-кнопка "↩️ В канал" прикрепляется к сообщению /start
+# ✅ Inline "↩️ В канал" прикрепляется к сообщению /start
 def build_start_inline_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("↩️ В канал", url=f"https://t.me/{CHANNEL_USERNAME}")]]
     )
 
 
+# ✅ ФИКС: не удаляем мгновенно (иначе клава может не появиться)
 async def ensure_reply_keyboard_visible(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Telegram не позволяет одновременно InlineKeyboard и ReplyKeyboard в одном сообщении.
-    Поэтому "Профиль/Помощь" показываем отдельным коротким сообщением и сразу удаляем.
-    """
     if not update.effective_chat:
         return
     chat_id = update.effective_chat.id
+
     try:
         m = await context.bot.send_message(chat_id=chat_id, text="\u200b", reply_markup=get_main_keyboard())
+        await asyncio.sleep(0.8)  # важно: дать клиенту время "приклеить" клаву
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=m.message_id)
         except Exception:
@@ -558,7 +556,7 @@ def build_help_text() -> str:
 
 🎟 *Рефералка*
 Команда /invite даёт твою ссылку.
-За каждого нового пользователя по ссылке: +20 (1 раз за каждого).
+За каждого нового пользователя по этой ссылке: +20 (1 раз за каждого).
 """
 
 
@@ -572,29 +570,6 @@ async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -
             )
     except Exception:
         pass
-
-
-async def open_channel_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = f"https://t.me/{CHANNEL_USERNAME}"
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Открыть канал ↗️", url=url)]])
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-
-    prev_id = _last_channel_msg_id.get(user_id)
-    if prev_id:
-        try:
-            await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=prev_id,
-                text="↩️ В канал:",
-                reply_markup=kb,
-            )
-            return
-        except Exception:
-            _last_channel_msg_id.pop(user_id, None)
-
-    msg = await update.message.reply_text("↩️ В канал:", reply_markup=kb)
-    _last_channel_msg_id[user_id] = msg.message_id
 
 
 def build_welcome_text(
@@ -671,7 +646,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             streak_bonus=0,
             referral_paid=referral_paid,
         )
-        # ✅ ИЗМЕНЕНО: inline "↩️ В канал" прикреплён к сообщению /start
         await update.message.reply_text(text_, reply_markup=build_start_inline_kb())
         await ensure_reply_keyboard_visible(update, context)
         return
@@ -691,7 +665,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         streak_bonus=streak_bonus,
         referral_paid=False,
     )
-    # ✅ ИЗМЕНЕНО: inline "↩️ В канал" прикреплён к сообщению /start
     await update.message.reply_text(text_, reply_markup=build_start_inline_kb())
     await ensure_reply_keyboard_visible(update, context)
 
@@ -1176,7 +1149,7 @@ def get_webapp_html() -> str:
         { id: "cat", label: "Категории" },
         { id: "brand", label: "Бренды" },
         { id: "sephora", label: "Sephora" },
-        { id: "ptype", label: "Продукт" }, // ✅ ИЗМЕНЕНО: было "Тип продукта"
+        { id: "ptype", label: "Продукт" }, // ✅ было "Тип продукта"
       ];
       return (
         <div style={{ display: "flex", gap: "8px", marginTop: "14px" }}>
@@ -1354,7 +1327,7 @@ def get_webapp_html() -> str:
                 <Button icon="📂" label="Категории" onClick={() => changeTab("cat")} />
                 <Button icon="🏷" label="Бренды" onClick={() => changeTab("brand")} />
                 <Button icon="💸" label="Sephora" onClick={() => changeTab("sephora")} />
-                <Button icon="🧴" label="Продукт" onClick={() => changeTab("ptype")} /> {/* ✅ ИЗМЕНЕНО */}
+                <Button icon="🧴" label="Продукт" onClick={() => changeTab("ptype")} />
                 <Button icon="💎" label="Beauty Challenges" onClick={() => openPosts("Challenge")} />
                 <Button icon="↩️" label="В канал" onClick={() => openLink(`https://t.me/${CHANNEL}`)} />
               </Panel>
