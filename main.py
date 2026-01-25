@@ -1,3 +1,5 @@
+# /app/main.py  (single-file монолит, обновлён только по требованиям)
+
 import os
 import re
 import asyncio
@@ -58,6 +60,7 @@ def env_get(name: str, default: str | None = None) -> str | None:
     v = os.getenv(name)
     return v if v is not None else default
 
+
 BOT_TOKEN = env_get("BOT_TOKEN")
 PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
 CHANNEL_USERNAME = env_get("CHANNEL_USERNAME", "NaturalSense") or "NaturalSense"
@@ -106,12 +109,12 @@ STREAK_MILESTONES = {
 # -----------------------------------------------------------------------------
 Base = declarative_base()
 
+
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
 
-    # ✅ BIGINT чтобы не было overflow
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
 
     username = Column(String, nullable=True)
@@ -122,15 +125,14 @@ class User(Base):
     favorites = Column(JSON, default=list)
     joined_at = Column(DateTime, default=lambda: datetime.utcnow())  # naive UTC
 
-    # антифарм + стрик
     last_daily_bonus_at = Column(DateTime, nullable=True)  # naive UTC
     daily_streak = Column(Integer, default=0)
     best_streak = Column(Integer, default=0)
 
-    # рефералка
     referred_by = Column(BigInteger, nullable=True)
     referral_count = Column(Integer, default=0)
     ref_bonus_paid = Column(Boolean, default=False, nullable=False)
+
 
 class Post(Base):
     __tablename__ = "posts"
@@ -150,17 +152,20 @@ class Post(Base):
     is_deleted = Column(Boolean, default=False, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
 
+
 # -----------------------------------------------------------------------------
 # DATABASE
 # -----------------------------------------------------------------------------
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+
 async def _safe_exec(conn, sql: str):
     try:
         await conn.execute(sql_text(sql))
     except Exception as e:
         logger.info("DB migration skipped/failed (ok in some DBs): %s | %s", sql, e)
+
 
 async def init_db():
     async with engine.begin() as conn:
@@ -185,6 +190,7 @@ async def init_db():
 
     logger.info("✅ Database initialized")
 
+
 # -----------------------------------------------------------------------------
 # USER / POINTS / STREAK / REFERRAL
 # -----------------------------------------------------------------------------
@@ -196,10 +202,12 @@ def _recalc_tier(user: User):
     else:
         user.tier = "free"
 
+
 async def get_user(telegram_id: int) -> Optional[User]:
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         return result.scalar_one_or_none()
+
 
 async def find_user_by_username(username: str) -> Optional[User]:
     u = (username or "").strip()
@@ -211,6 +219,7 @@ async def find_user_by_username(username: str) -> Optional[User]:
     async with async_session_maker() as session:
         res = await session.execute(select(User).where(func.lower(User.username) == u))
         return res.scalar_one_or_none()
+
 
 async def create_user_with_referral(
     telegram_id: int,
@@ -247,7 +256,6 @@ async def create_user_with_referral(
         session.add(user)
         await session.flush()
 
-        # платим пригласившему 1 раз за нового
         if inviter and not user.ref_bonus_paid:
             inviter.points = (inviter.points or 0) + REFERRAL_BONUS_POINTS
             inviter.referral_count = (inviter.referral_count or 0) + 1
@@ -260,6 +268,7 @@ async def create_user_with_referral(
         logger.info("✅ New user created: %s", telegram_id)
         return user, referral_paid
 
+
 async def add_points(telegram_id: int, points: int) -> Optional[User]:
     async with async_session_maker() as session:
         user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
@@ -271,6 +280,7 @@ async def add_points(telegram_id: int, points: int) -> Optional[User]:
         await session.refresh(user)
         return user
 
+
 async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[User], bool, int, int]:
     async with async_session_maker() as session:
         user: User | None = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
@@ -280,7 +290,6 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
         now = datetime.utcnow()
         last = user.last_daily_bonus_at
 
-        # антифарм: строго 24ч
         if last is not None and (now - last) < timedelta(days=1):
             delta = timedelta(days=1) - (now - last)
             hours_left = max(
@@ -291,7 +300,6 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
 
         user.points = (user.points or 0) + DAILY_BONUS_POINTS
 
-        # стрик: окно 48ч
         if last is None:
             user.daily_streak = 1
         else:
@@ -313,10 +321,12 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
         await session.refresh(user)
         return user, True, 0, streak_bonus
 
+
 # -----------------------------------------------------------------------------
 # POSTS INDEX (TAGS)
 # -----------------------------------------------------------------------------
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
+
 
 def extract_tags(text_: str | None) -> list[str]:
     if not text_:
@@ -329,14 +339,17 @@ def extract_tags(text_: str | None) -> list[str]:
             out.append(t)
     return out
 
+
 def preview_text(text_: str | None, limit: int = 180) -> str:
     if not text_:
         return ""
     s = re.sub(r"\s+", " ", text_.strip())
     return (s[:limit] + "…") if len(s) > limit else s
 
+
 def make_permalink(message_id: int) -> str:
     return f"https://t.me/{CHANNEL_USERNAME}/{message_id}"
+
 
 def to_naive_utc(dt: datetime | None) -> datetime | None:
     if dt is None:
@@ -344,6 +357,7 @@ def to_naive_utc(dt: datetime | None) -> datetime | None:
     if dt.tzinfo is None:
         return dt
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
 
 async def upsert_post_from_channel(
     message_id: int,
@@ -389,6 +403,7 @@ async def upsert_post_from_channel(
         logger.info("✅ Indexed post %s tags=%s", message_id, tags)
         return p
 
+
 async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
     if tag and tag in BLOCKED_TAGS:
         return []
@@ -406,6 +421,7 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
     if tag:
         rows = [p for p in rows if tag in (p.tags or [])]
     return rows
+
 
 # -----------------------------------------------------------------------------
 # DELETE SWEEPER (AUTO CHECK)
@@ -429,6 +445,7 @@ async def message_exists_public(message_id: int) -> bool:
     except Exception as e:
         logger.warning("Sweeper check failed for %s: %s", message_id, e)
         return True
+
 
 async def sweep_deleted_posts(batch: int = 80):
     async with async_session_maker() as session:
@@ -465,13 +482,15 @@ async def sweep_deleted_posts(batch: int = 80):
     logger.info("🧹 Marked deleted posts: %s", to_mark)
     return to_mark
 
+
 async def sweeper_loop():
     while True:
         try:
             await sweep_deleted_posts(batch=80)
         except Exception as e:
             logger.error("Sweeper error: %s", e)
-        await asyncio.sleep(300)  # 5 минут
+        await asyncio.sleep(300)
+
 
 # -----------------------------------------------------------------------------
 # TELEGRAM BOT
@@ -482,19 +501,27 @@ sweeper_task: asyncio.Task | None = None
 
 _last_channel_msg_id: dict[int, int] = {}
 
+
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
+
 def get_main_keyboard():
     webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
+
+    # ✅ Требование: "↩️ В канал" не пишет сообщений и не создаёт/редактирует сообщений.
+    # Делается через WebApp-кнопку, которая открывает /open-channel и мгновенно вызывает tg.openTelegramLink().
+    open_channel_url = f"{PUBLIC_BASE_URL}/open-channel" if PUBLIC_BASE_URL else "/open-channel"
+
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
             [KeyboardButton("👤 Профиль"), KeyboardButton("ℹ️ Помощь")],
-            [KeyboardButton("↩️ В канал")],
+            [KeyboardButton("↩️ В канал", web_app=WebAppInfo(url=open_channel_url))],
         ],
         resize_keyboard=True,
     )
+
 
 def build_help_text() -> str:
     return """\
@@ -521,6 +548,7 @@ def build_help_text() -> str:
 За каждого нового пользователя по ссылке: +20 (1 раз за каждого).
 """
 
+
 async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.exception("Telegram handler error: %s", context.error)
     try:
@@ -531,6 +559,7 @@ async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -
             )
     except Exception:
         pass
+
 
 async def open_channel_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = f"https://t.me/{CHANNEL_USERNAME}"
@@ -553,6 +582,7 @@ async def open_channel_clean(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     msg = await update.message.reply_text("↩️ В канал:", reply_markup=kb)
     _last_channel_msg_id[user_id] = msg.message_id
+
 
 def build_welcome_text(
     first_name: str | None,
@@ -600,6 +630,7 @@ def build_welcome_text(
 {streak_line}{ref_line}
 """
 
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
@@ -646,8 +677,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text_, reply_markup=get_main_keyboard())
 
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(build_help_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
+
 
 async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -666,6 +699,7 @@ async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
 За каждого нового пользователя по этой ссылке: +{REFERRAL_BONUS_POINTS} баллов (1 раз за каждого).
 """
     await update.message.reply_text(text, reply_markup=get_main_keyboard())
+
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -724,9 +758,11 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     await update.message.reply_text(text_, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
+
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     await update.message.reply_text(f"Твой telegram_id: {u.id}", reply_markup=get_main_keyboard())
+
 
 async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -739,6 +775,7 @@ async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"ID пользователя: {target.id}\nusername: @{target.username or '-'}\nname: {target.first_name or '-'}",
         reply_markup=get_main_keyboard()
     )
+
 
 # --- admin ---
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -754,6 +791,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     )
     await update.message.reply_text("👑 Админ-панель:", reply_markup=kb)
+
 
 async def admin_stats_text() -> str:
     async with async_session_maker() as session:
@@ -776,12 +814,14 @@ async def admin_stats_text() -> str:
 🗑 Помечено удалённых: *{deleted_posts}*
 """
 
+
 async def cmd_admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_admin(uid):
         await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
         return
     await update.message.reply_text(await admin_stats_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
+
 
 async def cmd_admin_sweep(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -793,6 +833,7 @@ async def cmd_admin_sweep(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🧹 Sweep: ничего не найдено.", reply_markup=get_main_keyboard())
     else:
         await update.message.reply_text(f"🧹 Sweep: помечены удалёнными: {marked}", reply_markup=get_main_keyboard())
+
 
 async def cmd_admin_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -826,6 +867,7 @@ Ref_paid: {u.ref_bonus_paid}
 """
     await update.message.reply_text(text, reply_markup=get_main_keyboard())
 
+
 async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_admin(uid):
@@ -845,6 +887,7 @@ async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(f"✅ Начислено {pts}. Теперь у юзера {u.points} баллов.", reply_markup=get_main_keyboard())
+
 
 async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -872,6 +915,7 @@ async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_main_keyboard()
     )
 
+
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not q:
@@ -896,6 +940,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text(f"🧹 Sweep: помечены удалёнными: {marked}")
         return
 
+
 async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -909,9 +954,11 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_help(update, context)
         return
 
+    # ✅ "↩️ В канал" теперь WebApp-кнопка и не шлёт текст.
+    # Если пользователь вручную напечатает — ничего не отвечаем (требование: не писать сообщений).
     if txt == "↩️ В канал":
-        await open_channel_clean(update, context)
         return
+
 
 # -----------------------------------------------------------------------------
 # CHANNEL INDEXING
@@ -929,6 +976,7 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         media_file_id=None,
     )
 
+
 async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.edited_channel_post
     if not msg:
@@ -941,6 +989,7 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
         media_type=None,
         media_file_id=None,
     )
+
 
 # -----------------------------------------------------------------------------
 # TELEGRAM RUNNER (polling)
@@ -969,6 +1018,7 @@ async def _telegram_runner():
                 await tg_app.shutdown()
         except Exception:
             pass
+
 
 async def start_telegram_bot():
     global tg_app, tg_task
@@ -1009,6 +1059,7 @@ async def start_telegram_bot():
 
     tg_task = asyncio.create_task(_telegram_runner())
 
+
 async def stop_telegram_bot():
     global tg_task
     if tg_task:
@@ -1018,6 +1069,7 @@ async def stop_telegram_bot():
         except Exception:
             pass
         tg_task = None
+
 
 # -----------------------------------------------------------------------------
 # WEBAPP HTML (Mini App)
@@ -1264,6 +1316,57 @@ def get_webapp_html() -> str:
         }
       }, []);
 
+      const brandButtons = [
+        { label: "The Ordinary", tag: "TheOrdinary" },
+        { label: "Dior", tag: "Dior" },
+        { label: "Chanel", tag: "Chanel" },
+        { label: "Kylie Cosmetics", tag: "KylieCosmetics" },
+        { label: "Gisou", tag: "Gisou" },
+        { label: "Rare Beauty", tag: "RareBeauty" },
+        { label: "Yves Saint Laurent", tag: "YSL" },
+        { label: "Givenchy", tag: "Givenchy" },
+        { label: "Charlotte Tilbury", tag: "CharlotteTilbury" },
+        { label: "NARS", tag: "NARS" },
+        { label: "Sol de Janeiro", tag: "SolDeJaneiro" },
+        { label: "Huda Beauty", tag: "HudaBeauty" },
+        { label: "Rhode", tag: "Rhode" },
+        { label: "Tower 28 Beauty", tag: "Tower28Beauty" },
+        { label: "Benefit Cosmetics", tag: "BenefitCosmetics" },
+        { label: "Estée Lauder", tag: "EsteeLauder" },
+        { label: "Sisley", tag: "Sisley" },
+        { label: "Kérastase", tag: "Kerastase" },
+        { label: "Armani Beauty", tag: "ArmaniBeauty" },
+        { label: "Hourglass", tag: "Hourglass" },
+        { label: "Shiseido", tag: "Shiseido" },
+        { label: "Tom Ford Beauty", tag: "TomFordBeauty" },
+        { label: "Tarte", tag: "Tarte" },
+        { label: "Sephora Collection", tag: "SephoraCollection" },
+        { label: "Clinique", tag: "Clinique" },
+        { label: "Dolce & Gabbana", tag: "DolceGabbana" },
+        { label: "Kayali", tag: "Kayali" },
+        { label: "Guerlain", tag: "Guerlain" },
+        { label: "Fenty Beauty", tag: "FentyBeauty" },
+        { label: "Too Faced", tag: "TooFaced" },
+        { label: "MAKE UP FOR EVER", tag: "MakeUpForEver" },
+        { label: "Erborian", tag: "Erborian" },
+        { label: "Natasha Denona", tag: "NatashaDenona" },
+        { label: "Lancôme", tag: "Lancome" },
+        { label: "Kosas", tag: "Kosas" },
+        { label: "ONE/SIZE", tag: "OneSize" },
+        { label: "Laneige", tag: "Laneige" },
+        { label: "Makeup by Mario", tag: "MakeupByMario" },
+        { label: "Valentino Beauty", tag: "ValentinoBeauty" },
+        { label: "Drunk Elephant", tag: "DrunkElephant" },
+        { label: "Olaplex", tag: "Olaplex" },
+        { label: "Anastasia Beverly Hills", tag: "AnastasiaBeverlyHills" },
+        { label: "Amika", tag: "Amika" },
+        { label: "BYOMA", tag: "BYOMA" },
+        { label: "Glow Recipe", tag: "GlowRecipe" },
+        { label: "Milk Makeup", tag: "MilkMakeup" },
+        { label: "Summer Fridays", tag: "SummerFridays" },
+        { label: "K18", tag: "K18" },
+      ];
+
       const PostsScreen = () => (
         <Panel>
           <div style={{ fontSize: "14px", color: "var(--muted)" }}>
@@ -1318,16 +1421,15 @@ def get_webapp_html() -> str:
           case "brand":
             return (
               <Panel>
-                <Button icon="✨" label="Dior" onClick={() => openPosts("Dior")} />
-                <Button icon="✨" label="Chanel" onClick={() => openPosts("Chanel")} />
-                <Button icon="✨" label="Charlotte Tilbury" onClick={() => openPosts("CharlotteTilbury")} />
+                {brandButtons.map(b => (
+                  <Button key={b.tag} icon="✨" label={b.label} onClick={() => openPosts(b.tag)} />
+                ))}
               </Panel>
             );
 
           case "sephora":
             return (
               <Panel>
-                {/* ✅ ОСТАЁТСЯ ТОЛЬКО: Подарки / акции */}
                 <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo")} />
               </Panel>
             );
@@ -1377,6 +1479,49 @@ def get_webapp_html() -> str:
 """
     return html.replace("__CHANNEL__", CHANNEL_USERNAME)
 
+
+def get_open_channel_html() -> str:
+    # Минимальная WebApp-страница: 1 тап -> открыть канал -> закрыть webview.
+    channel_url = f"https://t.me/{CHANNEL_USERNAME}"
+    return f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Open Channel</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body {{
+      margin: 0;
+      background: #0c0f14;
+      color: rgba(255,255,255,0.7);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }}
+  </style>
+</head>
+<body>
+  <div>Открываем канал…</div>
+  <script>
+    (function() {{
+      try {{
+        const tg = window.Telegram && window.Telegram.WebApp;
+        const url = {channel_url!r};
+        if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
+        else window.location.href = url;
+        if (tg && tg.close) setTimeout(() => tg.close(), 200);
+      }} catch (e) {{
+        window.location.href = {channel_url!r};
+      }}
+    }})();
+  </script>
+</body>
+</html>"""
+
+
 # -----------------------------------------------------------------------------
 # FASTAPI LIFESPAN
 # -----------------------------------------------------------------------------
@@ -1399,6 +1544,7 @@ async def lifespan(app_: FastAPI):
         await stop_telegram_bot()
         logger.info("✅ NS · Natural Sense stopped")
 
+
 # -----------------------------------------------------------------------------
 # FASTAPI
 # -----------------------------------------------------------------------------
@@ -1412,13 +1558,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 async def root():
     return {"app": "NS · Natural Sense", "status": "running", "version": "FINAL"}
 
+
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp():
     return HTMLResponse(get_webapp_html())
+
+
+# ✅ Новый endpoint для "↩️ В канал" без сообщений в чате
+@app.get("/open-channel", response_class=HTMLResponse)
+async def open_channel():
+    return HTMLResponse(get_open_channel_html())
+
 
 @app.get("/api/user/{telegram_id}")
 async def get_user_api(telegram_id: int):
@@ -1439,6 +1594,7 @@ async def get_user_api(telegram_id: int):
         "referral_count": user.referral_count or 0,
         "last_daily_bonus_at": user.last_daily_bonus_at.isoformat() if user.last_daily_bonus_at else None,
     }
+
 
 @app.get("/api/posts")
 async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
@@ -1462,6 +1618,7 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
             "preview": preview_text(p.text),
         })
     return out
+
 
 @app.get("/health")
 async def health():
