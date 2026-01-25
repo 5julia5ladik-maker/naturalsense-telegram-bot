@@ -1,5 +1,3 @@
-# main.py
-
 import os
 import re
 import asyncio
@@ -115,6 +113,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True)
 
+    # ✅ BIGINT чтобы не было overflow
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
 
     username = Column(String, nullable=True)
@@ -125,10 +124,12 @@ class User(Base):
     favorites = Column(JSON, default=list)
     joined_at = Column(DateTime, default=lambda: datetime.utcnow())  # naive UTC
 
+    # антифарм + стрик
     last_daily_bonus_at = Column(DateTime, nullable=True)  # naive UTC
     daily_streak = Column(Integer, default=0)
     best_streak = Column(Integer, default=0)
 
+    # рефералка
     referred_by = Column(BigInteger, nullable=True)
     referral_count = Column(Integer, default=0)
     ref_bonus_paid = Column(Boolean, default=False, nullable=False)
@@ -175,7 +176,7 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;")
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;")
 
-        # users
+        # users (для старой базы)
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_daily_bonus_at TIMESTAMP NULL;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_streak INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak INTEGER NOT NULL DEFAULT 0;")
@@ -183,7 +184,7 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_count INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
 
-        # Postgres: int32 -> bigint
+        # ✅ Postgres: int32 -> bigint
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN referred_by TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE posts ALTER COLUMN message_id TYPE BIGINT;")
@@ -256,6 +257,7 @@ async def create_user_with_referral(
         session.add(user)
         await session.flush()
 
+        # платим пригласившему 1 раз за нового
         if inviter and not user.ref_bonus_paid:
             inviter.points = (inviter.points or 0) + REFERRAL_BONUS_POINTS
             inviter.referral_count = (inviter.referral_count or 0) + 1
@@ -290,6 +292,7 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
         now = datetime.utcnow()
         last = user.last_daily_bonus_at
 
+        # антифарм: строго 24ч
         if last is not None and (now - last) < timedelta(days=1):
             delta = timedelta(days=1) - (now - last)
             hours_left = max(
@@ -300,6 +303,7 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
 
         user.points = (user.points or 0) + DAILY_BONUS_POINTS
 
+        # стрик: окно 48ч
         if last is None:
             user.daily_streak = 1
         else:
@@ -489,7 +493,7 @@ async def sweeper_loop():
             await sweep_deleted_posts(batch=80)
         except Exception as e:
             logger.error("Sweeper error: %s", e)
-        await asyncio.sleep(300)
+        await asyncio.sleep(300)  # 5 минут
 
 
 # -----------------------------------------------------------------------------
@@ -499,24 +503,23 @@ tg_app: Application | None = None
 tg_task: asyncio.Task | None = None
 sweeper_task: asyncio.Task | None = None
 
+_last_channel_msg_id: dict[int, int] = {}
+
 
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
 
 def get_main_keyboard():
-    # Важно: web_app кнопки корректно работают только с https публичным доменом.
-    if not PUBLIC_BASE_URL or not PUBLIC_BASE_URL.startswith("https://"):
-        logger.warning("PUBLIC_BASE_URL must be https://... for ReplyKeyboard WebApp buttons to work reliably")
+    webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
 
-    webapp_url = f"{PUBLIC_BASE_URL}/webapp"
-    open_channel_url = f"{PUBLIC_BASE_URL}/open-channel"
+    # ✅ ИЗМЕНЕНО: "↩️ В канал" -> web_app, чтобы не писало сообщений и открыло канал
+    open_channel_url = f"{PUBLIC_BASE_URL}/open-channel" if PUBLIC_BASE_URL else "/open-channel"
 
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
             [KeyboardButton("👤 Профиль"), KeyboardButton("ℹ️ Помощь")],
-            # ✅ Никаких сообщений в чат: это web_app кнопка
             [KeyboardButton("↩️ В канал", web_app=WebAppInfo(url=open_channel_url))],
         ],
         resize_keyboard=True,
@@ -531,6 +534,21 @@ def build_help_text() -> str:
 2) Выбирай категории/бренды и открывай посты.
 3) *👤 Профиль* — баллы, уровень, стрик.
 4) *↩️ В канал* — откроет канал в 1 клик.
+
+💎 *Баллы и антифарм*
+• Первый /start: +10 за регистрацию
+• Далее: +5 за визит, строго 1 раз в 24 часа
+
+🔥 *Стрик (серия дней)*
+За ежедневный вход растёт стрик. Бонусы:
+• 3 дня: +10
+• 7 дней: +30
+• 14 дней: +80
+• 30 дней: +250
+
+🎟 *Рефералка*
+Команда /invite даёт твою ссылку.
+За каждого нового пользователя по ссылке: +20 (1 раз за каждого).
 """
 
 
@@ -544,6 +562,29 @@ async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -
             )
     except Exception:
         pass
+
+
+async def open_channel_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = f"https://t.me/{CHANNEL_USERNAME}"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Открыть канал ↗️", url=url)]])
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    prev_id = _last_channel_msg_id.get(user_id)
+    if prev_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=prev_id,
+                text="↩️ В канал:",
+                reply_markup=kb,
+            )
+            return
+        except Exception:
+            _last_channel_msg_id.pop(user_id, None)
+
+    msg = await update.message.reply_text("↩️ В канал:", reply_markup=kb)
+    _last_channel_msg_id[user_id] = msg.message_id
 
 
 def build_welcome_text(
@@ -575,6 +616,18 @@ def build_welcome_text(
 
     return f"""\
 Привет, {name}! 🖤
+
+Я — Natural Sense Assistant.
+• открываю мини-журнал внутри Telegram
+• показываю профиль и баллы
+• даю бонусы за ежедневные визиты и стрик
+• веду в канал одним нажатием
+
+Как пользоваться:
+1) Нажми «📲 Открыть журнал»
+2) Выбирай категории/бренды и открывай посты
+3) «👤 Профиль» — баллы, уровень, стрик
+4) «ℹ️ Помощь» — правила и фишки
 
 {bonus_line}
 {streak_line}{ref_line}
@@ -904,7 +957,7 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_help(update, context)
         return
 
-    # "↩️ В канал" — web_app кнопка, текст не прилетает; если вручную ввели — молчим.
+    # ✅ ИЗМЕНЕНО: ничего не отправляем и не отвечаем (никаких сообщений в чат)
     if txt == "↩️ В канал":
         return
 
@@ -980,6 +1033,7 @@ async def start_telegram_bot():
 
     tg_app.add_error_handler(tg_error_handler)
 
+    # user commands
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("help", cmd_help))
     tg_app.add_handler(CommandHandler("invite", cmd_invite))
@@ -987,6 +1041,7 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("myid", cmd_myid))
     tg_app.add_handler(CommandHandler("id", cmd_id))
 
+    # admin commands
     tg_app.add_handler(CommandHandler("admin", cmd_admin))
     tg_app.add_handler(CommandHandler("admin_stats", cmd_admin_stats))
     tg_app.add_handler(CommandHandler("admin_sweep", cmd_admin_sweep))
@@ -994,9 +1049,13 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
+    # callbacks
     tg_app.add_handler(CallbackQueryHandler(on_callback))
+
+    # text buttons
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
 
+    # channel indexing
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
 
@@ -1065,7 +1124,6 @@ def get_webapp_html() -> str:
 
     const openLink = (url) => {
       if (tg?.openTelegramLink) tg.openTelegramLink(url);
-      else if (tg?.openLink) tg.openLink(url);
       else window.open(url, "_blank");
     };
 
@@ -1155,7 +1213,7 @@ def get_webapp_html() -> str:
           borderRadius: "18px",
           border: "1px solid var(--stroke)",
           background: "rgba(255,255,255,0.06)",
-          color: "var(--text)",
+          color: var(--text),
           fontSize: "15px",
           margin: "10px 0",
           cursor: "pointer"
@@ -1260,57 +1318,6 @@ def get_webapp_html() -> str:
         }
       }, []);
 
-      const brandButtons = [
-        { label: "The Ordinary", tag: "TheOrdinary" },
-        { label: "Dior", tag: "Dior" },
-        { label: "Chanel", tag: "Chanel" },
-        { label: "Kylie Cosmetics", tag: "KylieCosmetics" },
-        { label: "Gisou", tag: "Gisou" },
-        { label: "Rare Beauty", tag: "RareBeauty" },
-        { label: "Yves Saint Laurent", tag: "YSL" },
-        { label: "Givenchy", tag: "Givenchy" },
-        { label: "Charlotte Tilbury", tag: "CharlotteTilbury" },
-        { label: "NARS", tag: "NARS" },
-        { label: "Sol de Janeiro", tag: "SolDeJaneiro" },
-        { label: "Huda Beauty", tag: "HudaBeauty" },
-        { label: "Rhode", tag: "Rhode" },
-        { label: "Tower 28 Beauty", tag: "Tower28Beauty" },
-        { label: "Benefit Cosmetics", tag: "BenefitCosmetics" },
-        { label: "Estée Lauder", tag: "EsteeLauder" },
-        { label: "Sisley", tag: "Sisley" },
-        { label: "Kérastase", tag: "Kerastase" },
-        { label: "Armani Beauty", tag: "ArmaniBeauty" },
-        { label: "Hourglass", tag: "Hourglass" },
-        { label: "Shiseido", tag: "Shiseido" },
-        { label: "Tom Ford Beauty", tag: "TomFordBeauty" },
-        { label: "Tarte", tag: "Tarte" },
-        { label: "Sephora Collection", tag: "SephoraCollection" },
-        { label: "Clinique", tag: "Clinique" },
-        { label: "Dolce & Gabbana", tag: "DolceGabbana" },
-        { label: "Kayali", tag: "Kayali" },
-        { label: "Guerlain", tag: "Guerlain" },
-        { label: "Fenty Beauty", tag: "FentyBeauty" },
-        { label: "Too Faced", tag: "TooFaced" },
-        { label: "MAKE UP FOR EVER", tag: "MakeUpForEver" },
-        { label: "Erborian", tag: "Erborian" },
-        { label: "Natasha Denona", tag: "NatashaDenona" },
-        { label: "Lancôme", tag: "Lancome" },
-        { label: "Kosas", tag: "Kosas" },
-        { label: "ONE/SIZE", tag: "OneSize" },
-        { label: "Laneige", tag: "Laneige" },
-        { label: "Makeup by Mario", tag: "MakeupByMario" },
-        { label: "Valentino Beauty", tag: "ValentinoBeauty" },
-        { label: "Drunk Elephant", tag: "DrunkElephant" },
-        { label: "Olaplex", tag: "Olaplex" },
-        { label: "Anastasia Beverly Hills", tag: "AnastasiaBeverlyHills" },
-        { label: "Amika", tag: "Amika" },
-        { label: "BYOMA", tag: "BYOMA" },
-        { label: "Glow Recipe", tag: "GlowRecipe" },
-        { label: "Milk Makeup", tag: "MilkMakeup" },
-        { label: "Summer Fridays", tag: "SummerFridays" },
-        { label: "K18", tag: "K18" },
-      ];
-
       const PostsScreen = () => (
         <Panel>
           <div style={{ fontSize: "14px", color: "var(--muted)" }}>
@@ -1365,9 +1372,9 @@ def get_webapp_html() -> str:
           case "brand":
             return (
               <Panel>
-                {brandButtons.map(b => (
-                  <Button key={b.tag} icon="✨" label={b.label} onClick={() => openPosts(b.tag)} />
-                ))}
+                <Button icon="✨" label="Dior" onClick={() => openPosts("Dior")} />
+                <Button icon="✨" label="Chanel" onClick={() => openPosts("Chanel")} />
+                <Button icon="✨" label="Charlotte Tilbury" onClick={() => openPosts("CharlotteTilbury")} />
               </Panel>
             );
 
@@ -1424,18 +1431,11 @@ def get_webapp_html() -> str:
     return html.replace("__CHANNEL__", CHANNEL_USERNAME)
 
 
+# ✅ ДОБАВЛЕНО: страница, которая открывает канал без сообщений в чат
 def get_open_channel_html() -> str:
-    """
-    Максимально "1 тап":
-    - WebApp открывается по кнопке (это уже user gesture)
-    - сразу пытаемся открыть канал через openTelegramLink/openLink
-    - затем tg://resolve
-    - затем https fallback
-    - делаем несколько попыток с задержками
-    """
-    channel_username = CHANNEL_USERNAME
-    https_url = f"https://t.me/{channel_username}"
-    tg_scheme = f"tg://resolve?domain={channel_username}"
+    channel = CHANNEL_USERNAME
+    https_url = f"https://t.me/{channel}"
+    tg_scheme = f"tg://resolve?domain={channel}"
 
     return f"""<!DOCTYPE html>
 <html lang="ru">
@@ -1444,12 +1444,7 @@ def get_open_channel_html() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Open</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <style>
-    body {{
-      margin: 0;
-      background: #0c0f14;
-    }}
-  </style>
+  <style>body{{margin:0;background:#0c0f14;}}</style>
 </head>
 <body>
 <script>
@@ -1475,23 +1470,15 @@ def get_open_channel_html() -> str:
       }}
     }} catch (e) {{}}
 
-    try {{
-      window.location.replace(tgScheme);
-      return;
-    }} catch (e) {{}}
-
-    try {{
-      window.location.replace(httpsUrl);
-    }} catch (e) {{}}
+    try {{ window.location.replace(tgScheme); return; }} catch (e) {{}}
+    try {{ window.location.replace(httpsUrl); }} catch (e) {{}}
   }}
 
-  // несколько попыток — на части клиентов первый вызов игнорится
   attempt();
   setTimeout(attempt, 120);
   setTimeout(attempt, 350);
   setTimeout(attempt, 800);
 
-  // закрываем WebView чуть позже (раньше может ломать переход)
   setTimeout(function() {{
     try {{ tg && tg.close && tg.close(); }} catch (e) {{}}
   }}, 1500);
@@ -1548,6 +1535,7 @@ async def webapp():
     return HTMLResponse(get_webapp_html())
 
 
+# ✅ ДОБАВЛЕНО: endpoint для кнопки "↩️ В канал"
 @app.get("/open-channel", response_class=HTMLResponse)
 async def open_channel():
     return HTMLResponse(get_open_channel_html())
