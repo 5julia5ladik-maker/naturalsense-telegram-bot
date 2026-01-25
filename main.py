@@ -500,7 +500,7 @@ def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
 
-# ✅ ИЗМЕНЕНО: ReplyKeyboard снизу — ТОЛЬКО Профиль + Помощь
+# ReplyKeyboard снизу: только Профиль + Помощь
 def get_main_keyboard():
     return ReplyKeyboardMarkup(
         [
@@ -510,11 +510,27 @@ def get_main_keyboard():
     )
 
 
-# ✅ ИЗМЕНЕНО: inline-кнопка "↩️ В канал" под сообщением /start
+# Inline "↩️ В канал" под сообщением /start
 def build_start_inline_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("↩️ В канал", url=f"https://t.me/{CHANNEL_USERNAME}")]]
     )
+
+
+# Невидимое сообщение чтобы показать клаву, потом удалить
+async def set_keyboard_silent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat:
+        return
+    chat_id = update.effective_chat.id
+    try:
+        m = await context.bot.send_message(chat_id=chat_id, text="\u200b", reply_markup=get_main_keyboard())
+        await asyncio.sleep(0.8)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=m.message_id)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def build_help_text() -> str:
@@ -631,16 +647,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             streak_bonus=0,
             referral_paid=referral_paid,
         )
-        # ✅ сообщение /start с inline "↩️ В канал"
         await update.message.reply_text(text_, reply_markup=build_start_inline_kb())
-        # ✅ ОТДЕЛЬНОЕ сообщение для ReplyKeyboard (иначе клавиатура не появится)
-        await update.message.reply_text("Меню:", reply_markup=get_main_keyboard())
+        await set_keyboard_silent(update, context)
         return
 
     user2, granted, hours_left, streak_bonus = await add_daily_bonus_and_update_streak(user.id)
     if not user2:
         await update.message.reply_text("Ошибка пользователя. Нажми /start ещё раз.", reply_markup=build_start_inline_kb())
-        await update.message.reply_text("Меню:", reply_markup=get_main_keyboard())
+        await set_keyboard_silent(update, context)
         return
 
     text_ = build_welcome_text(
@@ -653,7 +667,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         referral_paid=False,
     )
     await update.message.reply_text(text_, reply_markup=build_start_inline_kb())
-    await update.message.reply_text("Меню:", reply_markup=get_main_keyboard())
+    await set_keyboard_silent(update, context)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -763,7 +777,6 @@ async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# --- admin ---
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
@@ -1021,10 +1034,8 @@ async def start_telegram_bot():
         return
 
     tg_app = Application.builder().token(BOT_TOKEN).build()
-
     tg_app.add_error_handler(tg_error_handler)
 
-    # user commands
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("help", cmd_help))
     tg_app.add_handler(CommandHandler("invite", cmd_invite))
@@ -1032,7 +1043,6 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("myid", cmd_myid))
     tg_app.add_handler(CommandHandler("id", cmd_id))
 
-    # admin commands
     tg_app.add_handler(CommandHandler("admin", cmd_admin))
     tg_app.add_handler(CommandHandler("admin_stats", cmd_admin_stats))
     tg_app.add_handler(CommandHandler("admin_sweep", cmd_admin_sweep))
@@ -1040,13 +1050,9 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
-    # callbacks
     tg_app.add_handler(CallbackQueryHandler(on_callback))
-
-    # text buttons
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
 
-    # channel indexing
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
 
@@ -1163,7 +1169,7 @@ def get_webapp_html() -> str:
         { id: "cat", label: "Категории" },
         { id: "brand", label: "Бренды" },
         { id: "sephora", label: "Sephora" },
-        { id: "ptype", label: "Продукт" }, // ✅ ИЗМЕНЕНО: было "Тип продукта"
+        { id: "ptype", label: "Продукт" },
       ];
       return (
         <div style={{ display: "flex", gap: "8px", marginTop: "14px" }}>
