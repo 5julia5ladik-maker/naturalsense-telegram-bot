@@ -510,16 +510,16 @@ def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
 
-# ✅ ЕДИНСТВЕННОЕ ИЗМЕНЕНИЕ: "↩️ В канал" как ты показал
+# ✅ ИЗМЕНЕНО: "↩️ В канал" открывает /open-channel (без сообщений, /start не ломается)
 def get_main_keyboard():
     webapp_url = f"{PUBLIC_BASE_URL}/webapp" if PUBLIC_BASE_URL else "/webapp"
-    channel_url = f"https://t.me/{CHANNEL_USERNAME}"
+    open_channel_url = f"{PUBLIC_BASE_URL}/open-channel" if PUBLIC_BASE_URL else "/open-channel"
 
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
             [KeyboardButton("👤 Профиль"), KeyboardButton("ℹ️ Помощь")],
-            [KeyboardButton("↩️ В канал", web_app=WebAppInfo(url=channel_url))],
+            [KeyboardButton("↩️ В канал", web_app=WebAppInfo(url=open_channel_url))],
         ],
         resize_keyboard=True,
     )
@@ -956,8 +956,8 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_help(update, context)
         return
 
+    # ✅ ИЗМЕНЕНО: если вдруг текстом прилетит — ничего не отправляем
     if txt == "↩️ В канал":
-        await open_channel_clean(update, context)
         return
 
 
@@ -1431,6 +1431,52 @@ def get_webapp_html() -> str:
     return html.replace("__CHANNEL__", CHANNEL_USERNAME)
 
 
+# ✅ ДОБАВЛЕНО: страница редиректа в канал (без сообщений)
+def get_open_channel_html() -> str:
+    channel_url = f"https://t.me/{CHANNEL_USERNAME}"
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Open channel</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>html,body{{margin:0;background:#0c0f14;}}</style>
+</head>
+<body>
+<script>
+(function() {{
+  const tg = window.Telegram && window.Telegram.WebApp;
+  const url = {channel_url!r};
+
+  try {{ tg && tg.ready && tg.ready(); }} catch (e) {{}}
+
+  function go() {{
+    try {{
+      if (tg && typeof tg.openTelegramLink === "function") {{
+        tg.openTelegramLink(url);
+        return;
+      }}
+    }} catch (e) {{}}
+
+    try {{ window.location.replace(url); }} catch (e) {{
+      try {{ window.location.href = url; }} catch (e2) {{}}
+    }}
+  }}
+
+  go();
+  setTimeout(go, 120);
+  setTimeout(go, 350);
+
+  setTimeout(function() {{
+    try {{ tg && tg.close && tg.close(); }} catch (e) {{}}
+  }}, 800);
+}})();
+</script>
+</body>
+</html>"""
+
+
 # -----------------------------------------------------------------------------
 # FASTAPI LIFESPAN
 # -----------------------------------------------------------------------------
@@ -1474,6 +1520,11 @@ async def root():
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp():
     return HTMLResponse(get_webapp_html())
+
+# ✅ ДОБАВЛЕНО: endpoint для кнопки "↩️ В канал"
+@app.get("/open-channel", response_class=HTMLResponse)
+async def open_channel():
+    return HTMLResponse(get_open_channel_html())
 
 @app.get("/api/user/{telegram_id}")
 async def get_user_api(telegram_id: int):
