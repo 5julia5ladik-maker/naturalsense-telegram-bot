@@ -111,7 +111,7 @@ STREAK_MILESTONES = {
 }
 
 RAFFLE_TICKET_COST = 500
-ROULETTE_SPIN_COST = 3000
+ROULETTE_SPIN_COST = 2000
 ROULETTE_LIMIT_WINDOW = timedelta(seconds=5)  # TEST: 5s cooldown
 DEFAULT_RAFFLE_ID = 1
 
@@ -1404,6 +1404,11 @@ def get_webapp_html() -> str:
       setVar("--glassStroke", scheme === "dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
       setVar("--glassShadow", scheme === "dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
 
+      // алиасы, которые использует locked-popup
+      setVar("--overlayBg", scheme === "dark" ? hexToRgba(bg, 0.55) : hexToRgba(bg, 0.45));
+      setVar("--glassBg", scheme === "dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.80)");
+      setVar("--accent", p.button_color || (scheme === "dark" ? "#5aa7ff" : "#1b74ff"));
+
       if (tg) {
         tg.setHeaderColor(bg);
         tg.setBackgroundColor(bg);
@@ -1430,11 +1435,13 @@ def get_webapp_html() -> str:
         overlay.style.backdropFilter = "blur(22px) saturate(180%)";
         overlay.style.webkitBackdropFilter = "blur(22px) saturate(180%)";
 
-        // блокируем закрытие кликом по фону
+        // блокируем закрытие кликом по фону (но не ломаем клики по кнопкам)
         overlay.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }, true);
+          if (e.target === overlay) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        });
 
         const card = document.createElement("div");
         card.style.width = "100%";
@@ -2207,7 +2214,7 @@ useEffect(() => {
                 <div style={{ fontSize:"14px", fontWeight:650 }}>💎 На что тратить баллы</div>
                 <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
                   • 🎁 Билет на розыгрыш — 500 баллов<br/>
-                  • 🎡 Рулетка — 3000 баллов (1 раз в 24 часа)
+                  • 🎡 Рулетка — 2000 баллов (лимит 1 раз/5с (тест))
                 </div>
 
                 <Divider />
@@ -2231,14 +2238,14 @@ useEffect(() => {
 
                 <div style={{ fontSize:"14px", fontWeight:650 }}>🎡 Рулетка</div>
                 <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
-                  1 спин = 3000 баллов. Каждый день (лимит 1 раз/5с (тест)).
+                  1 спин = 2000 баллов. Каждый день (лимит 1 раз/5с (тест)).
                 </div>
                 <Button
                   icon="🎡"
-                  label="Крутить (3000)"
+                  label="Крутить (2000)"
                   subtitle={busy ? "Подожди…" : ""}
                   onClick={spinRoulette}
-                  disabled={busy || (user.points || 0) < 3000}
+                  disabled={busy || (user.points || 0) < 2000}
                 />
 
                 <PrizeTable />
