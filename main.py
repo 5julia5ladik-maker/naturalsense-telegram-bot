@@ -1,3 +1,4 @@
+# /main.py
 import os
 import re
 import asyncio
@@ -183,7 +184,7 @@ class PointTransaction(Base):
 
     id = Column(Integer, primary_key=True)
     telegram_id = Column(BigInteger, index=True, nullable=False)
-    type = Column(String, nullable=False)
+    type = Column(String, nullable=False)  # daily/referral/raffle_ticket/roulette_spin/roulette_prize
     delta = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
     meta = Column(JSON, default=dict)
@@ -278,7 +279,7 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_count INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
 
-        # Postgres: int32 -> bigint
+        # ✅ Postgres: int32 -> bigint
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN referred_by TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE posts ALTER COLUMN message_id TYPE BIGINT;")
@@ -306,6 +307,18 @@ async def get_user(telegram_id: int) -> Optional[User]:
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         return result.scalar_one_or_none()
+
+
+async def find_user_by_username(username: str) -> Optional[User]:
+    u = (username or "").strip()
+    if not u:
+        return None
+    if u.startswith("@"):
+        u = u[1:]
+    u = u.lower()
+    async with async_session_maker() as session:
+        res = await session.execute(select(User).where(func.lower(User.username) == u))
+        return res.scalar_one_or_none()
 
 
 async def create_user_with_referral(
@@ -349,6 +362,7 @@ async def create_user_with_referral(
             _recalc_tier(inviter)
             user.ref_bonus_paid = True
             referral_paid = True
+
             session.add(
                 PointTransaction(
                     telegram_id=int(inviter.telegram_id),
@@ -358,11 +372,32 @@ async def create_user_with_referral(
                 )
             )
 
-        session.add(PointTransaction(telegram_id=telegram_id, type="register", delta=REGISTER_BONUS_POINTS, meta={}))
+        session.add(
+            PointTransaction(
+                telegram_id=telegram_id,
+                type="register",
+                delta=REGISTER_BONUS_POINTS,
+                meta={},
+            )
+        )
 
         await session.commit()
         await session.refresh(user)
+        logger.info("✅ New user created: %s", telegram_id)
         return user, referral_paid
+
+
+async def add_points(telegram_id: int, points: int) -> Optional[User]:
+    async with async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+        if not user:
+            return None
+        user.points = (user.points or 0) + points
+        _recalc_tier(user)
+        session.add(PointTransaction(telegram_id=telegram_id, type="admin", delta=points, meta={}))
+        await session.commit()
+        await session.refresh(user)
+        return user
 
 
 async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[User], bool, int, int]:
@@ -374,19 +409,23 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
         now = datetime.utcnow()
         last = user.last_daily_bonus_at
 
-        # anti-farm: strictly 24h
         if last is not None and (now - last) < timedelta(days=1):
             delta = timedelta(days=1) - (now - last)
-            hours_left = max(0, int(delta.total_seconds() // 3600) + (1 if (delta.total_seconds() % 3600) > 0 else 0))
+            hours_left = max(
+                0,
+                int(delta.total_seconds() // 3600) + (1 if (delta.total_seconds() % 3600) > 0 else 0),
+            )
             return user, False, hours_left, 0
 
         user.points = (user.points or 0) + DAILY_BONUS_POINTS
 
-        # streak: 48h window
         if last is None:
             user.daily_streak = 1
         else:
-            user.daily_streak = (user.daily_streak or 0) + 1 if (now - last) <= timedelta(days=2) else 1
+            if (now - last) <= timedelta(days=2):
+                user.daily_streak = (user.daily_streak or 0) + 1
+            else:
+                user.daily_streak = 1
 
         user.best_streak = max(user.best_streak or 0, user.daily_streak or 0)
         user.last_daily_bonus_at = now
@@ -411,6 +450,7 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
 # POSTS INDEX (TAGS)
 # -----------------------------------------------------------------------------
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
+ASCII_TAG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 def extract_tags(text_: str | None) -> list[str]:
@@ -485,6 +525,7 @@ async def upsert_post_from_channel(
         session.add(p)
         await session.commit()
         await session.refresh(p)
+        logger.info("✅ Indexed post %s tags=%s", message_id, tags)
         return p
 
 
@@ -507,6 +548,36 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
     return rows
 
 
+async def list_brand_tags(limit_posts: int = 4000) -> list[dict[str, Any]]:
+    excluded = {"Challenge", "SephoraPromo"} | set(BLOCKED_TAGS)
+    counts: dict[str, int] = {}
+    async with async_session_maker() as session:
+        rows = (
+            await session.execute(
+                select(Post.tags)
+                .where(Post.is_deleted == False)  # noqa: E712
+                .order_by(Post.message_id.desc())
+                .limit(limit_posts)
+            )
+        ).all()
+
+    for (tags,) in rows:
+        if not tags:
+            continue
+        for t in (tags or []):
+            if not isinstance(t, str):
+                continue
+            if t in excluded:
+                continue
+            if not ASCII_TAG_RE.match(t):
+                continue
+            counts[t] = counts.get(t, 0) + 1
+
+    items = [{"tag": k, "count": v} for k, v in counts.items()]
+    items.sort(key=lambda x: (-x["count"], x["tag"].lower()))
+    return items
+
+
 # -----------------------------------------------------------------------------
 # DELETE SWEEPER (AUTO CHECK)
 # -----------------------------------------------------------------------------
@@ -526,7 +597,8 @@ async def message_exists_public(message_id: int) -> bool:
             if "join channel" in html or "this channel is private" in html:
                 return True
             return True
-    except Exception:
+    except Exception as e:
+        logger.warning("Sweeper check failed for %s: %s", message_id, e)
         return True
 
 
@@ -561,6 +633,8 @@ async def sweep_deleted_posts(batch: int = 80):
             .values(is_deleted=True, deleted_at=now)
         )
         await session.commit()
+
+    logger.info("🧹 Marked deleted posts: %s", to_mark)
     return to_mark
 
 
@@ -570,7 +644,7 @@ async def sweeper_loop():
             await sweep_deleted_posts(batch=80)
         except Exception as e:
             logger.error("Sweeper error: %s", e)
-        await asyncio.sleep(300)
+        await asyncio.sleep(300)  # 5 минут
 
 
 # -----------------------------------------------------------------------------
@@ -593,14 +667,59 @@ def get_main_keyboard():
 
 
 def build_start_inline_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("↩️ В канал", url=f"https://t.me/{CHANNEL_USERNAME}")]])
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("↩️ В канал", url=f"https://t.me/{CHANNEL_USERNAME}")]]
+    )
+
+
+async def set_keyboard_silent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat = update.effective_chat
+    if not chat:
+        return
+    try:
+        m = await context.bot.send_message(chat_id=chat.id, text="\u200b", reply_markup=get_main_keyboard())
+        await asyncio.sleep(0.8)
+        try:
+            await context.bot.delete_message(chat_id=chat.id, message_id=m.message_id)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def build_help_text() -> str:
+    return """\
+ℹ️ *Помощь / Как пользоваться*
+
+1) Нажми *📲 Открыть журнал* — откроется Mini App внутри Telegram.
+2) Выбирай категории/бренды и открывай посты.
+3) *👤 Профиль* — баллы, уровень, стрик.
+4) *↩️ В канал* — кнопка под сообщением /start.
+
+💎 *Баллы и антифарм*
+• Первый /start: +10 за регистрацию
+• Далее: +5 за визит, строго 1 раз в 24 часа
+
+🔥 *Стрик (серия дней)*
+• 3 дня: +10
+• 7 дней: +30
+• 14 дней: +80
+• 30 дней: +250
+
+🎟 *Рефералка*
+Команда /invite даёт твою ссылку.
+За каждого нового пользователя по ссылке: +20 (1 раз за каждого).
+"""
 
 
 async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.exception("Telegram handler error: %s", context.error)
     try:
         if ADMIN_CHAT_ID:
-            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"❌ Ошибка в боте:\n{repr(context.error)}")
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=f"❌ Ошибка в боте:\n{repr(context.error)}"
+            )
     except Exception:
         pass
 
@@ -670,57 +789,26 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             referral_paid=referral_paid,
         )
         await update.message.reply_text(text_, reply_markup=build_start_inline_kb())
-        # ReplyKeyboard ставим отдельным сообщением и удаляем сразу (без "Меню")
-        try:
-            m = await context.bot.send_message(chat_id=update.effective_chat.id, text="\u200b", reply_markup=get_main_keyboard())
-            await asyncio.sleep(0.2)
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=m.message_id)
-        except Exception:
-            pass
+        await set_keyboard_silent(update, context)
         return
 
     user2, granted, hours_left, streak_bonus = await add_daily_bonus_and_update_streak(user.id)
+    if not user2:
+        await update.message.reply_text("Ошибка пользователя. Нажми /start ещё раз.", reply_markup=build_start_inline_kb())
+        await set_keyboard_silent(update, context)
+        return
+
     text_ = build_welcome_text(
         first_name=user.first_name,
         is_new=False,
-        daily_granted=bool(granted),
-        hours_left=int(hours_left),
-        streak=(user2.daily_streak or 0) if user2 else 0,
-        streak_bonus=int(streak_bonus),
+        daily_granted=granted,
+        hours_left=hours_left,
+        streak=user2.daily_streak or 0,
+        streak_bonus=streak_bonus,
         referral_paid=False,
     )
     await update.message.reply_text(text_, reply_markup=build_start_inline_kb())
-    try:
-        m = await context.bot.send_message(chat_id=update.effective_chat.id, text="\u200b", reply_markup=get_main_keyboard())
-        await asyncio.sleep(0.2)
-        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=m.message_id)
-    except Exception:
-        pass
-
-
-def build_help_text() -> str:
-    return """\
-ℹ️ *Помощь / Как пользоваться*
-
-1) Нажми *📲 Открыть журнал* — откроется Mini App внутри Telegram.
-2) Выбирай категории/бренды и открывай посты.
-3) *👤 Профиль* — баллы, уровень, стрик.
-4) *↩️ В канал* — кнопка под сообщением /start.
-
-💎 *Баллы и антифарм*
-• Первый /start: +10 за регистрацию
-• Далее: +5 за визит, строго 1 раз в 24 часа
-
-🔥 *Стрик (серия дней)*
-• 3 дня: +10
-• 7 дней: +30
-• 14 дней: +80
-• 30 дней: +250
-
-🎟 *Рефералка*
-Команда /invite даёт твою ссылку.
-За каждого нового пользователя по ссылке: +20 (1 раз за каждого).
-"""
+    await set_keyboard_silent(update, context)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -729,11 +817,33 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(build_help_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 
+async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    user = update.effective_user
+    me = await context.bot.get_me()
+    bot_username = me.username or ""
+    if not bot_username:
+        await update.message.reply_text("Не удалось получить username бота. Проверь настройки.", reply_markup=get_main_keyboard())
+        return
+
+    link = f"https://t.me/{bot_username}?start={user.id}"
+    text = f"""\
+🎟 Твоя реферальная ссылка:
+
+{link}
+
+За каждого нового пользователя по этой ссылке: +{REFERRAL_BONUS_POINTS} баллов (1 раз за каждого).
+"""
+    await update.message.reply_text(text, reply_markup=get_main_keyboard())
+
+
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-    u = update.effective_user
-    db_user = await get_user(u.id)
+    user = update.effective_user
+    db_user = await get_user(user.id)
+
     if not db_user:
         await update.message.reply_text("Нажми /start для регистрации", reply_markup=get_main_keyboard())
         return
@@ -741,9 +851,35 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tier_emoji = {"free": "🥉", "premium": "🥈", "vip": "🥇"}
     tier_name = {"free": "Bronze", "premium": "Silver", "vip": "Gold VIP"}
 
+    next_tier_points = {
+        "free": (100, "Silver"),
+        "premium": (500, "Gold VIP"),
+        "vip": (1000, "Platinum"),
+    }
+
+    next_points, next_name = next_tier_points.get(db_user.tier, (0, "Max"))
+    remaining = max(0, next_points - (db_user.points or 0))
+
     streak = db_user.daily_streak or 0
     best = db_user.best_streak or 0
     refs = db_user.referral_count or 0
+
+    last_bonus = db_user.last_daily_bonus_at
+    if last_bonus:
+        now = datetime.utcnow()
+        if (now - last_bonus) >= timedelta(days=1):
+            bonus_hint = "✅ Доступен ежедневный бонус — нажми /start"
+        else:
+            delta = timedelta(days=1) - (now - last_bonus)
+            hours_left = max(
+                0,
+                int(delta.total_seconds() // 3600) + (1 if (delta.total_seconds() % 3600) > 0 else 0),
+            )
+            bonus_hint = f"ℹ️ Ежедневный бонус через ~{hours_left} ч"
+    else:
+        bonus_hint = "ℹ️ Нажми /start для бонуса"
+
+    joined = db_user.joined_at.strftime("%d.%m.%Y") if db_user.joined_at else "-"
 
     text_ = f"""\
 👤 **Твой профиль**
@@ -753,18 +889,223 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🔥 Стрик: **{streak}** • Лучший: **{best}**
 🎟 Приглашено: **{refs}**
+
+📊 До {next_name}: {remaining} баллов
+📅 Регистрация: {joined}
+
+{bonus_hint}
 """
     await update.message.reply_text(text_, parse_mode="Markdown", reply_markup=get_main_keyboard())
+
+
+async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    u = update.effective_user
+    await update.message.reply_text(f"Твой telegram_id: {u.id}", reply_markup=get_main_keyboard())
+
+
+async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Ответь на сообщение человека и напиши /id", reply_markup=get_main_keyboard())
+        return
+    target = update.message.reply_to_message.from_user
+    await update.message.reply_text(
+        f"ID пользователя: {target.id}\nusername: @{target.username or '-'}\nname: {target.first_name or '-'}",
+        reply_markup=get_main_keyboard()
+    )
+
+
+# --- admin ---
+async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
+        return
+
+    kb = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
+            [InlineKeyboardButton("🧹 Sweep (проверка удалённых постов)", callback_data="admin_sweep")],
+        ]
+    )
+    await update.message.reply_text("👑 Админ-панель:", reply_markup=kb)
+
+
+async def admin_stats_text() -> str:
+    async with async_session_maker() as session:
+        total_users = (await session.execute(select(func.count(User.id)))).scalar() or 0
+        total_posts = (await session.execute(select(func.count(Post.id)))).scalar() or 0
+        deleted_posts = (
+            (await session.execute(select(func.count(Post.id)).where(Post.is_deleted == True)))  # noqa: E712
+        ).scalar() or 0
+
+        since = datetime.utcnow() - timedelta(days=1)
+        users_24h = (await session.execute(select(func.count(User.id)).where(User.joined_at >= since))).scalar() or 0
+
+    return f"""\
+📊 *Статистика*
+
+👥 Пользователей всего: *{total_users}*
+👥 Новых за 24ч: *{users_24h}*
+
+📝 Постов в базе: *{total_posts}*
+🗑 Помечено удалённых: *{deleted_posts}*
+"""
+
+
+async def cmd_admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
+        return
+    await update.message.reply_text(await admin_stats_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
+
+
+async def cmd_admin_sweep(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
+        return
+    marked = await sweep_deleted_posts(batch=120)
+    if not marked:
+        await update.message.reply_text("🧹 Sweep: ничего не найдено.", reply_markup=get_main_keyboard())
+    else:
+        await update.message.reply_text(f"🧹 Sweep: помечены удалёнными: {marked}", reply_markup=get_main_keyboard())
+
+
+async def cmd_admin_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
+        return
+
+    if not context.args or not (context.args[0] or "").isdigit():
+        await update.message.reply_text("Используй: /admin_user <telegram_id>", reply_markup=get_main_keyboard())
+        return
+
+    tid = int(context.args[0])
+    u = await get_user(tid)
+    if not u:
+        await update.message.reply_text("Юзер не найден.", reply_markup=get_main_keyboard())
+        return
+
+    text = f"""\
+👤 Пользователь: {u.telegram_id}
+Имя: {u.first_name or "-"} @{u.username or "-"}
+
+Tier: {u.tier}
+Баллы: {u.points}
+
+Стрик: {u.daily_streak} (best {u.best_streak})
+Last bonus: {u.last_daily_bonus_at}
+
+Referred_by: {u.referred_by}
+Referral_count: {u.referral_count}
+Ref_paid: {u.ref_bonus_paid}
+"""
+    await update.message.reply_text(text, reply_markup=get_main_keyboard())
+
+
+async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
+        return
+
+    if len(context.args) < 2 or not context.args[0].isdigit() or not re.match(r"^-?\d+$", context.args[1]):
+        await update.message.reply_text("Используй: /admin_add <telegram_id> <баллы>", reply_markup=get_main_keyboard())
+        return
+
+    tid = int(context.args[0])
+    pts = int(context.args[1])
+
+    u = await add_points(tid, pts)
+    if not u:
+        await update.message.reply_text("Юзер не найден.", reply_markup=get_main_keyboard())
+        return
+
+    await update.message.reply_text(f"✅ Начислено {pts}. Теперь у юзера {u.points} баллов.", reply_markup=get_main_keyboard())
+
+
+async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
+        return
+
+    if not context.args:
+        await update.message.reply_text("Используй: /find @username", reply_markup=get_main_keyboard())
+        return
+
+    username = context.args[0]
+    u = await find_user_by_username(username)
+    if not u:
+        await update.message.reply_text("Не найдено. Этот человек ещё не писал боту (/start).", reply_markup=get_main_keyboard())
+        return
+
+    await update.message.reply_text(
+        f"✅ Найден:\n"
+        f"telegram_id: {u.telegram_id}\n"
+        f"username: @{u.username or '-'}\n"
+        f"name: {u.first_name or '-'}\n"
+        f"points: {u.points}\n"
+        f"tier: {u.tier}",
+        reply_markup=get_main_keyboard()
+    )
+
+
+async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not q:
+        return
+    await q.answer()
+
+    uid = q.from_user.id
+    if not is_admin(uid):
+        await q.edit_message_text("⛔️ Нет доступа.")
+        return
+
+    data = q.data or ""
+    if data == "admin_stats":
+        await q.edit_message_text((await admin_stats_text()), parse_mode="Markdown")
+        return
+
+    if data == "admin_sweep":
+        marked = await sweep_deleted_posts(batch=120)
+        if not marked:
+            await q.edit_message_text("🧹 Sweep: ничего не найдено.")
+        else:
+            await q.edit_message_text(f"🧹 Sweep: помечены удалёнными: {marked}")
+        return
 
 
 async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
     txt = update.message.text.strip()
+
     if txt == "👤 Профиль":
         await cmd_profile(update, context)
-    elif txt == "ℹ️ Помощь":
+        return
+
+    if txt == "ℹ️ Помощь":
         await cmd_help(update, context)
+        return
 
 
 # -----------------------------------------------------------------------------
@@ -775,7 +1116,13 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
     text_ = msg.text or msg.caption or ""
-    await upsert_post_from_channel(message_id=msg.message_id, date=msg.date, text_=text_)
+    await upsert_post_from_channel(
+        message_id=msg.message_id,
+        date=msg.date,
+        text_=text_,
+        media_type=None,
+        media_file_id=None,
+    )
 
 
 async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -783,7 +1130,13 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
     if not msg:
         return
     text_ = msg.text or msg.caption or ""
-    await upsert_post_from_channel(message_id=msg.message_id, date=msg.date, text_=text_)
+    await upsert_post_from_channel(
+        message_id=msg.message_id,
+        date=msg.date,
+        text_=text_,
+        media_type=None,
+        media_file_id=None,
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -817,6 +1170,7 @@ async def _telegram_runner():
 
 async def start_telegram_bot():
     global tg_app, tg_task
+
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set; starting API WITHOUT Telegram bot")
         return
@@ -826,9 +1180,21 @@ async def start_telegram_bot():
 
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("help", cmd_help))
+    tg_app.add_handler(CommandHandler("invite", cmd_invite))
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
+    tg_app.add_handler(CommandHandler("myid", cmd_myid))
+    tg_app.add_handler(CommandHandler("id", cmd_id))
 
+    tg_app.add_handler(CommandHandler("admin", cmd_admin))
+    tg_app.add_handler(CommandHandler("admin_stats", cmd_admin_stats))
+    tg_app.add_handler(CommandHandler("admin_sweep", cmd_admin_sweep))
+    tg_app.add_handler(CommandHandler("admin_user", cmd_admin_user))
+    tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
+    tg_app.add_handler(CommandHandler("find", cmd_admin_find))
+
+    tg_app.add_handler(CallbackQueryHandler(on_callback))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
+
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
 
@@ -844,6 +1210,16 @@ async def stop_telegram_bot():
         except Exception:
             pass
         tg_task = None
+
+
+async def notify_admin(text: str) -> None:
+    if not tg_app or not BOT_TOKEN or not ADMIN_CHAT_ID:
+        logger.info("ADMIN ALERT (no bot): %s", text)
+        return
+    try:
+        await tg_app.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
+    except Exception as e:
+        logger.warning("Failed to notify admin: %s", e)
 
 
 # -----------------------------------------------------------------------------
@@ -869,6 +1245,7 @@ def get_webapp_html() -> str:
       --muted: rgba(255,255,255,0.60);
       --gold: rgba(230, 193, 128, 0.9);
       --stroke: rgba(255,255,255,0.10);
+      --sheet: rgba(12, 15, 20, 0.92);
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
@@ -910,4 +1287,1012 @@ def get_webapp_html() -> str:
         onClick={onOpenProfile}
         style={{
           border: "1px solid var(--stroke)",
-          background: "linear-gradient(180deg, rgba
+          background: "linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05))",
+          borderRadius: "22px",
+          padding: "16px 14px",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+          position: "relative",
+          overflow: "hidden",
+          cursor: user ? "pointer" : "default"
+        }}
+      >
+        <div style={{
+          position: "absolute", inset: "-2px",
+          background: "radial-gradient(600px 300px at 10% 0%, rgba(230,193,128,0.26), transparent 60%)",
+          pointerEvents: "none"
+        }} />
+        <div style={{ position: "relative" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontSize: "20px", fontWeight: 650, letterSpacing: "0.2px" }}>NS · Natural Sense</div>
+              <div style={{ marginTop: "6px", fontSize: "13px", color: "var(--muted)" }}>luxury beauty magazine</div>
+            </div>
+            {user && (
+              <div style={{ fontSize:"14px", color:"var(--muted)", display:"flex", gap:"6px", alignItems:"center" }}>
+                Профиль <span style={{ opacity:0.8 }}>›</span>
+              </div>
+            )}
+          </div>
+
+          {user && (
+            <div style={{
+              marginTop: "14px",
+              padding: "12px",
+              background: "rgba(230, 193, 128, 0.1)",
+              borderRadius: "14px",
+              border: "1px solid rgba(230, 193, 128, 0.2)"
+            }}>
+              <div style={{ fontSize: "13px", color: "var(--muted)" }}>Привет, {user.first_name}!</div>
+              <div style={{ fontSize: "16px", fontWeight: 600, marginTop: "4px" }}>
+                💎 {user.points} баллов • {tierLabel(user.tier)}
+              </div>
+              <div style={{ marginTop:"6px", fontSize:"12px", color:"var(--muted)" }}>
+                Нажми, чтобы открыть профиль и бонусы
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+
+    const Tabs = ({ active, onChange }) => {
+      const tabs = [
+        { id: "home", label: "Главное" },
+        { id: "cat", label: "Категории" },
+        { id: "brand", label: "Бренды" },
+        { id: "sephora", label: "Sephora" },
+        { id: "ptype", label: "Продукт" },
+      ];
+      return (
+        <div style={{ display: "flex", gap: "8px", marginTop: "14px" }}>
+          {tabs.map(tab => (
+            <div
+              key={tab.id}
+              onClick={() => onChange(tab.id)}
+              style={{
+                flex: 1,
+                border: active === tab.id ? "1px solid rgba(230,193,128,0.40)" : "1px solid var(--stroke)",
+                background: active === tab.id ? "rgba(230,193,128,0.12)" : "rgba(255,255,255,0.06)",
+                color: active === tab.id ? "rgba(255,255,255,0.95)" : "var(--text)",
+                padding: "10px",
+                borderRadius: "14px",
+                fontSize: "13px",
+                textAlign: "center",
+                cursor: "pointer",
+                userSelect: "none",
+                transition: "all 0.2s"
+              }}
+            >
+              {tab.label}
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    const Button = ({ icon, label, onClick, subtitle, disabled }) => (
+      <div
+        onClick={disabled ? undefined : onClick}
+        style={{
+          width: "100%",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "14px",
+          borderRadius: "18px",
+          border: "1px solid var(--stroke)",
+          background: "rgba(255,255,255,0.06)",
+          color: "var(--text)",
+          fontSize: "15px",
+          margin: "10px 0",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.6 : 1
+        }}
+      >
+        <div>
+          <div>{icon} {label}</div>
+          {subtitle && <div style={{ fontSize:"12px", color:"var(--muted)", marginTop:"4px" }}>{subtitle}</div>}
+        </div>
+        <span style={{ opacity: 0.8 }}>›</span>
+      </div>
+    );
+
+    const Panel = ({ children }) => (
+      <div style={{
+        marginTop: "14px",
+        border: "1px solid var(--stroke)",
+        background: "rgba(255,255,255,0.05)",
+        borderRadius: "22px",
+        padding: "12px"
+      }}>
+        {children}
+      </div>
+    );
+
+    const PostCard = ({ post }) => (
+      <div
+        onClick={() => openLink(post.url)}
+        style={{
+          marginTop: "10px",
+          padding: "12px",
+          borderRadius: "18px",
+          border: "1px solid var(--stroke)",
+          background: "rgba(255,255,255,0.06)",
+          cursor: "pointer"
+        }}
+      >
+        <div style={{ fontSize:"12px", color:"var(--muted)" }}>
+          {"#" + (post.tags?.[0] || "post")} • ID {post.message_id}
+        </div>
+        <div style={{ marginTop:"8px", fontSize:"14px", lineHeight:"1.35" }}>
+          {post.preview || "Открыть пост →"}
+        </div>
+        <div style={{ marginTop:"8px", display:"flex", gap:"6px", flexWrap:"wrap" }}>
+          {(post.tags || []).slice(0,6).map(t => (
+            <div key={t} style={{
+              fontSize:"12px",
+              padding:"5px 8px",
+              borderRadius:"999px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.05)"
+            }}>#{t}</div>
+          ))}
+        </div>
+      </div>
+    );
+
+    const Sheet = ({ open, onClose, children }) => {
+      if (!open) return null;
+      return (
+        <div
+          onClick={onClose}
+          style={{
+            position:"fixed",
+            inset:0,
+            background:"rgba(0,0,0,0.40)",
+            backdropFilter:"blur(12px)",
+            WebkitBackdropFilter:"blur(12px)",
+            zIndex:9999,
+            display:"flex",
+            justifyContent:"center",
+            alignItems:"flex-end",
+            padding:"10px"
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width:"100%",
+              maxWidth:"520px",
+              borderRadius:"22px 22px 18px 18px",
+              border:"1px solid rgba(255,255,255,0.14)",
+              background:"var(--sheet)",
+              boxShadow:"0 20px 60px rgba(0,0,0,0.60)",
+              padding:"14px 14px 10px",
+              maxHeight:"82vh",
+              overflow:"auto"
+            }}
+          >
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontSize:"16px", fontWeight:650 }}>👤 Профиль</div>
+              <div
+                onClick={onClose}
+                style={{ cursor:"pointer", color:"var(--muted)", fontSize:"14px" }}
+              >Закрыть</div>
+            </div>
+            {children}
+          </div>
+        </div>
+      );
+    };
+
+    const StatRow = ({ left, right }) => (
+      <div style={{ display:"flex", justifyContent:"space-between", marginTop:"10px", fontSize:"14px" }}>
+        <div style={{ color:"var(--muted)" }}>{left}</div>
+        <div style={{ fontWeight:600 }}>{right}</div>
+      </div>
+    );
+
+    const Divider = () => (
+      <div style={{ marginTop:"14px", marginBottom:"8px", height:"1px", background:"var(--stroke)" }} />
+    );
+
+    const PrizeTable = () => (
+      <div style={{ marginTop:"10px" }}>
+        <div style={{ fontSize:"13px", color:"var(--muted)" }}>Шансы рулетки (честно):</div>
+        <div style={{ marginTop:"10px", display:"grid", gap:"8px" }}>
+          {[
+            ["50%", "+500 баллов"],
+            ["25%", "+1000 баллов"],
+            ["15%", "🎟 Билет на розыгрыш"],
+            ["8%", "+3000 баллов"],
+            ["2%", "💎 Dior палетка (ТОП приз)"],
+          ].map(([p, t]) => (
+            <div key={p+t} style={{
+              padding:"10px",
+              borderRadius:"14px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.05)",
+              display:"flex",
+              justifyContent:"space-between",
+              fontSize:"14px"
+            }}>
+              <div style={{ color:"var(--muted)" }}>{p}</div>
+              <div style={{ fontWeight:600 }}>{t}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop:"10px", fontSize:"12px", color:"var(--muted)" }}>
+          Лимит: 1 спин в 24 часа
+        </div>
+      </div>
+    );
+
+    const App = () => {
+      const [activeTab, setActiveTab] = useState("home");
+      const [user, setUser] = useState(null);
+
+      const [postsMode, setPostsMode] = useState(false);
+      const [selectedTag, setSelectedTag] = useState(null);
+      const [posts, setPosts] = useState([]);
+      const [loading, setLoading] = useState(false);
+
+      const [profileOpen, setProfileOpen] = useState(false);
+      const [raffle, setRaffle] = useState(null);
+      const [rouletteHistory, setRouletteHistory] = useState([]);
+      const [busy, setBusy] = useState(false);
+      const [msg, setMsg] = useState("");
+
+      const [brandTags, setBrandTags] = useState([]);
+      const [brandLoading, setBrandLoading] = useState(false);
+
+      const tgUserId = tg?.initDataUnsafe?.user?.id;
+
+      const refreshUser = () => {
+        if (!tgUserId) return Promise.resolve();
+        return fetch(`/api/user/${tgUserId}`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setUser(data))
+          .catch(() => {});
+      };
+
+      const loadPosts = (tag) => {
+        setLoading(true);
+        fetch(`/api/posts?tag=${encodeURIComponent(tag)}`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setPosts(Array.isArray(data) ? data : []))
+          .catch(() => setPosts([]))
+          .finally(() => setLoading(false));
+      };
+
+      const openPosts = (tag) => {
+        setSelectedTag(tag);
+        setPostsMode(true);
+        loadPosts(tag);
+      };
+
+      const loadBrands = () => {
+        setBrandLoading(true);
+        return fetch(`/api/brands`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setBrandTags(Array.isArray(data) ? data : []))
+          .catch(() => setBrandTags([]))
+          .finally(() => setBrandLoading(false));
+      };
+
+      const changeTab = (tabId) => {
+        setActiveTab(tabId);
+        setPostsMode(false);
+        setSelectedTag(null);
+        setPosts([]);
+        setLoading(false);
+        if (tabId === "brand") loadBrands();
+      };
+
+      const loadRaffleStatus = () => {
+        if (!tgUserId) return Promise.resolve();
+        return fetch(`/api/raffle/status?telegram_id=${encodeURIComponent(tgUserId)}`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setRaffle(data))
+          .catch(() => setRaffle(null));
+      };
+
+      const loadRouletteHistory = () => {
+        if (!tgUserId) return Promise.resolve();
+        return fetch(`/api/roulette/history?telegram_id=${encodeURIComponent(tgUserId)}&limit=5`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setRouletteHistory(Array.isArray(data) ? data : []))
+          .catch(() => setRouletteHistory([]));
+      };
+
+      const openProfile = () => {
+        if (!user) return;
+        setMsg("");
+        setProfileOpen(true);
+      };
+
+      useEffect(() => {
+        if (tgUserId) refreshUser();
+      }, []);
+
+      useEffect(() => {
+        if (profileOpen) {
+          loadRaffleStatus();
+          loadRouletteHistory();
+        }
+      }, [profileOpen]);
+
+      const referralLink = useMemo(() => {
+        if (!tgUserId) return "";
+        if (!BOT_USERNAME) return "";
+        return `https://t.me/${BOT_USERNAME}?start=${tgUserId}`;
+      }, [tgUserId]);
+
+      const copyText = async (t) => {
+        try {
+          await navigator.clipboard.writeText(t);
+          setMsg("✅ Скопировано");
+        } catch (e) {
+          setMsg("ℹ️ Не удалось скопировать");
+        }
+      };
+
+      const buyTicket = async () => {
+        if (!tgUserId) return;
+        setBusy(true);
+        setMsg("");
+        try {
+          const r = await fetch(`/api/raffle/buy_ticket`, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ telegram_id: tgUserId, qty: 1 })
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || "Ошибка");
+          }
+          const data = await r.json();
+          setMsg(`✅ Билет куплен. Твоих билетов: ${data.ticket_count}`);
+          await refreshUser();
+          await loadRaffleStatus();
+        } catch (e) {
+          setMsg(`❌ ${e.message || "Ошибка"}`);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const spinRoulette = async () => {
+        if (!tgUserId) return;
+        setBusy(true);
+        setMsg("");
+        try {
+          const r = await fetch(`/api/roulette/spin`, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ telegram_id: tgUserId })
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || "Ошибка");
+          }
+          const data = await r.json();
+          setMsg(`🎡 Выпало: ${data.prize_label}`);
+          await refreshUser();
+          await loadRaffleStatus();
+          await loadRouletteHistory();
+        } catch (e) {
+          setMsg(`❌ ${e.message || "Ошибка"}`);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const PostsScreen = () => (
+        <Panel>
+          <div style={{ fontSize: "14px", color: "var(--muted)" }}>
+            Посты {selectedTag ? ("#" + selectedTag) : ""}
+          </div>
+
+          {loading && (
+            <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
+              Загрузка…
+            </div>
+          )}
+
+          {!loading && posts.length === 0 && (
+            <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
+              Постов с этим тегом пока нет.
+            </div>
+          )}
+
+          {!loading && posts.map(p => <PostCard key={p.message_id} post={p} />)}
+        </Panel>
+      );
+
+      const renderContent = () => {
+        if (postsMode) return <PostsScreen />;
+
+        switch (activeTab) {
+          case "home":
+            return (
+              <Panel>
+                <Button icon="📂" label="Категории" onClick={() => changeTab("cat")} />
+                <Button icon="🏷" label="Бренды" onClick={() => changeTab("brand")} />
+                <Button icon="💸" label="Sephora" onClick={() => changeTab("sephora")} />
+                <Button icon="🧴" label="Продукт" onClick={() => changeTab("ptype")} />
+                <Button icon="💎" label="Beauty Challenges" onClick={() => openPosts("Challenge")} />
+                <Button icon="↩️" label="В канал" onClick={() => openLink(`https://t.me/${CHANNEL}`)} />
+              </Panel>
+            );
+
+          case "cat":
+            return (
+              <Panel>
+                <Button icon="🆕" label="Новинка" onClick={() => openPosts("Новинка")} />
+                <Button icon="💎" label="Кратко о люкс продукте" onClick={() => openPosts("Люкс")} />
+                <Button icon="🔥" label="Тренд" onClick={() => openPosts("Тренд")} />
+                <Button icon="🏛" label="История бренда" onClick={() => openPosts("История")} />
+                <Button icon="⭐" label="Личная оценка" onClick={() => openPosts("Оценка")} />
+                <Button icon="🧾" label="Факты" onClick={() => openPosts("Факты")} />
+                <Button icon="🧪" label="Составы продуктов" onClick={() => openPosts("Состав")} />
+              </Panel>
+            );
+
+          case "brand":
+            return (
+              <Panel>
+                {brandLoading && (
+                  <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
+                    Загрузка брендов…
+                  </div>
+                )}
+                {!brandLoading && brandTags.length === 0 && (
+                  <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
+                    Брендов пока нет (нужны посты с ASCII-тегами типа #Dior, #Chanel).
+                  </div>
+                )}
+                {!brandLoading && brandTags.map(x => (
+                  <Button
+                    key={x.tag}
+                    icon="✨"
+                    label={x.tag}
+                    subtitle={(x.count ? `${x.count} пост(ов)` : "")}
+                    onClick={() => openPosts(x.tag)}
+                  />
+                ))}
+              </Panel>
+            );
+
+          case "sephora":
+            return (
+              <Panel>
+                <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo")} />
+              </Panel>
+            );
+
+          case "ptype":
+            return (
+              <Panel>
+                <Button icon="🧴" label="Праймер" onClick={() => openPosts("Праймер")} />
+                <Button icon="🧴" label="Тональная основа" onClick={() => openPosts("ТональнаяОснова")} />
+                <Button icon="🧴" label="Консилер" onClick={() => openPosts("Консилер")} />
+                <Button icon="🧴" label="Пудра" onClick={() => openPosts("Пудра")} />
+                <Button icon="🧴" label="Румяна" onClick={() => openPosts("Румяна")} />
+                <Button icon="🧴" label="Скульптор" onClick={() => openPosts("Скульптор")} />
+                <Button icon="🧴" label="Бронзер" onClick={() => openPosts("Бронзер")} />
+                <Button icon="🧴" label="Продукт для бровей" onClick={() => openPosts("ПродуктДляБровей")} />
+                <Button icon="🧴" label="Хайлайтер" onClick={() => openPosts("Хайлайтер")} />
+                <Button icon="🧴" label="Тушь" onClick={() => openPosts("Тушь")} />
+                <Button icon="🧴" label="Тени" onClick={() => openPosts("Тени")} />
+                <Button icon="🧴" label="Помада" onClick={() => openPosts("Помада")} />
+                <Button icon="🧴" label="Карандаш для губ" onClick={() => openPosts("КарандашДляГуб")} />
+                <Button icon="🧴" label="Палетка" onClick={() => openPosts("Палетка")} />
+                <Button icon="🧴" label="Фиксатор" onClick={() => openPosts("Фиксатор")} />
+              </Panel>
+            );
+
+          default:
+            return null;
+        }
+      };
+
+      const ticketNeed = raffle?.ticket_cost ?? 500;
+      const canBuyTicket = (user?.points || 0) >= ticketNeed;
+      const canSpin = (user?.points || 0) >= 3000;
+
+      return (
+        <div style={{ padding:"18px 16px 26px", maxWidth:"520px", margin:"0 auto" }}>
+          <Hero user={user} onOpenProfile={openProfile} />
+          <Tabs active={activeTab} onChange={changeTab} />
+          {renderContent()}
+
+          <Sheet open={profileOpen} onClose={() => setProfileOpen(false)}>
+            {!user ? (
+              <div style={{ marginTop:"12px", color:"var(--muted)", fontSize:"13px" }}>
+                Профиль недоступен.
+              </div>
+            ) : (
+              <div style={{ marginTop:"12px" }}>
+                <div style={{
+                  padding:"12px",
+                  borderRadius:"18px",
+                  border:"1px solid rgba(255,255,255,0.14)",
+                  background:"rgba(255,255,255,0.05)"
+                }}>
+                  <div style={{ fontSize:"13px", color:"var(--muted)" }}>Привет, {user.first_name}!</div>
+                  <div style={{ fontSize:"18px", fontWeight:700, marginTop:"6px" }}>💎 {user.points} баллов</div>
+                  <div style={{ fontSize:"13px", color:"var(--muted)", marginTop:"4px" }}>{tierLabel(user.tier)}</div>
+
+                  <StatRow left="🔥 Стрик" right={`${user.daily_streak || 0} (best ${user.best_streak || 0})`} />
+                  <StatRow left="🎟 Приглашено" right={`${user.referral_count || 0}`} />
+                </div>
+
+                <Divider />
+
+                <div style={{ fontSize:"14px", fontWeight:650 }}>🎟 Рефералка</div>
+                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                  За нового пользователя: +20 баллов (1 раз за каждого).
+                </div>
+                {BOT_USERNAME ? (
+                  <div style={{
+                    marginTop:"10px",
+                    padding:"10px",
+                    borderRadius:"14px",
+                    border:"1px solid rgba(255,255,255,0.14)",
+                    background:"rgba(255,255,255,0.05)",
+                    fontSize:"12px",
+                    color:"rgba(255,255,255,0.85)",
+                    wordBreak:"break-all"
+                  }}>
+                    {referralLink}
+                  </div>
+                ) : (
+                  <div style={{ marginTop:"10px", fontSize:"12px", color:"var(--muted)" }}>
+                    Чтобы показать ссылку тут — задай переменную окружения <b>BOT_USERNAME</b>. Сейчас ссылку можно взять через /invite.
+                  </div>
+                )}
+                <Button
+                  icon="📎"
+                  label="Скопировать ссылку"
+                  onClick={() => copyText(referralLink)}
+                  disabled={!BOT_USERNAME}
+                />
+
+                <Divider />
+
+                <div style={{ fontSize:"14px", fontWeight:650 }}>💎 На что тратить баллы</div>
+                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                  • 🎁 Билет на розыгрыш — 500 баллов<br/>
+                  • 🎡 Рулетка — 3000 баллов (1 раз в 24 часа)
+                </div>
+
+                <Divider />
+
+                <div style={{ fontSize:"14px", fontWeight:650 }}>🎁 Розыгрыши</div>
+                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                  Билет = {ticketNeed} баллов. Баллы списываются.
+                </div>
+                <div style={{ marginTop:"10px", fontSize:"13px", color:"var(--muted)" }}>
+                  Твоих билетов: <b style={{ color:"rgba(255,255,255,0.92)" }}>{raffle?.ticket_count ?? 0}</b>
+                </div>
+                <Button
+                  icon="🎟"
+                  label={`Купить билет (${ticketNeed})`}
+                  subtitle={busy ? "Подожди…" : (!canBuyTicket ? `Не хватает баллов: нужно ${ticketNeed}` : "")}
+                  onClick={buyTicket}
+                  disabled={busy}
+                />
+
+                <Divider />
+
+                <div style={{ fontSize:"14px", fontWeight:650 }}>🎡 Рулетка</div>
+                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                  1 спин = 3000 баллов. Каждый день (лимит 1 раз/24ч).
+                </div>
+                <Button
+                  icon="🎡"
+                  label="Крутить (3000)"
+                  subtitle={busy ? "Подожди…" : (!canSpin ? "Не хватает баллов: нужно 3000" : "")}
+                  onClick={spinRoulette}
+                  disabled={busy}
+                />
+
+                <PrizeTable />
+
+                {msg && (
+                  <div style={{
+                    marginTop:"14px",
+                    padding:"10px",
+                    borderRadius:"14px",
+                    border:"1px solid rgba(255,255,255,0.14)",
+                    background:"rgba(255,255,255,0.05)",
+                    fontSize:"13px"
+                  }}>{msg}</div>
+                )}
+
+                <Divider />
+
+                <div style={{ fontSize:"14px", fontWeight:650 }}>🧾 История рулетки</div>
+                {rouletteHistory.length === 0 ? (
+                  <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                    Пока пусто.
+                  </div>
+                ) : (
+                  <div style={{ marginTop:"10px", display:"grid", gap:"8px" }}>
+                    {rouletteHistory.map((x) => (
+                      <div key={x.id} style={{
+                        padding:"10px",
+                        borderRadius:"14px",
+                        border:"1px solid rgba(255,255,255,0.14)",
+                        background:"rgba(255,255,255,0.05)"
+                      }}>
+                        <div style={{ fontSize:"12px", color:"var(--muted)" }}>{x.created_at}</div>
+                        <div style={{ marginTop:"4px", fontSize:"14px", fontWeight:600 }}>{x.prize_label}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </Sheet>
+
+          <div style={{ marginTop:"20px", color:"var(--muted)", fontSize:"12px", textAlign:"center" }}>
+            Открывается как Mini App внутри Telegram
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.render(<App />, document.getElementById("root"));
+  </script>
+</body>
+</html>
+"""
+    return (
+        html.replace("__CHANNEL__", CHANNEL_USERNAME)
+        .replace("__BOT_USERNAME__", BOT_USERNAME)
+    )
+
+
+# -----------------------------------------------------------------------------
+# FASTAPI LIFESPAN
+# -----------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app_: FastAPI):
+    global sweeper_task
+    await init_db()
+    await start_telegram_bot()
+    sweeper_task = asyncio.create_task(sweeper_loop())
+    logger.info("✅ NS · Natural Sense started")
+    try:
+        yield
+    finally:
+        if sweeper_task:
+            sweeper_task.cancel()
+            try:
+                await sweeper_task
+            except Exception:
+                pass
+        await stop_telegram_bot()
+        logger.info("✅ NS · Natural Sense stopped")
+
+
+# -----------------------------------------------------------------------------
+# FASTAPI
+# -----------------------------------------------------------------------------
+app = FastAPI(title="NS · Natural Sense API", version="FINAL", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/")
+async def root():
+    return {"app": "NS · Natural Sense", "status": "running", "version": "FINAL"}
+
+
+@app.get("/webapp", response_class=HTMLResponse)
+async def webapp():
+    return HTMLResponse(get_webapp_html())
+
+
+@app.get("/api/user/{telegram_id}")
+async def get_user_api(telegram_id: int):
+    user = await get_user(int(telegram_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "id": user.id,
+        "telegram_id": int(user.telegram_id),
+        "username": user.username,
+        "first_name": user.first_name,
+        "tier": user.tier,
+        "points": user.points,
+        "favorites": user.favorites,
+        "joined_at": user.joined_at.isoformat() if user.joined_at else None,
+        "daily_streak": user.daily_streak or 0,
+        "best_streak": user.best_streak or 0,
+        "referral_count": user.referral_count or 0,
+        "last_daily_bonus_at": user.last_daily_bonus_at.isoformat() if user.last_daily_bonus_at else None,
+    }
+
+
+@app.get("/api/posts")
+async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
+    if not tag:
+        return []
+
+    tag = (tag or "").strip()
+    if tag in BLOCKED_TAGS:
+        return []
+
+    limit = max(1, min(int(limit), 100))
+    offset = max(0, int(offset))
+
+    rows = await list_posts(tag=tag, limit=limit, offset=offset)
+    out = []
+    for p in rows:
+        out.append({
+            "message_id": int(p.message_id),
+            "url": p.permalink or make_permalink(int(p.message_id)),
+            "tags": p.tags or [],
+            "preview": preview_text(p.text),
+        })
+    return out
+
+
+@app.get("/api/brands")
+async def api_brands():
+    return await list_brand_tags(limit_posts=4000)
+
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+
+# -----------------------------------------------------------------------------
+# RAFFLE + ROULETTE API
+# -----------------------------------------------------------------------------
+class BuyTicketReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    qty: int = Field(1, ge=1, le=50)
+
+
+class BuyTicketResp(BaseModel):
+    telegram_id: int
+    points: int
+    ticket_count: int
+
+
+class RaffleStatusResp(BaseModel):
+    raffle_id: int
+    title: str
+    is_active: bool
+    ends_at: str | None
+    ticket_count: int
+    ticket_cost: int
+
+
+class SpinReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+
+
+class SpinResp(BaseModel):
+    telegram_id: int
+    points: int
+    prize_type: str
+    prize_value: int
+    prize_label: str
+    roll: int
+
+
+def pick_roulette_prize(roll: int) -> dict[str, Any]:
+    acc = 0
+    for item in ROULETTE_DISTRIBUTION:
+        acc += int(item["weight"])
+        if roll < acc:
+            return item
+    return ROULETTE_DISTRIBUTION[-1]
+
+
+async def get_ticket_row(session: AsyncSession, telegram_id: int, raffle_id: int) -> RaffleTicket:
+    row = (
+        await session.execute(
+            select(RaffleTicket).where(
+                RaffleTicket.telegram_id == telegram_id,
+                RaffleTicket.raffle_id == raffle_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row:
+        return row
+    row = RaffleTicket(raffle_id=raffle_id, telegram_id=telegram_id, count=0, updated_at=datetime.utcnow())
+    session.add(row)
+    await session.flush()
+    return row
+
+
+@app.get("/api/raffle/status", response_model=RaffleStatusResp)
+async def raffle_status(telegram_id: int):
+    async with async_session_maker() as session:
+        raffle = (await session.execute(select(Raffle).where(Raffle.id == DEFAULT_RAFFLE_ID))).scalar_one()
+        t = (
+            await session.execute(
+                select(RaffleTicket.count).where(
+                    RaffleTicket.telegram_id == int(telegram_id),
+                    RaffleTicket.raffle_id == raffle.id,
+                )
+            )
+        ).scalar_one_or_none()
+        return {
+            "raffle_id": raffle.id,
+            "title": raffle.title,
+            "is_active": bool(raffle.is_active),
+            "ends_at": raffle.ends_at.isoformat() if raffle.ends_at else None,
+            "ticket_count": int(t or 0),
+            "ticket_cost": RAFFLE_TICKET_COST,
+        }
+
+
+@app.post("/api/raffle/buy_ticket", response_model=BuyTicketResp)
+async def raffle_buy_ticket(req: BuyTicketReq):
+    tid = int(req.telegram_id)
+    qty = int(req.qty)
+    cost = RAFFLE_TICKET_COST * qty
+
+    async with async_session_maker() as session:
+        async with session.begin():
+            user = (
+                await session.execute(
+                    select(User).where(User.telegram_id == tid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            if (user.points or 0) < cost:
+                raise HTTPException(status_code=400, detail=f"Недостаточно баллов. Нужно {cost}")
+
+            raffle = (await session.execute(select(Raffle).where(Raffle.id == DEFAULT_RAFFLE_ID))).scalar_one()
+            if not raffle.is_active:
+                raise HTTPException(status_code=400, detail="Розыгрыш сейчас недоступен")
+
+            user.points = (user.points or 0) - cost
+            _recalc_tier(user)
+
+            ticket_row = await get_ticket_row(session, tid, raffle.id)
+            ticket_row.count = int(ticket_row.count or 0) + qty
+            ticket_row.updated_at = datetime.utcnow()
+
+            session.add(PointTransaction(telegram_id=tid, type="raffle_ticket", delta=-cost, meta={"qty": qty, "raffle_id": raffle.id}))
+
+        await session.refresh(user)
+        ticket_row2 = (
+            await session.execute(
+                select(RaffleTicket).where(
+                    RaffleTicket.telegram_id == tid,
+                    RaffleTicket.raffle_id == DEFAULT_RAFFLE_ID,
+                )
+            )
+        ).scalar_one()
+
+        return {"telegram_id": tid, "points": int(user.points or 0), "ticket_count": int(ticket_row2.count or 0)}
+
+
+@app.get("/api/roulette/history")
+async def roulette_history(telegram_id: int, limit: int = 5):
+    limit = max(1, min(int(limit), 20))
+    tid = int(telegram_id)
+    async with async_session_maker() as session:
+        rows = (
+            await session.execute(
+                select(RouletteSpin)
+                .where(RouletteSpin.telegram_id == tid)
+                .order_by(RouletteSpin.created_at.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "id": r.id,
+                "created_at": r.created_at.isoformat(),
+                "prize_label": r.prize_label,
+                "prize_type": r.prize_type,
+                "prize_value": r.prize_value,
+                "roll": r.roll,
+            }
+        )
+    return out
+
+
+@app.post("/api/roulette/spin", response_model=SpinResp)
+async def roulette_spin(req: SpinReq):
+    tid = int(req.telegram_id)
+    now = datetime.utcnow()
+
+    async with async_session_maker() as session:
+        async with session.begin():
+            user = (
+                await session.execute(
+                    select(User).where(User.telegram_id == tid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            if (user.points or 0) < ROULETTE_SPIN_COST:
+                raise HTTPException(status_code=400, detail=f"Недостаточно баллов. Нужно {ROULETTE_SPIN_COST}")
+
+            last_spin = (
+                await session.execute(
+                    select(RouletteSpin.created_at)
+                    .where(RouletteSpin.telegram_id == tid)
+                    .order_by(RouletteSpin.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+
+            if last_spin and (now - last_spin) < ROULETTE_LIMIT_WINDOW:
+                delta = ROULETTE_LIMIT_WINDOW - (now - last_spin)
+                hours_left = max(
+                    0,
+                    int(delta.total_seconds() // 3600) + (1 if (delta.total_seconds() % 3600) > 0 else 0),
+                )
+                raise HTTPException(status_code=400, detail=f"Рулетка доступна через ~{hours_left} ч")
+
+            user.points = (user.points or 0) - ROULETTE_SPIN_COST
+            session.add(PointTransaction(telegram_id=tid, type="roulette_spin", delta=-ROULETTE_SPIN_COST, meta={}))
+
+            roll = secrets.randbelow(1_000_000)
+            prize = pick_roulette_prize(roll)
+            prize_type: PrizeType = prize["type"]
+            prize_value = int(prize["value"])
+            prize_label = str(prize["label"])
+
+            if prize_type == "points":
+                user.points = (user.points or 0) + prize_value
+                session.add(PointTransaction(telegram_id=tid, type="roulette_prize", delta=prize_value, meta={"roll": roll, "prize": prize_label}))
+            elif prize_type == "raffle_ticket":
+                ticket_row = await get_ticket_row(session, tid, DEFAULT_RAFFLE_ID)
+                ticket_row.count = int(ticket_row.count or 0) + prize_value
+                ticket_row.updated_at = now
+                session.add(PointTransaction(telegram_id=tid, type="roulette_prize", delta=0, meta={"roll": roll, "prize": "raffle_ticket", "qty": prize_value}))
+            else:
+                session.add(PointTransaction(telegram_id=tid, type="roulette_prize", delta=0, meta={"roll": roll, "prize": "physical_dior_palette"}))
+
+            _recalc_tier(user)
+
+            spin_row = RouletteSpin(
+                telegram_id=tid,
+                created_at=now,
+                cost_points=ROULETTE_SPIN_COST,
+                roll=roll,
+                prize_type=prize_type,
+                prize_value=prize_value,
+                prize_label=prize_label,
+            )
+            session.add(spin_row)
+
+        await session.refresh(user)
+
+    if prize_type == "physical_dior_palette":
+        await notify_admin(f"💎 ТОП ПРИЗ: Dior палетка!\ntelegram_id: {tid}\nroll: {roll}")
+
+    return {
+        "telegram_id": tid,
+        "points": int(user.points or 0),
+        "prize_type": prize_type,
+        "prize_value": prize_value,
+        "prize_label": prize_label,
+        "roll": int(roll),
+    }
