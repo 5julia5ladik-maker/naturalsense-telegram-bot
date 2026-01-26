@@ -233,6 +233,26 @@ class RouletteSpin(Base):
 Index("ix_roulette_spins_tid_created", RouletteSpin.telegram_id, RouletteSpin.created_at)
 
 
+class RouletteClaim(Base):
+    __tablename__ = "roulette_claims"
+
+    id = Column(Integer, primary_key=True)
+    claim_code = Column(String, unique=True, index=True, nullable=False)  # e.g. "NS-AB12CD34"
+    telegram_id = Column(BigInteger, index=True, nullable=False)
+    spin_id = Column(Integer, nullable=True)  # optional link to roulette_spins.id
+
+    prize_type = Column(String, nullable=False)
+    prize_label = Column(String, nullable=False)
+
+    status = Column(String, default="awaiting_contact", nullable=False)  # awaiting_contact|submitted|closed
+    contact_text = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
+
+Index("ix_roulette_claims_tid_created", RouletteClaim.telegram_id, RouletteClaim.created_at)
+
+
 # -----------------------------------------------------------------------------
 # DATABASE
 # -----------------------------------------------------------------------------
@@ -739,6 +759,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     referred_by: int | None = None
     if context.args:
         arg0 = (context.args[0] or "").strip()
+
+        # ✅ claim flow via deep-link: /start claim_<CODE>
+        if arg0.startswith("claim_"):
+            code = arg0.replace("claim_", "", 1).strip()
+            await claim_start_flow(update, context, code)
+            return
         if arg0.isdigit():
             referred_by = int(arg0)
 
@@ -787,6 +813,52 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
     await update.message.reply_text(build_help_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
+
+async def claim_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str):
+    """Общая логика для /claim и deep-link /start claim_CODE"""
+    if not update.message:
+        return
+    code = (code or "").strip().upper()
+    if not code:
+        await update.message.reply_text("Использование: /claim NS-XXXXXXXX")
+        return
+
+    async with async_session_maker() as session:
+        claim = (
+            await session.execute(
+                select(RouletteClaim).where(RouletteClaim.claim_code == code)
+            )
+        ).scalar_one_or_none()
+
+        if not claim:
+            await update.message.reply_text("❌ Код не найден. Проверьте, пожалуйста.")
+            return
+
+        if int(claim.telegram_id) != int(update.effective_user.id):
+            await update.message.reply_text("⛔️ Этот код принадлежит другому пользователю.")
+            return
+
+        if (claim.status or "") == "submitted":
+            await update.message.reply_text("✅ Заявка уже отправлена. Мы скоро свяжемся.")
+            return
+
+        # помечаем как ожидание контакта и обновляем время
+        claim.status = "awaiting_contact"
+        claim.updated_at = datetime.utcnow()
+        await session.commit()
+
+    await update.message.reply_text(
+        "🎁 Заявка на приз принята!\n\n"
+        "Напишите одним сообщением удобный способ связи (Telegram/WhatsApp) и адрес/город доставки.\n"
+        f"Код заявки: {code}"
+    )
+
+
+async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    code = (context.args[0] if context.args else "").strip()
+    await claim_start_flow(update, context, code)
 
 
 async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1071,6 +1143,38 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     txt = update.message.text.strip()
 
+    # ✅ если ожидаем контакты/адрес по claim — принимаем любое сообщение
+    async with async_session_maker() as session:
+        pending = (
+            await session.execute(
+                select(RouletteClaim)
+                .where(RouletteClaim.telegram_id == update.effective_user.id)
+                .where(RouletteClaim.status == "awaiting_contact")
+                .order_by(RouletteClaim.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if pending and txt not in ("👤 Профиль", "ℹ️ Помощь", "↩️ В канал"):
+            pending.contact_text = txt
+            pending.status = "submitted"
+            pending.updated_at = datetime.utcnow()
+            await session.commit()
+
+            uname = (update.effective_user.username or "").strip()
+            mention = f"@{uname}" if uname else "(без username)"
+            await notify_admin(
+                "✅ CLAIM: пользователь отправил контакты\n"
+                f"user: {mention} | {update.effective_user.first_name or '-'}\n"
+                f"telegram_id: {update.effective_user.id}\n"
+                f"link: {tg_user_link(update.effective_user.id)}\n"
+                f"claim: {pending.claim_code}\n"
+                f"prize: {pending.prize_label}\n"
+                f"contacts: {txt}"
+            )
+            await update.message.reply_text("✅ Спасибо! Заявка отправлена. Мы скоро свяжемся.")
+            return
+
     if txt == "👤 Профиль":
         await cmd_profile(update, context)
         return
@@ -1152,6 +1256,7 @@ async def start_telegram_bot():
 
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("help", cmd_help))
+    tg_app.add_handler(CommandHandler("claim", cmd_claim))
     tg_app.add_handler(CommandHandler("invite", cmd_invite))
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
     tg_app.add_handler(CommandHandler("myid", cmd_myid))
@@ -1183,6 +1288,17 @@ async def stop_telegram_bot():
             pass
         tg_task = None
 
+
+
+def generate_claim_code() -> str:
+    # короткий читаемый код
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    rnd = "".join(secrets.choice(alphabet) for _ in range(8))
+    return f"NS-{rnd}"
+
+
+def tg_user_link(user_id: int) -> str:
+    return f"tg://user?id={int(user_id)}"
 
 async def notify_admin(text: str) -> None:
     if not tg_app or not BOT_TOKEN or not ADMIN_CHAT_ID:
@@ -1727,11 +1843,30 @@ useEffect(() => {
           // ✅ всплывающее окно с призом
           try {
             if (tg?.showPopup) {
-              tg.showPopup({
-                title: "🎡 Рулетка",
-                message: `Ваш приз: ${data.prize_label}`,
-                buttons: [{ type: "ok" }]
-              });
+              const msg = data.claimable && data.claim_code
+                ? `Ваш приз: ${data.prize_label}\n\nЧтобы забрать: откройте чат с ботом и отправьте\n/claim ${data.claim_code}`
+                : `Ваш приз: ${data.prize_label}`;
+
+              if (data.claimable && data.claim_code && tg?.openTelegramLink && botUsername) {
+                tg.showPopup({
+                  title: "🎡 Рулетка",
+                  message: msg,
+                  buttons: [
+                    { id: "claim", type: "default", text: "Получить приз" },
+                    { type: "ok" }
+                  ]
+                }, (btnId) => {
+                  if (btnId === "claim") {
+                    tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${data.claim_code}`);
+                  }
+                });
+              } else {
+                tg.showPopup({
+                  title: "🎡 Рулетка",
+                  message: msg,
+                  buttons: [{ type: "ok" }]
+                });
+              }
             } else {
               alert(`Ваш приз: ${data.prize_label}`);
             }
@@ -2206,6 +2341,8 @@ class SpinResp(BaseModel):
     prize_value: int
     prize_label: str
     roll: int
+    claimable: bool = False
+    claim_code: Optional[str] = None
 
 
 def pick_roulette_prize(roll: int) -> dict[str, Any]:
@@ -2334,6 +2471,8 @@ async def roulette_spin(req: SpinReq):
     tid = int(req.telegram_id)
     now = datetime.utcnow()
 
+    claim_code: str | None = None
+
     async with async_session_maker() as session:
         async with session.begin():
             user = (
@@ -2398,12 +2537,34 @@ async def roulette_spin(req: SpinReq):
                 prize_value=prize_value,
                 prize_label=prize_label,
             )
-            session.add(spin_row)
+            if prize_type == "physical_dior_palette":
+                # создаём заявку на получение приза
+                claim_code = generate_claim_code()
+                session.add(
+                    RouletteClaim(
+                        claim_code=claim_code,
+                        telegram_id=tid,
+                        spin_id=None,  # id будет после commit, связь не критична
+                        prize_type=prize_type,
+                        prize_label=prize_label,
+                        status="awaiting_contact",
+                    )
+                )
 
         await session.refresh(user)
 
     if prize_type == "physical_dior_palette":
-        await notify_admin(f"💎 ТОП ПРИЗ: Dior палетка!\ntelegram_id: {tid}\nroll: {roll}")
+        uname = (user.username or "").strip()
+        mention = f"@{uname}" if uname else "(без username)"
+        await notify_admin(
+            "💎 ТОП ПРИЗ: Dior палетка!\n"
+            f"user: {mention} | {user.first_name or '-'}\n"
+            f"telegram_id: {tid}\n"
+            f"link: {tg_user_link(tid)}\n"
+            f"claim: {claim_code}\n"
+            f"roll: {roll}\n"
+            "👉 Пользователю: отправьте /claim <код> и потом сообщение с контактами/адресом."
+        )
 
     return {
         "telegram_id": tid,
@@ -2412,4 +2573,6 @@ async def roulette_spin(req: SpinReq):
         "prize_value": prize_value,
         "prize_label": prize_label,
         "roll": int(roll),
+        "claimable": bool(prize_type == "physical_dior_palette"),
+        "claim_code": claim_code,
     }
