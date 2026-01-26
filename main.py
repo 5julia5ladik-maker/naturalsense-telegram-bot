@@ -1421,7 +1421,7 @@ def get_webapp_html() -> str:
           style={{
             position:"fixed",
             inset:0,
-            background:"rgba(0,0,0,0.55)",
+            background:"rgba(12,15,20,0.72)",
             backdropFilter:"blur(10px)",
             WebkitBackdropFilter:"blur(10px)",
             zIndex:9999,
@@ -1648,6 +1648,8 @@ useEffect(() => {
           }
           const data = await r.json();
           setMsg(`✅ Билет куплен. Твоих билетов: ${data.ticket_count}`);
+          // ✅ обновляем сразу, чтобы счётчик билетов менялся моментально
+          setRaffle((prev) => ({ ...(prev || {}), ticket_count: data.ticket_count }));
           await refreshUser();
           await loadRaffleStatus();
         } catch (e) {
@@ -1673,6 +1675,18 @@ useEffect(() => {
           }
           const data = await r.json();
           setMsg(`🎡 Выпало: ${data.prize_label}`);
+          // ✅ всплывающее окно с призом
+          try {
+            if (tg?.showPopup) {
+              tg.showPopup({
+                title: "🎡 Рулетка",
+                message: `Ваш приз: ${data.prize_label}`,
+                buttons: [{ type: "ok" }]
+              });
+            } else {
+              alert(`Ваш приз: ${data.prize_label}`);
+            }
+          } catch (e) {}
           await refreshUser();
           await loadRaffleStatus();
           await loadRouletteHistory();
@@ -1842,11 +1856,26 @@ useEffect(() => {
                   padding:"12px",
                   borderRadius:"18px",
                   border:"1px solid var(--stroke)",
-                  background:"rgba(255,255,255,0.08)"
+                  background:"rgba(255,255,255,0.08)",
+                  position:"relative"
                 }}>
+                  {/* 💎 Баллы — в правом верхнем углу (как просили) */}
+                  <div style={{
+                    position:"absolute",
+                    top:"10px",
+                    right:"10px",
+                    padding:"6px 10px",
+                    borderRadius:"999px",
+                    border:"1px solid rgba(230,193,128,0.25)",
+                    background:"rgba(230,193,128,0.10)",
+                    fontSize:"13px",
+                    fontWeight:700
+                  }}>
+                    💎 {user.points}
+                  </div>
+
                   <div style={{ fontSize:"13px", color:"var(--muted)" }}>Привет, {user.first_name}!</div>
-                  <div style={{ fontSize:"18px", fontWeight:700, marginTop:"6px" }}>💎 {user.points} баллов</div>
-                  <div style={{ fontSize:"13px", color:"var(--muted)", marginTop:"4px" }}>{tierLabel(user.tier)}</div>
+                  <div style={{ fontSize:"13px", color:"var(--muted)", marginTop:"6px" }}>{tierLabel(user.tier)}</div>
 
                   <StatRow left="🔥 Стрик" right={`${user.daily_streak || 0} (best ${user.best_streak || 0})`} />
                   <StatRow left="🎟 Приглашено" right={`${user.referral_count || 0}`} />
