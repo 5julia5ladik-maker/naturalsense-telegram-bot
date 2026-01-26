@@ -1309,6 +1309,16 @@ async def notify_admin(text: str) -> None:
     except Exception as e:
         logger.warning("Failed to notify admin: %s", e)
 
+async def notify_user(telegram_id: int, text: str) -> None:
+    if not tg_app or not BOT_TOKEN:
+        logger.info("USER MSG (no bot) to %s: %s", telegram_id, text)
+        return
+    try:
+        await tg_app.bot.send_message(chat_id=telegram_id, text=text)
+    except Exception as e:
+        logger.warning("Failed to notify user %s: %s", telegram_id, e)
+
+
 
 # -----------------------------------------------------------------------------
 # MINI APP (WEBAPP HTML)
@@ -1399,6 +1409,107 @@ def get_webapp_html() -> str:
         tg.setBackgroundColor(bg);
       }
     };
+
+    // iOS-style "locked" modal inside WebApp (не закрывается по тапу вокруг)
+    const showLockedPopup = ({ title, message, primaryText, onPrimary, okText = "OK" }) => {
+      try {
+        // не плодим несколько окон
+        const existing = document.getElementById("ns_locked_popup");
+        if (existing) existing.remove();
+
+        const overlay = document.createElement("div");
+        overlay.id = "ns_locked_popup";
+        overlay.style.position = "fixed";
+        overlay.style.inset = "0";
+        overlay.style.zIndex = "99999";
+        overlay.style.display = "flex";
+        overlay.style.alignItems = "center";
+        overlay.style.justifyContent = "center";
+        overlay.style.padding = "20px";
+        overlay.style.background = "var(--overlayBg)";
+        overlay.style.backdropFilter = "blur(22px) saturate(180%)";
+        overlay.style.webkitBackdropFilter = "blur(22px) saturate(180%)";
+
+        // блокируем закрытие кликом по фону
+        overlay.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }, true);
+
+        const card = document.createElement("div");
+        card.style.width = "100%";
+        card.style.maxWidth = "520px";
+        card.style.borderRadius = "18px";
+        card.style.padding = "18px 16px 14px";
+        card.style.background = "var(--glassBg)";
+        card.style.border = "1px solid var(--glassStroke)";
+        card.style.boxShadow = `0 18px 60px var(--glassShadow)`;
+        card.style.color = "var(--text)";
+        card.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        card.addEventListener("click", (e) => { e.stopPropagation(); });
+
+        const h = document.createElement("div");
+        h.textContent = title || "";
+        h.style.fontSize = "18px";
+        h.style.fontWeight = "700";
+        h.style.marginBottom = "10px";
+
+        const p = document.createElement("div");
+        p.textContent = message || "";
+        p.style.whiteSpace = "pre-wrap";
+        p.style.lineHeight = "1.4";
+        p.style.fontSize = "15px";
+        p.style.opacity = "0.95";
+
+        const btnRow = document.createElement("div");
+        btnRow.style.display = "flex";
+        btnRow.style.gap = "14px";
+        btnRow.style.justifyContent = "flex-end";
+        btnRow.style.marginTop = "16px";
+
+        const ok = document.createElement("button");
+        ok.textContent = okText;
+        ok.style.border = "none";
+        ok.style.background = "transparent";
+        ok.style.color = "var(--muted)";
+        ok.style.fontSize = "16px";
+        ok.style.padding = "10px 12px";
+        ok.style.cursor = "pointer";
+
+        const primary = document.createElement("button");
+        primary.textContent = primaryText || "";
+        primary.style.border = "none";
+        primary.style.background = "transparent";
+        primary.style.color = "var(--accent)";
+        primary.style.fontSize = "16px";
+        primary.style.padding = "10px 12px";
+        primary.style.cursor = "pointer";
+
+        const close = () => {
+          try { document.body.style.overflow = ""; } catch (e) {}
+          overlay.remove();
+        };
+
+        ok.onclick = () => close();
+        primary.onclick = () => { try { onPrimary && onPrimary(); } catch (e) {} close(); };
+
+        btnRow.appendChild(ok);
+        if (primaryText) btnRow.appendChild(primary);
+
+        card.appendChild(h);
+        card.appendChild(p);
+        card.appendChild(btnRow);
+        overlay.appendChild(card);
+
+        document.body.style.overflow = "hidden";
+        document.body.appendChild(overlay);
+      } catch (e) {
+        // fallback
+        try { alert(message || ""); } catch (e2) {}
+      }
+    };
+
+
 
     if (tg) {
       tg.expand();
@@ -1848,17 +1959,12 @@ useEffect(() => {
                 : `Ваш приз: ${data.prize_label}`;
 
               if (data.claimable && data.claim_code && tg?.openTelegramLink && botUsername) {
-                tg.showPopup({
+                showLockedPopup({
                   title: "🎡 Рулетка",
                   message: msg,
-                  buttons: [
-                    { id: "claim", type: "default", text: "Получить приз" },
-                    { type: "ok" }
-                  ]
-                }, (btnId) => {
-                  if (btnId === "claim") {
-                    tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${data.claim_code}`);
-                  }
+                  primaryText: "Получить приз",
+                  onPrimary: () => tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${data.claim_code}`),
+                  okText: "OK"
                 });
               } else {
                 tg.showPopup({
@@ -2564,6 +2670,14 @@ async def roulette_spin(req: SpinReq):
             f"claim: {claim_code}\n"
             f"roll: {roll}\n"
             "👉 Пользователю: отправьте /claim <код> и потом сообщение с контактами/адресом."
+        )
+
+        # Дублируем пользователю в ЛС, чтобы он 100% не потерял инструкцию
+        await notify_user(
+            tid,
+            "💎 Вы выиграли: Dior палетка (ТОП приз)!\n\n"
+            f"Чтобы забрать приз, отправьте в этот чат команду:\n/claim {claim_code}\n\n"
+            "Затем одним сообщением пришлите удобный способ связи (Telegram/WhatsApp) и город/адрес доставки."
         )
 
     return {
