@@ -1242,7 +1242,8 @@ def get_webapp_html() -> str:
     }
 
     const CHANNEL = "__CHANNEL__";
-    const BOT_USERNAME = "__BOT_USERNAME__";
+    const BOT_USERNAME = "__BOT_USERNAME__"; // может быть пустым, если не задана переменная окружения
+
 
     const openLink = (url) => {
       if (tg?.openTelegramLink) tg.openTelegramLink(url);
@@ -1405,7 +1406,7 @@ def get_webapp_html() -> str:
               padding:"5px 8px",
               borderRadius:"999px",
               border:"1px solid var(--stroke)",
-              background:"rgba(255,255,255,0.05)"
+              background:"rgba(255,255,255,0.08)"
             }}>#{t}</div>
           ))}
         </div>
@@ -1421,6 +1422,8 @@ def get_webapp_html() -> str:
             position:"fixed",
             inset:0,
             background:"rgba(0,0,0,0.55)",
+            backdropFilter:"blur(10px)",
+            WebkitBackdropFilter:"blur(10px)",
             zIndex:9999,
             display:"flex",
             justifyContent:"center",
@@ -1435,7 +1438,9 @@ def get_webapp_html() -> str:
               maxWidth:"520px",
               borderRadius:"22px 22px 18px 18px",
               border:"1px solid var(--stroke)",
-              background:"linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.06))",
+              background:"rgba(12,15,20,0.92)",
+              backdropFilter:"blur(14px)",
+              WebkitBackdropFilter:"blur(14px)",
               boxShadow:"0 10px 30px rgba(0,0,0,0.45)",
               padding:"14px 14px 10px",
               maxHeight:"82vh",
@@ -1481,7 +1486,7 @@ def get_webapp_html() -> str:
               padding:"10px",
               borderRadius:"14px",
               border:"1px solid var(--stroke)",
-              background:"rgba(255,255,255,0.05)",
+              background:"rgba(255,255,255,0.08)",
               display:"flex",
               justifyContent:"space-between",
               fontSize:"14px"
@@ -1500,6 +1505,7 @@ def get_webapp_html() -> str:
     const App = () => {
       const [activeTab, setActiveTab] = useState("home");
       const [user, setUser] = useState(null);
+      const [botUsername, setBotUsername] = useState(BOT_USERNAME || "");
 
       const [postsMode, setPostsMode] = useState(false);
       const [selectedTag, setSelectedTag] = useState(null);
@@ -1572,7 +1578,19 @@ def get_webapp_html() -> str:
           refreshUser();
         }
       }, []);
+useEffect(() => {
+        // пробуем подтянуть username бота для реф-ссылки
+        fetch(`/api/bot/username`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(d => {
+            const u = (d?.bot_username || "").trim().replace(/^@/, "");
+            if (u) setBotUsername(u);
+          })
+          .catch(() => {});
+      }, []);
 
+
+      
       useEffect(() => {
         if (profileOpen) {
           loadRaffleStatus();
@@ -1582,16 +1600,35 @@ def get_webapp_html() -> str:
 
       const referralLink = useMemo(() => {
         if (!tgUserId) return "";
-        if (!BOT_USERNAME) return "";
-        return `https://t.me/${BOT_USERNAME}?start=${tgUserId}`;
-      }, [tgUserId]);
+        if (!botUsername) return "";
+        return `https://t.me/${botUsername}?start=${tgUserId}`;
+      }, [tgUserId, botUsername]);
 
       const copyText = async (t) => {
+        if (!t) return;
         try {
           await navigator.clipboard.writeText(t);
           setMsg("✅ Скопировано");
+          if (tg?.HapticFeedback?.impactOccurred) tg.HapticFeedback.impactOccurred("light");
+          return;
         } catch (e) {
-          setMsg("ℹ️ Не удалось скопировать");
+          // fallback для webview/старых браузеров
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = t;
+            ta.style.position = "fixed";
+            ta.style.left = "-9999px";
+            ta.style.top = "-9999px";
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            const ok = document.execCommand("copy");
+            document.body.removeChild(ta);
+            setMsg(ok ? "✅ Скопировано" : "ℹ️ Не удалось скопировать");
+            if (ok && tg?.HapticFeedback?.impactOccurred) tg.HapticFeedback.impactOccurred("light");
+          } catch (e2) {
+            setMsg("ℹ️ Не удалось скопировать");
+          }
         }
       };
 
@@ -1805,7 +1842,7 @@ def get_webapp_html() -> str:
                   padding:"12px",
                   borderRadius:"18px",
                   border:"1px solid var(--stroke)",
-                  background:"rgba(255,255,255,0.05)"
+                  background:"rgba(255,255,255,0.08)"
                 }}>
                   <div style={{ fontSize:"13px", color:"var(--muted)" }}>Привет, {user.first_name}!</div>
                   <div style={{ fontSize:"18px", fontWeight:700, marginTop:"6px" }}>💎 {user.points} баллов</div>
@@ -1821,13 +1858,13 @@ def get_webapp_html() -> str:
                 <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
                   За нового пользователя: +20 баллов (1 раз за каждого).
                 </div>
-                {BOT_USERNAME ? (
+                {botUsername ? (
                   <div style={{
                     marginTop:"10px",
                     padding:"10px",
                     borderRadius:"14px",
                     border:"1px solid var(--stroke)",
-                    background:"rgba(255,255,255,0.05)",
+                    background:"rgba(255,255,255,0.08)",
                     fontSize:"12px",
                     color:"rgba(255,255,255,0.85)",
                     wordBreak:"break-all"
@@ -1836,14 +1873,14 @@ def get_webapp_html() -> str:
                   </div>
                 ) : (
                   <div style={{ marginTop:"10px", fontSize:"12px", color:"var(--muted)" }}>
-                    Чтобы показать ссылку тут — задай переменную окружения <b>BOT_USERNAME</b>. Сейчас ссылку можно взять через /invite.
+                    Если ссылка не показалась — задай переменную окружения <b>BOT_USERNAME</b> или проверь, что бот запущен (мы берём username через Telegram API).
                   </div>
                 )}
                 <Button
                   icon="📎"
                   label="Скопировать ссылку"
                   onClick={() => copyText(referralLink)}
-                  disabled={!BOT_USERNAME}
+                  disabled={!botUsername || !referralLink}
                 />
 
                 <Divider />
@@ -1893,7 +1930,7 @@ def get_webapp_html() -> str:
                     padding:"10px",
                     borderRadius:"14px",
                     border:"1px solid var(--stroke)",
-                    background:"rgba(255,255,255,0.05)",
+                    background:"rgba(255,255,255,0.08)",
                     fontSize:"13px"
                   }}>{msg}</div>
                 )}
@@ -1912,7 +1949,7 @@ def get_webapp_html() -> str:
                         padding:"10px",
                         borderRadius:"14px",
                         border:"1px solid var(--stroke)",
-                        background:"rgba(255,255,255,0.05)"
+                        background:"rgba(255,255,255,0.08)"
                       }}>
                         <div style={{ fontSize:"12px", color:"var(--muted)" }}>{x.created_at}</div>
                         <div style={{ marginTop:"4px", fontSize:"14px", fontWeight:600 }}>{x.prize_label}</div>
@@ -2032,6 +2069,24 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
             "preview": preview_text(p.text),
         })
     return out
+
+
+@app.get("/api/bot/username")
+async def api_bot_username():
+    """
+    Возвращает username бота для формирования реф-ссылки в Mini App.
+    Предпочитаем переменную окружения BOT_USERNAME (стабильно).
+    Если её нет — пробуем получить через Telegram API (getMe), если бот запущен.
+    """
+    if BOT_USERNAME:
+        return {"bot_username": BOT_USERNAME}
+    if tg_app and BOT_TOKEN:
+        try:
+            me = await tg_app.bot.get_me()
+            return {"bot_username": (me.username or "")}
+        except Exception:
+            return {"bot_username": ""}
+    return {"bot_username": ""}
 
 
 @app.get("/health")
