@@ -1,4 +1,3 @@
-# /main.py
 import os
 import re
 import asyncio
@@ -450,7 +449,6 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
 # POSTS INDEX (TAGS)
 # -----------------------------------------------------------------------------
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
-ASCII_TAG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 def extract_tags(text_: str | None) -> list[str]:
@@ -548,36 +546,6 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
     return rows
 
 
-async def list_brand_tags(limit_posts: int = 4000) -> list[dict[str, Any]]:
-    excluded = {"Challenge", "SephoraPromo"} | set(BLOCKED_TAGS)
-    counts: dict[str, int] = {}
-    async with async_session_maker() as session:
-        rows = (
-            await session.execute(
-                select(Post.tags)
-                .where(Post.is_deleted == False)  # noqa: E712
-                .order_by(Post.message_id.desc())
-                .limit(limit_posts)
-            )
-        ).all()
-
-    for (tags,) in rows:
-        if not tags:
-            continue
-        for t in (tags or []):
-            if not isinstance(t, str):
-                continue
-            if t in excluded:
-                continue
-            if not ASCII_TAG_RE.match(t):
-                continue
-            counts[t] = counts.get(t, 0) + 1
-
-    items = [{"tag": k, "count": v} for k, v in counts.items()]
-    items.sort(key=lambda x: (-x["count"], x["tag"].lower()))
-    return items
-
-
 # -----------------------------------------------------------------------------
 # DELETE SWEEPER (AUTO CHECK)
 # -----------------------------------------------------------------------------
@@ -660,6 +628,7 @@ def is_admin(user_id: int) -> bool:
 
 
 def get_main_keyboard():
+    # ✅ СНИЗУ ТОЛЬКО: Профиль + Помощь
     return ReplyKeyboardMarkup(
         [[KeyboardButton("👤 Профиль"), KeyboardButton("ℹ️ Помощь")]],
         resize_keyboard=True,
@@ -667,12 +636,15 @@ def get_main_keyboard():
 
 
 def build_start_inline_kb() -> InlineKeyboardMarkup:
+    # ✅ “В канал” прикреплена к сообщению /start
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("↩️ В канал", url=f"https://t.me/{CHANNEL_USERNAME}")]]
     )
 
 
 async def set_keyboard_silent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Telegram показывает ReplyKeyboard только через сообщение.
+    # Делаем невидимое сообщение и удаляем -> в чате ничего не видно, кнопки остаются.
     chat = update.effective_chat
     if not chat:
         return
@@ -1245,7 +1217,6 @@ def get_webapp_html() -> str:
       --muted: rgba(255,255,255,0.60);
       --gold: rgba(230, 193, 128, 0.9);
       --stroke: rgba(255,255,255,0.10);
-      --sheet: rgba(12, 15, 20, 0.92);
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
@@ -1386,7 +1357,7 @@ def get_webapp_html() -> str:
           fontSize: "15px",
           margin: "10px 0",
           cursor: disabled ? "not-allowed" : "pointer",
-          opacity: disabled ? 0.6 : 1
+          opacity: disabled ? 0.5 : 1
         }}
       >
         <div>
@@ -1449,9 +1420,7 @@ def get_webapp_html() -> str:
           style={{
             position:"fixed",
             inset:0,
-            background:"rgba(0,0,0,0.40)",
-            backdropFilter:"blur(12px)",
-            WebkitBackdropFilter:"blur(12px)",
+            background:"rgba(0,0,0,0.55)",
             zIndex:9999,
             display:"flex",
             justifyContent:"center",
@@ -1465,9 +1434,9 @@ def get_webapp_html() -> str:
               width:"100%",
               maxWidth:"520px",
               borderRadius:"22px 22px 18px 18px",
-              border:"1px solid rgba(255,255,255,0.14)",
-              background:"var(--sheet)",
-              boxShadow:"0 20px 60px rgba(0,0,0,0.60)",
+              border:"1px solid var(--stroke)",
+              background:"linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.06))",
+              boxShadow:"0 10px 30px rgba(0,0,0,0.45)",
               padding:"14px 14px 10px",
               maxHeight:"82vh",
               overflow:"auto"
@@ -1543,9 +1512,6 @@ def get_webapp_html() -> str:
       const [busy, setBusy] = useState(false);
       const [msg, setMsg] = useState("");
 
-      const [brandTags, setBrandTags] = useState([]);
-      const [brandLoading, setBrandLoading] = useState(false);
-
       const tgUserId = tg?.initDataUnsafe?.user?.id;
 
       const refreshUser = () => {
@@ -1571,22 +1537,12 @@ def get_webapp_html() -> str:
         loadPosts(tag);
       };
 
-      const loadBrands = () => {
-        setBrandLoading(true);
-        return fetch(`/api/brands`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setBrandTags(Array.isArray(data) ? data : []))
-          .catch(() => setBrandTags([]))
-          .finally(() => setBrandLoading(false));
-      };
-
       const changeTab = (tabId) => {
         setActiveTab(tabId);
         setPostsMode(false);
         setSelectedTag(null);
         setPosts([]);
         setLoading(false);
-        if (tabId === "brand") loadBrands();
       };
 
       const loadRaffleStatus = () => {
@@ -1612,7 +1568,9 @@ def get_webapp_html() -> str:
       };
 
       useEffect(() => {
-        if (tgUserId) refreshUser();
+        if (tgUserId) {
+          refreshUser();
+        }
       }, []);
 
       useEffect(() => {
@@ -1742,24 +1700,57 @@ def get_webapp_html() -> str:
           case "brand":
             return (
               <Panel>
-                {brandLoading && (
-                  <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
-                    Загрузка брендов…
-                  </div>
-                )}
-                {!brandLoading && brandTags.length === 0 && (
-                  <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
-                    Брендов пока нет (нужны посты с ASCII-тегами типа #Dior, #Chanel).
-                  </div>
-                )}
-                {!brandLoading && brandTags.map(x => (
-                  <Button
-                    key={x.tag}
-                    icon="✨"
-                    label={x.tag}
-                    subtitle={(x.count ? `${x.count} пост(ов)` : "")}
-                    onClick={() => openPosts(x.tag)}
-                  />
+                {[
+                  ["The Ordinary", "TheOrdinary"],
+                  ["Dior", "Dior"],
+                  ["Chanel", "Chanel"],
+                  ["Kylie Cosmetics", "KylieCosmetics"],
+                  ["Gisou", "Gisou"],
+                  ["Rare Beauty", "RareBeauty"],
+                  ["Yves Saint Laurent", "YSL"],
+                  ["Givenchy", "Givenchy"],
+                  ["Charlotte Tilbury", "CharlotteTilbury"],
+                  ["NARS", "NARS"],
+                  ["Sol de Janeiro", "SolDeJaneiro"],
+                  ["Huda Beauty", "HudaBeauty"],
+                  ["Rhode", "Rhode"],
+                  ["Tower 28 Beauty", "Tower28Beauty"],
+                  ["Benefit Cosmetics", "BenefitCosmetics"],
+                  ["Estée Lauder", "EsteeLauder"],
+                  ["Sisley", "Sisley"],
+                  ["Kérastase", "Kerastase"],
+                  ["Armani Beauty", "ArmaniBeauty"],
+                  ["Hourglass", "Hourglass"],
+                  ["Shiseido", "Shiseido"],
+                  ["Tom Ford Beauty", "TomFordBeauty"],
+                  ["Tarte", "Tarte"],
+                  ["Sephora Collection", "SephoraCollection"],
+                  ["Clinique", "Clinique"],
+                  ["Dolce & Gabbana", "DolceGabbana"],
+                  ["Kayali", "Kayali"],
+                  ["Guerlain", "Guerlain"],
+                  ["Fenty Beauty", "FentyBeauty"],
+                  ["Too Faced", "TooFaced"],
+                  ["MAKE UP FOR EVER", "MakeUpForEver"],
+                  ["Erborian", "Erborian"],
+                  ["Natasha Denona", "NatashaDenona"],
+                  ["Lancôme", "Lancome"],
+                  ["Kosas", "Kosas"],
+                  ["ONE/SIZE", "OneSize"],
+                  ["Laneige", "Laneige"],
+                  ["Makeup by Mario", "MakeupByMario"],
+                  ["Valentino Beauty", "ValentinoBeauty"],
+                  ["Drunk Elephant", "DrunkElephant"],
+                  ["Olaplex", "Olaplex"],
+                  ["Anastasia Beverly Hills", "AnastasiaBeverlyHills"],
+                  ["Amika", "Amika"],
+                  ["BYOMA", "BYOMA"],
+                  ["Glow Recipe", "GlowRecipe"],
+                  ["Milk Makeup", "MilkMakeup"],
+                  ["Summer Fridays", "SummerFridays"],
+                  ["K18", "K18"],
+                ].map(([label, tag]) => (
+                  <Button key={tag} icon="✨" label={label} onClick={() => openPosts(tag)} />
                 ))}
               </Panel>
             );
@@ -1797,10 +1788,6 @@ def get_webapp_html() -> str:
         }
       };
 
-      const ticketNeed = raffle?.ticket_cost ?? 500;
-      const canBuyTicket = (user?.points || 0) >= ticketNeed;
-      const canSpin = (user?.points || 0) >= 3000;
-
       return (
         <div style={{ padding:"18px 16px 26px", maxWidth:"520px", margin:"0 auto" }}>
           <Hero user={user} onOpenProfile={openProfile} />
@@ -1817,7 +1804,7 @@ def get_webapp_html() -> str:
                 <div style={{
                   padding:"12px",
                   borderRadius:"18px",
-                  border:"1px solid rgba(255,255,255,0.14)",
+                  border:"1px solid var(--stroke)",
                   background:"rgba(255,255,255,0.05)"
                 }}>
                   <div style={{ fontSize:"13px", color:"var(--muted)" }}>Привет, {user.first_name}!</div>
@@ -1839,7 +1826,7 @@ def get_webapp_html() -> str:
                     marginTop:"10px",
                     padding:"10px",
                     borderRadius:"14px",
-                    border:"1px solid rgba(255,255,255,0.14)",
+                    border:"1px solid var(--stroke)",
                     background:"rgba(255,255,255,0.05)",
                     fontSize:"12px",
                     color:"rgba(255,255,255,0.85)",
@@ -1871,17 +1858,17 @@ def get_webapp_html() -> str:
 
                 <div style={{ fontSize:"14px", fontWeight:650 }}>🎁 Розыгрыши</div>
                 <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
-                  Билет = {ticketNeed} баллов. Баллы списываются.
+                  Билет = 500 баллов. Баллы списываются.
                 </div>
                 <div style={{ marginTop:"10px", fontSize:"13px", color:"var(--muted)" }}>
                   Твоих билетов: <b style={{ color:"rgba(255,255,255,0.92)" }}>{raffle?.ticket_count ?? 0}</b>
                 </div>
                 <Button
                   icon="🎟"
-                  label={`Купить билет (${ticketNeed})`}
-                  subtitle={busy ? "Подожди…" : (!canBuyTicket ? `Не хватает баллов: нужно ${ticketNeed}` : "")}
+                  label="Купить билет (500)"
+                  subtitle={busy ? "Подожди…" : ""}
                   onClick={buyTicket}
-                  disabled={busy}
+                  disabled={busy || (user.points || 0) < 500}
                 />
 
                 <Divider />
@@ -1893,9 +1880,9 @@ def get_webapp_html() -> str:
                 <Button
                   icon="🎡"
                   label="Крутить (3000)"
-                  subtitle={busy ? "Подожди…" : (!canSpin ? "Не хватает баллов: нужно 3000" : "")}
+                  subtitle={busy ? "Подожди…" : ""}
                   onClick={spinRoulette}
-                  disabled={busy}
+                  disabled={busy || (user.points || 0) < 3000}
                 />
 
                 <PrizeTable />
@@ -1905,7 +1892,7 @@ def get_webapp_html() -> str:
                     marginTop:"14px",
                     padding:"10px",
                     borderRadius:"14px",
-                    border:"1px solid rgba(255,255,255,0.14)",
+                    border:"1px solid var(--stroke)",
                     background:"rgba(255,255,255,0.05)",
                     fontSize:"13px"
                   }}>{msg}</div>
@@ -1924,7 +1911,7 @@ def get_webapp_html() -> str:
                       <div key={x.id} style={{
                         padding:"10px",
                         borderRadius:"14px",
-                        border:"1px solid rgba(255,255,255,0.14)",
+                        border:"1px solid var(--stroke)",
                         background:"rgba(255,255,255,0.05)"
                       }}>
                         <div style={{ fontSize:"12px", color:"var(--muted)" }}>{x.created_at}</div>
@@ -2045,11 +2032,6 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
             "preview": preview_text(p.text),
         })
     return out
-
-
-@app.get("/api/brands")
-async def api_brands():
-    return await list_brand_tags(limit_posts=4000)
 
 
 @app.get("/health")
@@ -2174,14 +2156,13 @@ async def raffle_buy_ticket(req: BuyTicketReq):
             session.add(PointTransaction(telegram_id=tid, type="raffle_ticket", delta=-cost, meta={"qty": qty, "raffle_id": raffle.id}))
 
         await session.refresh(user)
-        ticket_row2 = (
-            await session.execute(
-                select(RaffleTicket).where(
-                    RaffleTicket.telegram_id == tid,
-                    RaffleTicket.raffle_id == DEFAULT_RAFFLE_ID,
+        # refresh ticket
+        async with session.begin():
+            ticket_row2 = (
+                await session.execute(
+                    select(RaffleTicket).where(RaffleTicket.telegram_id == tid, RaffleTicket.raffle_id == DEFAULT_RAFFLE_ID)
                 )
-            )
-        ).scalar_one()
+            ).scalar_one()
 
         return {"telegram_id": tid, "points": int(user.points or 0), "ticket_count": int(ticket_row2.count or 0)}
 
@@ -2250,6 +2231,7 @@ async def roulette_spin(req: SpinReq):
                 )
                 raise HTTPException(status_code=400, detail=f"Рулетка доступна через ~{hours_left} ч")
 
+            # списание
             user.points = (user.points or 0) - ROULETTE_SPIN_COST
             session.add(PointTransaction(telegram_id=tid, type="roulette_spin", delta=-ROULETTE_SPIN_COST, meta={}))
 
@@ -2259,6 +2241,7 @@ async def roulette_spin(req: SpinReq):
             prize_value = int(prize["value"])
             prize_label = str(prize["label"])
 
+            # выдача приза
             if prize_type == "points":
                 user.points = (user.points or 0) + prize_value
                 session.add(PointTransaction(telegram_id=tid, type="roulette_prize", delta=prize_value, meta={"roll": roll, "prize": prize_label}))
@@ -2268,6 +2251,7 @@ async def roulette_spin(req: SpinReq):
                 ticket_row.updated_at = now
                 session.add(PointTransaction(telegram_id=tid, type="roulette_prize", delta=0, meta={"roll": roll, "prize": "raffle_ticket", "qty": prize_value}))
             else:
+                # физический приз - только лог + уведомление админу
                 session.add(PointTransaction(telegram_id=tid, type="roulette_prize", delta=0, meta={"roll": roll, "prize": "physical_dior_palette"}))
 
             _recalc_tier(user)
