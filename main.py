@@ -112,7 +112,7 @@ STREAK_MILESTONES = {
 
 RAFFLE_TICKET_COST = 500
 ROULETTE_SPIN_COST = 3000
-ROULETTE_LIMIT_WINDOW = timedelta(hours=24)
+ROULETTE_LIMIT_WINDOW = timedelta(seconds=5)  # TEST: 5s cooldown
 DEFAULT_RAFFLE_ID = 1
 
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
@@ -1217,6 +1217,10 @@ def get_webapp_html() -> str:
       --muted: rgba(255,255,255,0.60);
       --gold: rgba(230, 193, 128, 0.9);
       --stroke: rgba(255,255,255,0.10);
+      --sheetOverlay: rgba(12,15,20,0.55);
+      --sheetCardBg: rgba(255,255,255,0.10);
+      --glassStroke: rgba(255,255,255,0.16);
+      --glassShadow: rgba(0,0,0,0.45);
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
@@ -1235,10 +1239,55 @@ def get_webapp_html() -> str:
     const { useState, useEffect, useMemo } = React;
     const tg = window.Telegram?.WebApp;
 
+    const DEFAULT_BG = "#0c0f14";
+
+    const hexToRgba = (hex, a) => {
+      if (!hex) return `rgba(12,15,20,${a})`;
+      let h = String(hex).trim();
+      if (h[0] === "#") h = h.slice(1);
+      if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+      if (h.length !== 6) return `rgba(12,15,20,${a})`;
+      const r = parseInt(h.slice(0, 2), 16);
+      const g = parseInt(h.slice(2, 4), 16);
+      const b = parseInt(h.slice(4, 6), 16);
+      return `rgba(${r},${g},${b},${a})`;
+    };
+
+    const setVar = (k, v) => {
+      document.documentElement.style.setProperty(k, v);
+    };
+
+    const applyTelegramTheme = () => {
+      const scheme = tg?.colorScheme || "dark";
+      const p = tg?.themeParams || {};
+
+      const bg = p.bg_color || DEFAULT_BG;
+      const text = p.text_color || (scheme === "dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
+      const muted = p.hint_color || (scheme === "dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
+
+      // базовые токены
+      setVar("--bg", bg);
+      setVar("--text", text);
+      setVar("--muted", muted);
+      setVar("--stroke", scheme === "dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
+      setVar("--card", scheme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
+
+      // iOS glass (Sheet)
+      setVar("--sheetOverlay", scheme === "dark" ? hexToRgba(bg, 0.55) : hexToRgba(bg, 0.45));
+      setVar("--sheetCardBg", scheme === "dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.80)");
+      setVar("--glassStroke", scheme === "dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
+      setVar("--glassShadow", scheme === "dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
+
+      if (tg) {
+        tg.setHeaderColor(bg);
+        tg.setBackgroundColor(bg);
+      }
+    };
+
     if (tg) {
       tg.expand();
-      tg.setHeaderColor("#0c0f14");
-      tg.setBackgroundColor("#0c0f14");
+      applyTelegramTheme();
+      tg.onEvent("themeChanged", applyTelegramTheme);
     }
 
     const CHANNEL = "__CHANNEL__";
@@ -1421,9 +1470,9 @@ def get_webapp_html() -> str:
           style={{
             position:"fixed",
             inset:0,
-            background:"rgba(12,15,20,0.72)",
-            backdropFilter:"blur(10px)",
-            WebkitBackdropFilter:"blur(10px)",
+            background:"var(--sheetOverlay)",
+            backdropFilter:"blur(22px) saturate(180%)",
+            WebkitBackdropFilter:"blur(22px) saturate(180%)",
             zIndex:9999,
             display:"flex",
             justifyContent:"center",
@@ -1437,11 +1486,11 @@ def get_webapp_html() -> str:
               width:"100%",
               maxWidth:"520px",
               borderRadius:"22px 22px 18px 18px",
-              border:"1px solid var(--stroke)",
-              background:"rgba(12,15,20,0.92)",
-              backdropFilter:"blur(14px)",
-              WebkitBackdropFilter:"blur(14px)",
-              boxShadow:"0 10px 30px rgba(0,0,0,0.45)",
+              border:"1px solid var(--glassStroke)",
+              background:"var(--sheetCardBg)",
+              backdropFilter:"blur(28px) saturate(180%)",
+              WebkitBackdropFilter:"blur(28px) saturate(180%)",
+              boxShadow:"0 12px 40px var(--glassShadow)",
               padding:"14px 14px 10px",
               maxHeight:"82vh",
               overflow:"auto"
@@ -1941,7 +1990,7 @@ useEffect(() => {
 
                 <div style={{ fontSize:"14px", fontWeight:650 }}>🎡 Рулетка</div>
                 <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
-                  1 спин = 3000 баллов. Каждый день (лимит 1 раз/24ч).
+                  1 спин = 3000 баллов. Каждый день (лимит 1 раз/5с (тест)).
                 </div>
                 <Button
                   icon="🎡"
