@@ -122,18 +122,25 @@ PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
 
 # per 1_000_000
 ROULETTE_DISTRIBUTION: list[dict[str, Any]] = [
-    {"weight": 415_600, "type": "points", "value": 500, "label": "+500 баллов"},
-    {"weight": 290_900, "type": "points", "value": 1000, "label": "+1000 баллов"},
-    {"weight": 124_700, "type": "points", "value": 1500, "label": "+1500 баллов"},
-    {"weight": 83_100, "type": "points", "value": 2000, "label": "+2000 баллов (камбэк)"},
-    {"weight": 41_600, "type": "raffle_ticket", "value": 1, "label": "🎟 Билет на розыгрыш"},
-    {"weight": 29_100, "type": "points", "value": 3000, "label": "+3000 баллов"},
-    {"weight": 15_000, "type": "physical_dior_palette", "value": 1, "label": "💎 Палетка Dior (ТОП приз)"},
+    {"weight": 416_667, "type": "points", "value": 500, "label": "+500 баллов"},
+    {"weight": 291_667, "type": "points", "value": 1000, "label": "+1000 баллов"},
+    {"weight": 125_000, "type": "points", "value": 1500, "label": "+1500 баллов"},
+    {"weight": 83_333, "type": "points", "value": 2000, "label": "+2000 баллов (камбэк)"},
+    {"weight": 41_667, "type": "raffle_ticket", "value": 1, "label": "🎟 +1 билет"},
+    {"weight": 29_167, "type": "points", "value": 3000, "label": "+3000 баллов"},
+    {"weight": 12_499, "type": "physical_dior_palette", "value": 1, "label": "💎 Главный приз (Палетка Dior)"},
 ]
 ROULETTE_TOTAL = sum(x["weight"] for x in ROULETTE_DISTRIBUTION)
 if ROULETTE_TOTAL != 1_000_000:
     raise RuntimeError("ROULETTE_DISTRIBUTION must sum to 1_000_000")
 
+
+
+
+# -----------------------------------------------------------------------------
+# DATABASE MODELS
+# -----------------------------------------------------------------------------
+Base = declarative_base()
 
 
 class UserDailyStat(Base):
@@ -161,12 +168,6 @@ class ActivityEvent(Base):
 
 Index("ix_activity_events_unique", ActivityEvent.telegram_id, ActivityEvent.day, ActivityEvent.kind, ActivityEvent.key, unique=True)
 
-
-
-# -----------------------------------------------------------------------------
-# DATABASE MODELS
-# -----------------------------------------------------------------------------
-Base = declarative_base()
 
 
 class User(Base):
@@ -2529,7 +2530,52 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
 
 
 
-@app.post("/api/activity/view", response_model="ActivityResp")
+
+
+class ActivityViewReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    post_id: int = Field(..., ge=1)  # message_id поста
+
+
+class ActivityVoteReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    poll_id: str = Field(..., min_length=1, max_length=128)
+
+
+class ActivityChallengeReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
+class ActivityQuestReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+
+
+class ActivityFavoriteReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    brand_tag: str = Field(..., min_length=1, max_length=64)
+
+
+class ActivityRatingReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    product_tag: str = Field(..., min_length=1, max_length=128)
+    stars: int = Field(..., ge=1, le=5)
+    text: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ActivityCommentReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    post_id: int = Field(..., ge=1)
+    text: str = Field(..., min_length=25, max_length=4000)
+
+
+class ActivityResp(BaseModel):
+    ok: bool
+    message: str
+    points: int
+    awarded: int = 0
+
+@app.post("/api/activity/view", response_model=ActivityResp)
 async def api_activity_view(req: ActivityViewReq):
     day = utc_day_key()
     async with async_session_maker() as session:
@@ -2558,7 +2604,7 @@ async def api_activity_view(req: ActivityViewReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/vote", response_model="ActivityResp")
+@app.post("/api/activity/vote", response_model=ActivityResp)
 async def api_activity_vote(req: ActivityVoteReq):
     day = utc_day_key()
     async with async_session_maker() as session:
@@ -2587,7 +2633,7 @@ async def api_activity_vote(req: ActivityVoteReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/challenge", response_model="ActivityResp")
+@app.post("/api/activity/challenge", response_model=ActivityResp)
 async def api_activity_challenge(req: ActivityChallengeReq):
     day = utc_day_key()
     async with async_session_maker() as session:
@@ -2616,7 +2662,7 @@ async def api_activity_challenge(req: ActivityChallengeReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/quest", response_model="ActivityResp")
+@app.post("/api/activity/quest", response_model=ActivityResp)
 async def api_activity_quest(req: ActivityQuestReq):
     day = utc_day_key()
     async with async_session_maker() as session:
@@ -2645,7 +2691,7 @@ async def api_activity_quest(req: ActivityQuestReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/favorite", response_model="ActivityResp")
+@app.post("/api/activity/favorite", response_model=ActivityResp)
 async def api_activity_favorite(req: ActivityFavoriteReq):
     day = utc_day_key()
     brand = (req.brand_tag or "").strip()
@@ -2683,7 +2729,7 @@ async def api_activity_favorite(req: ActivityFavoriteReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/rating", response_model="ActivityResp")
+@app.post("/api/activity/rating", response_model=ActivityResp)
 async def api_activity_rating(req: ActivityRatingReq):
     day = utc_day_key()
     tag = (req.product_tag or "").strip()
@@ -2727,7 +2773,7 @@ async def api_activity_rating(req: ActivityRatingReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/comment", response_model="ActivityResp")
+@app.post("/api/activity/comment", response_model=ActivityResp)
 async def api_activity_comment(req: ActivityCommentReq):
     day = utc_day_key()
     text = (req.text or "").strip()
@@ -2872,50 +2918,6 @@ class SpinResp(BaseModel):
 # -----------------------------------------------------------------------------
 # ACTIVITY (баллы за действия в Mini App)
 # -----------------------------------------------------------------------------
-class ActivityViewReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    post_id: int = Field(..., ge=1)  # message_id поста
-
-
-class ActivityVoteReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    poll_id: str = Field(..., min_length=1, max_length=128)
-
-
-class ActivityChallengeReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    text: str = Field(..., min_length=1, max_length=2000)
-
-
-class ActivityQuestReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-
-
-class ActivityFavoriteReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    brand_tag: str = Field(..., min_length=1, max_length=64)
-
-
-class ActivityRatingReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    product_tag: str = Field(..., min_length=1, max_length=128)
-    stars: int = Field(..., ge=1, le=5)
-    text: Optional[str] = Field(default=None, max_length=2000)
-
-
-class ActivityCommentReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    post_id: int = Field(..., ge=1)
-    text: str = Field(..., min_length=25, max_length=4000)
-
-
-class ActivityResp(BaseModel):
-    ok: bool
-    message: str
-    points: int
-    awarded: int = 0
-
-
 def utc_day_key(dt: Optional[datetime] = None) -> str:
     d = dt or datetime.utcnow()
     return d.date().isoformat()
