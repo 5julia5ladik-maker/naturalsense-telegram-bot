@@ -2534,7 +2534,7 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
 
 
 
-@app.post("/api/activity/view", response_model=ActivityResp)
+@app.post("/api/activity/view", response_model="ActivityResp")
 async def api_activity_view(req: ActivityViewReq):
     day = utc_day_key()
     async with async_session_maker() as session:
@@ -2563,7 +2563,7 @@ async def api_activity_view(req: ActivityViewReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/vote", response_model=ActivityResp)
+@app.post("/api/activity/vote", response_model="ActivityResp")
 async def api_activity_vote(req: ActivityVoteReq):
     day = utc_day_key()
     async with async_session_maker() as session:
@@ -2592,7 +2592,7 @@ async def api_activity_vote(req: ActivityVoteReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/challenge", response_model=ActivityResp)
+@app.post("/api/activity/challenge", response_model="ActivityResp")
 async def api_activity_challenge(req: ActivityChallengeReq):
     day = utc_day_key()
     async with async_session_maker() as session:
@@ -2621,7 +2621,7 @@ async def api_activity_challenge(req: ActivityChallengeReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/quest", response_model=ActivityResp)
+@app.post("/api/activity/quest", response_model="ActivityResp")
 async def api_activity_quest(req: ActivityQuestReq):
     day = utc_day_key()
     async with async_session_maker() as session:
@@ -2650,7 +2650,7 @@ async def api_activity_quest(req: ActivityQuestReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/favorite", response_model=ActivityResp)
+@app.post("/api/activity/favorite", response_model="ActivityResp")
 async def api_activity_favorite(req: ActivityFavoriteReq):
     day = utc_day_key()
     brand = (req.brand_tag or "").strip()
@@ -2688,7 +2688,7 @@ async def api_activity_favorite(req: ActivityFavoriteReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/rating", response_model=ActivityResp)
+@app.post("/api/activity/rating", response_model="ActivityResp")
 async def api_activity_rating(req: ActivityRatingReq):
     day = utc_day_key()
     tag = (req.product_tag or "").strip()
@@ -2732,7 +2732,7 @@ async def api_activity_rating(req: ActivityRatingReq):
             return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
 
 
-@app.post("/api/activity/comment", response_model=ActivityResp)
+@app.post("/api/activity/comment", response_model="ActivityResp")
 async def api_activity_comment(req: ActivityCommentReq):
     day = utc_day_key()
     text = (req.text or "").strip()
