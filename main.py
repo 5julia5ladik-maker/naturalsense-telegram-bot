@@ -119,13 +119,13 @@ PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
 
 # per 1_000_000
 ROULETTE_DISTRIBUTION: list[dict[str, Any]] = [
-    {"weight": 416_667, "type": "points", "value": 500, "label": "+500"},
-    {"weight": 291_667, "type": "points", "value": 1000, "label": "+1000"},
-    {"weight": 125_000, "type": "points", "value": 1500, "label": "+1500"},
-    {"weight": 83_333, "type": "points", "value": 2000, "label": "+2000"},
+    {"weight": 416_667, "type": "points", "value": 500, "label": "+500 баллов"},
+    {"weight": 291_667, "type": "points", "value": 1000, "label": "+1000 баллов"},
+    {"weight": 125_000, "type": "points", "value": 1500, "label": "+1500 баллов"},
+    {"weight": 83_333, "type": "points", "value": 2000, "label": "+2000 баллов"},
     {"weight": 41_667, "type": "raffle_ticket", "value": 1, "label": "🎟 +1 билет"},
-    {"weight": 29_167, "type": "points", "value": 3000, "label": "+3000"},
-    {"weight": 12_499, "type": "physical_dior_palette", "value": 1, "label": "💎 главный приз"},
+    {"weight": 29_166, "type": "points", "value": 3000, "label": "+3000 баллов"},
+    {"weight": 12_500, "type": "physical_dior_palette", "value": 1, "label": "💎 главный приз"},
 ]
 ROULETTE_TOTAL = sum(x["weight"] for x in ROULETTE_DISTRIBUTION)
 if ROULETTE_TOTAL != 1_000_000:
@@ -1302,6 +1302,25 @@ def generate_claim_code() -> str:
 def tg_user_link(user_id: int) -> str:
     return f"tg://user?id={int(user_id)}"
 
+
+async def notify_user_top_prize(user_id: int, prize_label: str, claim_code: str) -> None:
+    """Отправляем человеку сообщение в личный чат, чтобы он не потерял выигрыш."""
+    if not tg_app or not BOT_TOKEN:
+        return
+    try:
+        await tg_app.bot.send_message(
+            chat_id=int(user_id),
+            text=(
+                "🎉 Поздравляем! Вы выиграли: " + str(prize_label) + "\n\n"
+                "Чтобы забрать приз:\n"
+                f"/claim {claim_code}\n\n"
+                "После этого отправьте одним сообщением удобный способ связи (Telegram/WhatsApp) и адрес/город доставки."
+            ),
+        )
+    except Exception as e:
+        logger.warning("Failed to notify winner: %s", e)
+
+
 async def notify_admin(text: str) -> None:
     if not tg_app or not BOT_TOKEN or not ADMIN_CHAT_ID:
         logger.info("ADMIN ALERT (no bot): %s", text)
@@ -1310,16 +1329,6 @@ async def notify_admin(text: str) -> None:
         await tg_app.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
     except Exception as e:
         logger.warning("Failed to notify admin: %s", e)
-
-async def notify_user(telegram_id: int, text: str) -> None:
-    if not tg_app or not BOT_TOKEN:
-        logger.info("USER MSG (no bot) to %s: %s", telegram_id, text)
-        return
-    try:
-        await tg_app.bot.send_message(chat_id=telegram_id, text=text)
-    except Exception as e:
-        logger.warning("Failed to notify user %s: %s", telegram_id, e)
-
 
 
 # -----------------------------------------------------------------------------
@@ -1406,119 +1415,11 @@ def get_webapp_html() -> str:
       setVar("--glassStroke", scheme === "dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
       setVar("--glassShadow", scheme === "dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
 
-      // алиасы, которые использует locked-popup
-      setVar("--overlayBg", scheme === "dark" ? hexToRgba(bg, 0.55) : hexToRgba(bg, 0.45));
-      setVar("--glassBg", scheme === "dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.80)");
-      setVar("--accent", p.button_color || (scheme === "dark" ? "#5aa7ff" : "#1b74ff"));
-
       if (tg) {
         tg.setHeaderColor(bg);
         tg.setBackgroundColor(bg);
       }
     };
-
-    // iOS-style "locked" modal inside WebApp (не закрывается по тапу вокруг)
-    const showLockedPopup = ({ title, message, primaryText, onPrimary, okText = "OK" }) => {
-      try {
-        // не плодим несколько окон
-        const existing = document.getElementById("ns_locked_popup");
-        if (existing) existing.remove();
-
-        const overlay = document.createElement("div");
-        overlay.id = "ns_locked_popup";
-        overlay.style.position = "fixed";
-        overlay.style.inset = "0";
-        overlay.style.zIndex = "99999";
-        overlay.style.display = "flex";
-        overlay.style.alignItems = "center";
-        overlay.style.justifyContent = "center";
-        overlay.style.padding = "20px";
-        overlay.style.background = "var(--overlayBg)";
-        overlay.style.backdropFilter = "blur(22px) saturate(180%)";
-        overlay.style.webkitBackdropFilter = "blur(22px) saturate(180%)";
-
-        // блокируем закрытие кликом по фону (но не ломаем клики по кнопкам)
-        overlay.addEventListener("click", (e) => {
-          if (e.target === overlay) {
-            e.preventDefault();
-            e.stopPropagation();
-          }
-        });
-
-        const card = document.createElement("div");
-        card.style.width = "100%";
-        card.style.maxWidth = "520px";
-        card.style.borderRadius = "18px";
-        card.style.padding = "18px 16px 14px";
-        card.style.background = "var(--glassBg)";
-        card.style.border = "1px solid var(--glassStroke)";
-        card.style.boxShadow = `0 18px 60px var(--glassShadow)`;
-        card.style.color = "var(--text)";
-        card.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
-        card.addEventListener("click", (e) => { e.stopPropagation(); });
-
-        const h = document.createElement("div");
-        h.textContent = title || "";
-        h.style.fontSize = "18px";
-        h.style.fontWeight = "700";
-        h.style.marginBottom = "10px";
-
-        const p = document.createElement("div");
-        p.textContent = message || "";
-        p.style.whiteSpace = "pre-wrap";
-        p.style.lineHeight = "1.4";
-        p.style.fontSize = "15px";
-        p.style.opacity = "0.95";
-
-        const btnRow = document.createElement("div");
-        btnRow.style.display = "flex";
-        btnRow.style.gap = "14px";
-        btnRow.style.justifyContent = "flex-end";
-        btnRow.style.marginTop = "16px";
-
-        const ok = document.createElement("button");
-        ok.textContent = okText;
-        ok.style.border = "none";
-        ok.style.background = "transparent";
-        ok.style.color = "var(--muted)";
-        ok.style.fontSize = "16px";
-        ok.style.padding = "10px 12px";
-        ok.style.cursor = "pointer";
-
-        const primary = document.createElement("button");
-        primary.textContent = primaryText || "";
-        primary.style.border = "none";
-        primary.style.background = "transparent";
-        primary.style.color = "var(--accent)";
-        primary.style.fontSize = "16px";
-        primary.style.padding = "10px 12px";
-        primary.style.cursor = "pointer";
-
-        const close = () => {
-          try { document.body.style.overflow = ""; } catch (e) {}
-          overlay.remove();
-        };
-
-        ok.onclick = () => close();
-        primary.onclick = () => { try { onPrimary && onPrimary(); } catch (e) {} close(); };
-
-        btnRow.appendChild(ok);
-        if (primaryText) btnRow.appendChild(primary);
-
-        card.appendChild(h);
-        card.appendChild(p);
-        card.appendChild(btnRow);
-        overlay.appendChild(card);
-
-        document.body.style.overflow = "hidden";
-        document.body.appendChild(overlay);
-      } catch (e) {
-        // fallback
-        try { alert(message || ""); } catch (e2) {}
-      }
-    };
-
-
 
     if (tg) {
       tg.expand();
@@ -1745,6 +1646,80 @@ def get_webapp_html() -> str:
       );
     };
 
+
+    const LockedClaimModal = ({ open, message, claimCode, onOk, onClaim }) => {
+      if (!open) return null;
+      return (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) { /* не закрываем по фону */ } }}
+          style={{
+            position:"fixed",
+            inset:0,
+            background:"var(--sheetOverlay)",
+            backdropFilter:"blur(22px) saturate(180%)",
+            WebkitBackdropFilter:"blur(22px) saturate(180%)",
+            zIndex:10000,
+            display:"flex",
+            justifyContent:"center",
+            alignItems:"center",
+            padding:"16px"
+          }}
+        >
+          <div
+            style={{
+              width:"100%",
+              maxWidth:"520px",
+              borderRadius:"22px",
+              border:"1px solid var(--glassStroke)",
+              background:"var(--sheetCardBg)",
+              backdropFilter:"blur(28px) saturate(180%)",
+              WebkitBackdropFilter:"blur(28px) saturate(180%)",
+              boxShadow:"0 12px 40px var(--glassShadow)",
+              padding:"16px"
+            }}
+          >
+            <div style={{ fontSize:"18px", fontWeight:750, marginBottom:"10px" }}>🎡 Рулетка</div>
+            <div style={{ fontSize:"14px", lineHeight:"1.4", whiteSpace:"pre-line" }}>{message}</div>
+
+            <div style={{ display:"flex", gap:"10px", marginTop:"16px" }}>
+              <div
+                onClick={onOk}
+                style={{
+                  flex:1,
+                  padding:"12px",
+                  textAlign:"center",
+                  borderRadius:"14px",
+                  border:"1px solid var(--stroke)",
+                  background:"rgba(255,255,255,0.06)",
+                  cursor:"pointer",
+                  userSelect:"none",
+                  fontWeight:650
+                }}
+              >OK</div>
+
+              <div
+                onClick={onClaim}
+                style={{
+                  flex:1.2,
+                  padding:"12px",
+                  textAlign:"center",
+                  borderRadius:"14px",
+                  border:"1px solid rgba(230,193,128,0.35)",
+                  background:"rgba(230,193,128,0.14)",
+                  cursor:"pointer",
+                  userSelect:"none",
+                  fontWeight:750
+                }}
+              >Получить приз</div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+
+
+
     const StatRow = ({ left, right }) => (
       <div style={{ display:"flex", justifyContent:"space-between", marginTop:"10px", fontSize:"14px" }}>
         <div style={{ color:"var(--muted)" }}>{left}</div>
@@ -1761,14 +1736,12 @@ def get_webapp_html() -> str:
         <div style={{ fontSize:"13px", color:"var(--muted)" }}>Шансы рулетки (честно):</div>
         <div style={{ marginTop:"10px", display:"grid", gap:"8px" }}>
           {[
-            ["41.7%", "+500 баллов"],
-            ["29.2%", "+1000 баллов"],
-            ["12.5%", "+1500 баллов"],
-            ["8.3%", "+2000 баллов"],
-            ["4.2%", "🎟 +1 билет"],
-            ["2.9%", "+3000 баллов"],
-            ["1.2%", "💎 главный приз"],
-          ]].map(([p, t]) => (
+            ["50%", "+500 баллов"],
+            ["25%", "+1000 баллов"],
+            ["15%", "🎟 Билет на розыгрыш"],
+            ["8%", "+3000 баллов"],
+            ["2%", "💎 Dior палетка (ТОП приз)"],
+          ].map(([p, t]) => (
             <div key={p+t} style={{
               padding:"10px",
               borderRadius:"14px",
@@ -1804,6 +1777,9 @@ def get_webapp_html() -> str:
       const [rouletteHistory, setRouletteHistory] = useState([]);
       const [busy, setBusy] = useState(false);
       const [msg, setMsg] = useState("");
+
+      // locked modal для ТОП-приза (нельзя закрыть тапом вне)
+      const [claimModal, setClaimModal] = useState({ open:false, message:"", claim_code:"" });
 
       const tgUserId = tg?.initDataUnsafe?.user?.id;
 
@@ -1964,31 +1940,22 @@ useEffect(() => {
           setMsg(`🎡 Выпало: ${data.prize_label}`);
           // ✅ всплывающее окно с призом
           try {
-            if (tg?.showPopup) {
-              const msg = data.claimable && data.claim_code
-                ? `Ваш приз: ${data.prize_label}\n\nЧтобы забрать: откройте чат с ботом и отправьте\n/claim ${data.claim_code}`
-                : `Ваш приз: ${data.prize_label}`;
+            if (data.claimable && data.claim_code) {
+              const m = `Ваш приз: ${data.prize_label}
 
-              if (data.claimable && data.claim_code && tg?.openTelegramLink && botUsername) {
-                showLockedPopup({
-                  title: "🎡 Рулетка",
-                  message: msg,
-                  primaryText: "Получить приз",
-                  onPrimary: () => tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${data.claim_code}`),
-                  okText: "OK"
-                });
-              } else {
-                tg.showPopup({
-                  title: "🎡 Рулетка",
-                  message: msg,
-                  buttons: [{ type: "ok" }]
-                });
-              }
+Чтобы забрать: откройте чат с ботом и отправьте
+/claim ${data.claim_code}`;
+              setClaimModal({ open:true, message:m, claim_code:data.claim_code });
+            } else if (tg?.showPopup) {
+              tg.showPopup({
+                title: "🎡 Рулетка",
+                message: `Ваш приз: ${data.prize_label}`,
+                buttons: [{ type: "ok" }]
+              });
             } else {
               alert(`Ваш приз: ${data.prize_label}`);
             }
-          } catch (e) {}
-          await refreshUser();
+          } catch (e) {}          await refreshUser();
           await loadRaffleStatus();
           await loadRouletteHistory();
         } catch (e) {
@@ -2146,6 +2113,18 @@ useEffect(() => {
           <Tabs active={activeTab} onChange={changeTab} />
           {renderContent()}
 
+          <LockedClaimModal
+            open={claimModal.open}
+            message={claimModal.message}
+            claimCode={claimModal.claim_code}
+            onOk={() => setClaimModal({ open:false, message:"", claim_code:"" })}
+            onClaim={() => {
+              if (botUsername && tg?.openTelegramLink && claimModal.claim_code) {
+                tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${claimModal.claim_code}`);
+              }
+              setClaimModal({ open:false, message:"", claim_code:"" });
+            }}
+          />
           <Sheet open={profileOpen} onClose={() => setProfileOpen(false)}>
             {!user ? (
               <div style={{ marginTop:"12px", color:"var(--muted)", fontSize:"13px" }}>
@@ -2218,7 +2197,7 @@ useEffect(() => {
                 <div style={{ fontSize:"14px", fontWeight:650 }}>💎 На что тратить баллы</div>
                 <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
                   • 🎁 Билет на розыгрыш — 500 баллов<br/>
-                  • 🎡 Рулетка — 2000 баллов (лимит 1 раз/5с (тест))
+                  • 🎡 Рулетка — 2000 баллов (лимит 1 раз/день)
                 </div>
 
                 <Divider />
@@ -2614,15 +2593,8 @@ async def roulette_spin(req: SpinReq):
 
             if last_spin and (now - last_spin) < ROULETTE_LIMIT_WINDOW:
                 delta = ROULETTE_LIMIT_WINDOW - (now - last_spin)
-                # ✅ Для коротких тестовых лимитов (секунды) показываем секунды, а не часы
-                if ROULETTE_LIMIT_WINDOW < timedelta(hours=1):
-                    sec_left = max(1, int(delta.total_seconds()) + (1 if (delta.total_seconds() % 1) > 0 else 0))
-                    raise HTTPException(status_code=400, detail=f"Рулетка доступна через ~{sec_left} сек")
-                hours_left = max(
-                    0,
-                    int(delta.total_seconds() // 3600) + (1 if (delta.total_seconds() % 3600) > 0 else 0),
-                )
-                raise HTTPException(status_code=400, detail=f"Рулетка доступна через ~{hours_left} ч")
+                secs_left = max(1, int(delta.total_seconds()) + (1 if (delta.total_seconds() % 1) > 0 else 0))
+                raise HTTPException(status_code=400, detail=f"Рулетка доступна через ~{secs_left} сек")
 
             # списание
             user.points = (user.points or 0) - ROULETTE_SPIN_COST
@@ -2675,24 +2647,20 @@ async def roulette_spin(req: SpinReq):
         await session.refresh(user)
 
     if prize_type == "physical_dior_palette":
+        # ✅ сообщаем победителю в чат сразу (чтобы не потерял выигрыш)
+        if claim_code:
+            await notify_user_top_prize(tid, prize_label, claim_code)
+
         uname = (user.username or "").strip()
         mention = f"@{uname}" if uname else "(без username)"
         await notify_admin(
-            "💎 ТОП ПРИЗ: главный приз!\n"
+            "💎 ТОП ПРИЗ: Dior палетка!\n"
             f"user: {mention} | {user.first_name or '-'}\n"
             f"telegram_id: {tid}\n"
             f"link: {tg_user_link(tid)}\n"
             f"claim: {claim_code}\n"
             f"roll: {roll}\n"
             "👉 Пользователю: отправьте /claim <код> и потом сообщение с контактами/адресом."
-        )
-
-        # Дублируем пользователю в ЛС, чтобы он 100% не потерял инструкцию
-        await notify_user(
-            tid,
-            "💎 Вы выиграли: главный приз (ТОП приз)!\n\n"
-            f"Чтобы забрать приз, отправьте в этот чат команду:\n/claim {claim_code}\n\n"
-            "Затем одним сообщением пришлите удобный способ связи (Telegram/WhatsApp) и город/адрес доставки."
         )
 
     return {
