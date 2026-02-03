@@ -1736,11 +1736,13 @@ def get_webapp_html() -> str:
         <div style={{ fontSize:"13px", color:"var(--muted)" }}>Шансы рулетки (честно):</div>
         <div style={{ marginTop:"10px", display:"grid", gap:"8px" }}>
           {[
-            ["50%", "+500 баллов"],
-            ["25%", "+1000 баллов"],
-            ["15%", "🎟 Билет на розыгрыш"],
-            ["8%", "+3000 баллов"],
-            ["2%", "💎 Dior палетка (ТОП приз)"],
+            ["50%", "+500"],
+            ["35%", "+1000"],
+            ["15%", "+1500"],
+            ["10%", "+2000"],
+            ["5%", "🎟 +1 билет"],
+            ["3.5%", "+3000"],
+            ["1.5%", "💎 главный приз"],
           ].map(([p, t]) => (
             <div key={p+t} style={{
               padding:"10px",
@@ -2654,7 +2656,7 @@ async def roulette_spin(req: SpinReq):
         uname = (user.username or "").strip()
         mention = f"@{uname}" if uname else "(без username)"
         await notify_admin(
-            "💎 ТОП ПРИЗ: Dior палетка!\n"
+            "💎 ГЛАВНЫЙ ПРИЗ!\n"
             f"user: {mention} | {user.first_name or '-'}\n"
             f"telegram_id: {tid}\n"
             f"link: {tg_user_link(tid)}\n"
