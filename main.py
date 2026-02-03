@@ -1,13 +1,3 @@
-ROULETTE_WEIGHTS = [
-    ("points", 500,   50),
-    ("points", 1000,  35),
-    ("points", 1500,  15),
-    ("points", 2000,  10),
-    ("ticket", 1,      5),
-    ("points", 3000,   3.5),
-    ("top_prize", None, 1.5),
-]
-
 import os
 import re
 import asyncio
@@ -113,9 +103,6 @@ DAILY_BONUS_POINTS = 5
 REGISTER_BONUS_POINTS = 10
 REFERRAL_BONUS_POINTS = 20
 
-# Максимум баллов в день за "активности" (просмотры/голоса/челленджи/квесты/оценки/избранное/комменты)
-DAILY_ACTIVITY_CAP = 300
-
 STREAK_MILESTONES = {
     3: 10,
     7: 30,
@@ -124,53 +111,23 @@ STREAK_MILESTONES = {
 }
 
 RAFFLE_TICKET_COST = 500
-ROULETTE_SPIN_COST = 2000
-ROULETTE_LIMIT_WINDOW = timedelta(hours=3)  # cooldown между спинами
+ROULETTE_SPIN_COST = 3000
+ROULETTE_LIMIT_WINDOW = timedelta(seconds=5)  # TEST: 5s cooldown
 DEFAULT_RAFFLE_ID = 1
 
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
 
 # per 1_000_000
 ROULETTE_DISTRIBUTION: list[dict[str, Any]] = [
-    {"weight": 415_600, "type": "points", "value": 500, "label": "+500 баллов"},
-    {"weight": 290_900, "type": "points", "value": 1000, "label": "+1000 баллов"},
-    {"weight": 124_700, "type": "points", "value": 1500, "label": "+1500 баллов"},
-    {"weight": 83_100, "type": "points", "value": 2000, "label": "+2000 баллов (камбэк)"},
-    {"weight": 41_600, "type": "raffle_ticket", "value": 1, "label": "🎟 Билет на розыгрыш"},
-    {"weight": 29_100, "type": "points", "value": 3000, "label": "+3000 баллов"},
-    {"weight": 15_000, "type": "physical_dior_palette", "value": 1, "label": "💎 Палетка Dior (ТОП приз)"},
+    {"weight": 500_000, "type": "points", "value": 500, "label": "+500 баллов"},
+    {"weight": 250_000, "type": "points", "value": 1000, "label": "+1000 баллов"},
+    {"weight": 150_000, "type": "raffle_ticket", "value": 1, "label": "🎟 Билет на розыгрыш"},
+    {"weight": 80_000, "type": "points", "value": 3000, "label": "+3000 баллов"},
+    {"weight": 20_000, "type": "physical_dior_palette", "value": 1, "label": "💎 Dior палетка (ТОП приз)"},
 ]
 ROULETTE_TOTAL = sum(x["weight"] for x in ROULETTE_DISTRIBUTION)
 if ROULETTE_TOTAL != 1_000_000:
     raise RuntimeError("ROULETTE_DISTRIBUTION must sum to 1_000_000")
-
-
-
-class UserDailyStat(Base):
-    __tablename__ = "user_daily_stats"
-
-    id = Column(Integer, primary_key=True)
-    telegram_id = Column(BigInteger, index=True, nullable=False)
-    day = Column(String, index=True, nullable=False)  # YYYY-MM-DD in UTC
-    earned_activity_points = Column(Integer, default=0, nullable=False)
-    counters = Column(JSON, default=dict)  # flexible per-day counters
-    updated_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
-
-Index("ix_user_daily_stats_unique", UserDailyStat.telegram_id, UserDailyStat.day, unique=True)
-
-
-class ActivityEvent(Base):
-    __tablename__ = "activity_events"
-
-    id = Column(Integer, primary_key=True)
-    telegram_id = Column(BigInteger, index=True, nullable=False)
-    day = Column(String, index=True, nullable=False)  # YYYY-MM-DD
-    kind = Column(String, index=True, nullable=False)  # view/vote/challenge/quest/favorite/rating/comment...
-    key = Column(String, nullable=False)  # dedupe key (e.g., post_id/poll_id/brand/product/hash)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
-
-Index("ix_activity_events_unique", ActivityEvent.telegram_id, ActivityEvent.day, ActivityEvent.kind, ActivityEvent.key, unique=True)
-
 
 
 # -----------------------------------------------------------------------------
@@ -200,7 +157,6 @@ class User(Base):
     referred_by = Column(BigInteger, nullable=True)
     referral_count = Column(Integer, default=0)
     ref_bonus_paid = Column(Boolean, default=False, nullable=False)
-    ref_active_bonus_paid = Column(Boolean, default=False, nullable=False)
 
 
 class Post(Base):
@@ -341,7 +297,6 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT NULL;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_count INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
-        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_active_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
 
         # ✅ Postgres: int32 -> bigint
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;")
@@ -730,33 +685,18 @@ def build_help_text() -> str:
 
 1) Нажми *📲 Открыть журнал* — откроется Mini App внутри Telegram.
 2) Выбирай категории/бренды и открывай посты.
-3) *👤 Профиль* — баллы, уровень, стрик, реф-ссылка.
+3) *👤 Профиль* — баллы, уровень, стрик.
 4) *↩️ В канал* — кнопка под сообщением /start.
 
-💎 *Как получать баллы*
-• Ежедневный визит: +5 (строго 1 раз в 24 часа)
-• 3 комментария в день: +10 (текст от 25 символов)
-• Просмотр постов из Mini App: +1 (до 15/день)
-• Голосования: +3 (до 5/день)
-• Challenge дня: +5 (1/день)
-• Квест дня: +10 (1/день)
-• Избранное: +2 (до 5/день)
-• Оценки: +3 / +5 с текстом
-• Реферал: +20 +10 за активность реферала
-
-🧱 *Ограничение*
-• За активности максимум: 300 баллов в день
+💎 *Баллы и антифарм*
+• Первый /start: +10 за регистрацию
+• Далее: +5 за визит, строго 1 раз в 24 часа
 
 🔥 *Стрик (серия дней)*
 • 3 дня: +10
 • 7 дней: +30
 • 14 дней: +80
 • 30 дней: +250
-
-🎡 *Рулетка*
-• 1 спин = 2000 баллов
-• Лимит: 1 раз в 3 часа
-• Главный приз: палетка Dior (до 4000 грн)
 
 🎟 *Рефералка*
 Команда /invite даёт твою ссылку.
@@ -1369,16 +1309,6 @@ async def notify_admin(text: str) -> None:
     except Exception as e:
         logger.warning("Failed to notify admin: %s", e)
 
-async def notify_user(telegram_id: int, text: str) -> None:
-    if not tg_app or not BOT_TOKEN:
-        logger.info("USER MSG (no bot) to %s: %s", telegram_id, text)
-        return
-    try:
-        await tg_app.bot.send_message(chat_id=telegram_id, text=text)
-    except Exception as e:
-        logger.warning("Failed to notify user %s: %s", telegram_id, e)
-
-
 
 # -----------------------------------------------------------------------------
 # MINI APP (WEBAPP HTML)
@@ -1464,119 +1394,11 @@ def get_webapp_html() -> str:
       setVar("--glassStroke", scheme === "dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
       setVar("--glassShadow", scheme === "dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
 
-      // алиасы, которые использует locked-popup
-      setVar("--overlayBg", scheme === "dark" ? hexToRgba(bg, 0.55) : hexToRgba(bg, 0.45));
-      setVar("--glassBg", scheme === "dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.80)");
-      setVar("--accent", p.button_color || (scheme === "dark" ? "#5aa7ff" : "#1b74ff"));
-
       if (tg) {
         tg.setHeaderColor(bg);
         tg.setBackgroundColor(bg);
       }
     };
-
-    // iOS-style "locked" modal inside WebApp (не закрывается по тапу вокруг)
-    const showLockedPopup = ({ title, message, primaryText, onPrimary, okText = "OK" }) => {
-      try {
-        // не плодим несколько окон
-        const existing = document.getElementById("ns_locked_popup");
-        if (existing) existing.remove();
-
-        const overlay = document.createElement("div");
-        overlay.id = "ns_locked_popup";
-        overlay.style.position = "fixed";
-        overlay.style.inset = "0";
-        overlay.style.zIndex = "99999";
-        overlay.style.display = "flex";
-        overlay.style.alignItems = "center";
-        overlay.style.justifyContent = "center";
-        overlay.style.padding = "20px";
-        overlay.style.background = "var(--overlayBg)";
-        overlay.style.backdropFilter = "blur(22px) saturate(180%)";
-        overlay.style.webkitBackdropFilter = "blur(22px) saturate(180%)";
-
-        // блокируем закрытие кликом по фону (но не ломаем клики по кнопкам)
-        overlay.addEventListener("click", (e) => {
-          if (e.target === overlay) {
-            e.preventDefault();
-            e.stopPropagation();
-          }
-        });
-
-        const card = document.createElement("div");
-        card.style.width = "100%";
-        card.style.maxWidth = "520px";
-        card.style.borderRadius = "18px";
-        card.style.padding = "18px 16px 14px";
-        card.style.background = "var(--glassBg)";
-        card.style.border = "1px solid var(--glassStroke)";
-        card.style.boxShadow = `0 18px 60px var(--glassShadow)`;
-        card.style.color = "var(--text)";
-        card.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
-        card.addEventListener("click", (e) => { e.stopPropagation(); });
-
-        const h = document.createElement("div");
-        h.textContent = title || "";
-        h.style.fontSize = "18px";
-        h.style.fontWeight = "700";
-        h.style.marginBottom = "10px";
-
-        const p = document.createElement("div");
-        p.textContent = message || "";
-        p.style.whiteSpace = "pre-wrap";
-        p.style.lineHeight = "1.4";
-        p.style.fontSize = "15px";
-        p.style.opacity = "0.95";
-
-        const btnRow = document.createElement("div");
-        btnRow.style.display = "flex";
-        btnRow.style.gap = "14px";
-        btnRow.style.justifyContent = "flex-end";
-        btnRow.style.marginTop = "16px";
-
-        const ok = document.createElement("button");
-        ok.textContent = okText;
-        ok.style.border = "none";
-        ok.style.background = "transparent";
-        ok.style.color = "var(--muted)";
-        ok.style.fontSize = "16px";
-        ok.style.padding = "10px 12px";
-        ok.style.cursor = "pointer";
-
-        const primary = document.createElement("button");
-        primary.textContent = primaryText || "";
-        primary.style.border = "none";
-        primary.style.background = "transparent";
-        primary.style.color = "var(--accent)";
-        primary.style.fontSize = "16px";
-        primary.style.padding = "10px 12px";
-        primary.style.cursor = "pointer";
-
-        const close = () => {
-          try { document.body.style.overflow = ""; } catch (e) {}
-          overlay.remove();
-        };
-
-        ok.onclick = () => close();
-        primary.onclick = () => { try { onPrimary && onPrimary(); } catch (e) {} close(); };
-
-        btnRow.appendChild(ok);
-        if (primaryText) btnRow.appendChild(primary);
-
-        card.appendChild(h);
-        card.appendChild(p);
-        card.appendChild(btnRow);
-        overlay.appendChild(card);
-
-        document.body.style.overflow = "hidden";
-        document.body.appendChild(overlay);
-      } catch (e) {
-        // fallback
-        try { alert(message || ""); } catch (e2) {}
-      }
-    };
-
-
 
     if (tg) {
       tg.expand();
@@ -1726,7 +1548,7 @@ def get_webapp_html() -> str:
 
     const PostCard = ({ post }) => (
       <div
-        onClick={() => { trackView(post.message_id); openLink(post.url); }}
+        onClick={() => openLink(post.url)}
         style={{
           marginTop: "10px",
           padding: "12px",
@@ -1840,7 +1662,7 @@ def get_webapp_html() -> str:
           ))}
         </div>
         <div style={{ marginTop:"10px", fontSize:"12px", color:"var(--muted)" }}>
-          Лимит: 1 спин раз в 3 часа
+          Лимит: 1 спин в 24 часа
         </div>
       </div>
     );
@@ -1869,32 +1691,6 @@ def get_webapp_html() -> str:
           .then(r => r.ok ? r.json() : Promise.reject())
           .then(data => setUser(data))
           .catch(() => {});
-      };
-
-
-      const apiPost = (path, body) => {
-        return fetch(path, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body || {}),
-          keepalive: true,
-        })
-          .then(r => r.ok ? r.json().catch(() => ({})) : r.json().catch(() => ({})).then(e => Promise.reject(e)))
-          .catch(() => ({}));
-      };
-
-      const doActivity = async (path, body) => {
-        if (!tgUserId) return;
-        const res = await apiPost(path, { telegram_id: tgUserId, ...(body || {}) });
-        if (res?.message) setMsg(res.message);
-        refreshUser();
-        return res;
-      };
-
-      const trackView = (postId) => {
-        if (!postId) return;
-        // fire & forget
-        doActivity("/api/activity/view", { post_id: postId });
       };
 
       const loadPosts = (tag) => {
@@ -2052,12 +1848,17 @@ useEffect(() => {
                 : `Ваш приз: ${data.prize_label}`;
 
               if (data.claimable && data.claim_code && tg?.openTelegramLink && botUsername) {
-                showLockedPopup({
+                tg.showPopup({
                   title: "🎡 Рулетка",
                   message: msg,
-                  primaryText: "Получить приз",
-                  onPrimary: () => tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${data.claim_code}`),
-                  okText: "OK"
+                  buttons: [
+                    { id: "claim", type: "default", text: "Получить приз" },
+                    { type: "ok" }
+                  ]
+                }, (btnId) => {
+                  if (btnId === "claim") {
+                    tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${data.claim_code}`);
+                  }
                 });
               } else {
                 tg.showPopup({
@@ -2300,65 +2101,10 @@ useEffect(() => {
                 <div style={{ fontSize:"14px", fontWeight:650 }}>💎 На что тратить баллы</div>
                 <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
                   • 🎁 Билет на розыгрыш — 500 баллов<br/>
-                  • 🎡 Рулетка — 2000 баллов (лимит 1 раз в 3 часа)
-                </div>
-
-                <div style={{ marginTop:"12px", fontSize:"14px", fontWeight:650 }}>💎 Как получать баллы</div>
-                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
-                  • Ежедневный визит: +5 (раз в 24ч)<br/>
-                  • 3 комментария в день: +10 (коммент от 25 символов)<br/>
-                  • Просмотр постов из Mini App: +1 (до 15/день)<br/>
-                  • Голосования: +3 (до 5/день)<br/>
-                  • Challenge дня: +5 (1/день)<br/>
-                  • Квест дня: +10 (1/день)<br/>
-                  • Избранное: +2 (до 5/день)<br/>
-                  • Оценки: +3 / +5 с текстом<br/>
-                  • Реферал: +20 +10 за активность
+                  • 🎡 Рулетка — 3000 баллов (1 раз в 24 часа)
                 </div>
 
                 <Divider />
-
-                <div style={{ fontSize:"14px", fontWeight:650 }}>⚡ Активности</div>
-                <div style={{ marginTop:"8px", display:"grid", gap:"8px" }}>
-                  <Button icon="💬" label="Отметить комментарий" onClick={async () => {
-                    const postId = parseInt(prompt("ID поста (message_id) из канала:", ""), 10);
-                    if (!postId) return;
-                    const txt = prompt("Текст комментария (минимум 25 символов):", "");
-                    if (!txt) return;
-                    await doActivity("/api/activity/comment", { post_id: postId, text: txt });
-                  }} />
-                  <Button icon="🗳" label="Голосование" onClick={async () => {
-                    const pollId = prompt("ID/код голосования (любой идентификатор):", "");
-                    if (!pollId) return;
-                    await doActivity("/api/activity/vote", { poll_id: pollId });
-                  }} />
-                  <Button icon="🎯" label="Challenge дня" onClick={async () => {
-                    const txt = prompt("Твой ответ / мини-мысль:", "");
-                    if (!txt) return;
-                    await doActivity("/api/activity/challenge", { text: txt });
-                  }} />
-                  <Button icon="🧾" label="Квест дня" onClick={async () => {
-                    await doActivity("/api/activity/quest", {});
-                  }} />
-                  <Button icon="✨" label="Добавить бренд в избранное (+2)" onClick={async () => {
-                    const brand = prompt("Тег бренда (например: #Dior):", "");
-                    if (!brand) return;
-                    await doActivity("/api/activity/favorite", { brand_tag: brand.trim() });
-                  }} />
-                  <Button icon="⭐" label="Оценить продукт" onClick={async () => {
-                    const tag = prompt("Тег продукта (например: Dior Glow Maximizer Palette):", "");
-                    if (!tag) return;
-                    const stars = parseInt(prompt("Оценка 1-5:", "5"), 10);
-                    if (!stars) return;
-                    const txt = prompt("Комментарий (необязательно):", "");
-                    await doActivity("/api/activity/rating", { product_tag: tag.trim(), stars, text: (txt || "").trim() });
-                  }} />
-                </div>
-
-                <Divider />
-
-
-                
 
                 <div style={{ fontSize:"14px", fontWeight:650 }}>🎁 Розыгрыши</div>
                 <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
@@ -2379,14 +2125,14 @@ useEffect(() => {
 
                 <div style={{ fontSize:"14px", fontWeight:650 }}>🎡 Рулетка</div>
                 <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
-                  1 спин = 2000 баллов. Лимит: 1 раз в 3 часа.
+                  1 спин = 3000 баллов. Каждый день (лимит 1 раз/5с (тест)).
                 </div>
                 <Button
                   icon="🎡"
-                  label="Крутить (2000)"
+                  label="Крутить (3000)"
                   subtitle={busy ? "Подожди…" : ""}
                   onClick={spinRoulette}
-                  disabled={busy || (user.points || 0) < 2000}
+                  disabled={busy || (user.points || 0) < 3000}
                 />
 
                 <PrizeTable />
@@ -2538,285 +2284,6 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     return out
 
 
-
-@app.post("/api/activity/view", response_model="ActivityResp")
-async def api_activity_view(req: ActivityViewReq):
-    day = utc_day_key()
-    async with async_session_maker() as session:
-        async with session.begin():
-            stat = await get_or_create_daily_stat(session, int(req.telegram_id), day)
-            views = _counter_get(stat.counters or {}, "views", 0)
-            if views >= 15:
-                user = await get_or_create_user(session, int(req.telegram_id))
-                return ActivityResp(ok=False, message="Лимит просмотров на сегодня достигнут.", points=int(user.points or 0), awarded=0)
-
-            ok, msg, awarded = await award_activity_points(
-                session,
-                int(req.telegram_id),
-                "view",
-                1,
-                key=f"post:{int(req.post_id)}",
-                day=day,
-            )
-            if ok and awarded > 0:
-                c = dict(stat.counters or {})
-                c["views"] = views + 1
-                stat.counters = c
-                stat.updated_at = datetime.utcnow()
-
-            user = await get_or_create_user(session, int(req.telegram_id))
-            return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
-
-
-@app.post("/api/activity/vote", response_model="ActivityResp")
-async def api_activity_vote(req: ActivityVoteReq):
-    day = utc_day_key()
-    async with async_session_maker() as session:
-        async with session.begin():
-            stat = await get_or_create_daily_stat(session, int(req.telegram_id), day)
-            votes = _counter_get(stat.counters or {}, "votes", 0)
-            if votes >= 5:
-                user = await get_or_create_user(session, int(req.telegram_id))
-                return ActivityResp(ok=False, message="Лимит голосований на сегодня достигнут.", points=int(user.points or 0), awarded=0)
-
-            ok, msg, awarded = await award_activity_points(
-                session,
-                int(req.telegram_id),
-                "vote",
-                3,
-                key=f"poll:{req.poll_id}",
-                day=day,
-            )
-            if ok and awarded > 0:
-                c = dict(stat.counters or {})
-                c["votes"] = votes + 1
-                stat.counters = c
-                stat.updated_at = datetime.utcnow()
-
-            user = await get_or_create_user(session, int(req.telegram_id))
-            return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
-
-
-@app.post("/api/activity/challenge", response_model="ActivityResp")
-async def api_activity_challenge(req: ActivityChallengeReq):
-    day = utc_day_key()
-    async with async_session_maker() as session:
-        async with session.begin():
-            stat = await get_or_create_daily_stat(session, int(req.telegram_id), day)
-            done = bool((stat.counters or {}).get("challenge_done", False))
-            if done:
-                user = await get_or_create_user(session, int(req.telegram_id))
-                return ActivityResp(ok=False, message="Challenge дня уже выполнен.", points=int(user.points or 0), awarded=0)
-
-            ok, msg, awarded = await award_activity_points(
-                session,
-                int(req.telegram_id),
-                "challenge",
-                5,
-                key="daily",
-                day=day,
-            )
-            if ok and awarded > 0:
-                c = dict(stat.counters or {})
-                c["challenge_done"] = True
-                stat.counters = c
-                stat.updated_at = datetime.utcnow()
-
-            user = await get_or_create_user(session, int(req.telegram_id))
-            return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
-
-
-@app.post("/api/activity/quest", response_model="ActivityResp")
-async def api_activity_quest(req: ActivityQuestReq):
-    day = utc_day_key()
-    async with async_session_maker() as session:
-        async with session.begin():
-            stat = await get_or_create_daily_stat(session, int(req.telegram_id), day)
-            done = bool((stat.counters or {}).get("quest_done", False))
-            if done:
-                user = await get_or_create_user(session, int(req.telegram_id))
-                return ActivityResp(ok=False, message="Квест дня уже выполнен.", points=int(user.points or 0), awarded=0)
-
-            ok, msg, awarded = await award_activity_points(
-                session,
-                int(req.telegram_id),
-                "quest",
-                10,
-                key="daily",
-                day=day,
-            )
-            if ok and awarded > 0:
-                c = dict(stat.counters or {})
-                c["quest_done"] = True
-                stat.counters = c
-                stat.updated_at = datetime.utcnow()
-
-            user = await get_or_create_user(session, int(req.telegram_id))
-            return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
-
-
-@app.post("/api/activity/favorite", response_model="ActivityResp")
-async def api_activity_favorite(req: ActivityFavoriteReq):
-    day = utc_day_key()
-    brand = (req.brand_tag or "").strip()
-    if not brand:
-        raise HTTPException(status_code=400, detail="brand_tag required")
-
-    async with async_session_maker() as session:
-        async with session.begin():
-            user = await get_or_create_user(session, int(req.telegram_id))
-            favs = list(user.favorites or [])
-            if brand in favs:
-                return ActivityResp(ok=False, message="Этот бренд уже в избранном.", points=int(user.points or 0), awarded=0)
-
-            stat = await get_or_create_daily_stat(session, int(req.telegram_id), day)
-            cnt = _counter_get(stat.counters or {}, "favorites_added", 0)
-            if cnt >= 5:
-                return ActivityResp(ok=False, message="Лимит добавлений в избранное на сегодня достигнут.", points=int(user.points or 0), awarded=0)
-
-            ok, msg, awarded = await award_activity_points(
-                session,
-                int(req.telegram_id),
-                "favorite",
-                2,
-                key=f"brand:{brand}",
-                day=day,
-            )
-            if ok and awarded > 0:
-                favs.append(brand)
-                user.favorites = favs
-                c = dict(stat.counters or {})
-                c["favorites_added"] = cnt + 1
-                stat.counters = c
-                stat.updated_at = datetime.utcnow()
-
-            return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
-
-
-@app.post("/api/activity/rating", response_model="ActivityResp")
-async def api_activity_rating(req: ActivityRatingReq):
-    day = utc_day_key()
-    tag = (req.product_tag or "").strip()
-    if not tag:
-        raise HTTPException(status_code=400, detail="product_tag required")
-
-    has_text = bool(req.text and req.text.strip())
-    delta = 5 if has_text else 3
-
-    async with async_session_maker() as session:
-        async with session.begin():
-            stat = await get_or_create_daily_stat(session, int(req.telegram_id), day)
-            r_cnt = _counter_get(stat.counters or {}, "ratings", 0)
-            rt_cnt = _counter_get(stat.counters or {}, "ratings_text", 0)
-
-            if r_cnt >= 3:
-                user = await get_or_create_user(session, int(req.telegram_id))
-                return ActivityResp(ok=False, message="Лимит оценок на сегодня достигнут.", points=int(user.points or 0), awarded=0)
-            if has_text and rt_cnt >= 2:
-                user = await get_or_create_user(session, int(req.telegram_id))
-                return ActivityResp(ok=False, message="Лимит оценок с текстом на сегодня достигнут.", points=int(user.points or 0), awarded=0)
-
-            key = f"product:{tag}:stars:{int(req.stars)}"
-            ok, msg, awarded = await award_activity_points(
-                session,
-                int(req.telegram_id),
-                "rating_text" if has_text else "rating",
-                delta,
-                key=key,
-                day=day,
-            )
-            if ok and awarded > 0:
-                c = dict(stat.counters or {})
-                c["ratings"] = r_cnt + 1
-                if has_text:
-                    c["ratings_text"] = rt_cnt + 1
-                stat.counters = c
-                stat.updated_at = datetime.utcnow()
-
-            user = await get_or_create_user(session, int(req.telegram_id))
-            return ActivityResp(ok=ok, message=msg, points=int(user.points or 0), awarded=awarded)
-
-
-@app.post("/api/activity/comment", response_model="ActivityResp")
-async def api_activity_comment(req: ActivityCommentReq):
-    day = utc_day_key()
-    text = (req.text or "").strip()
-    if len(text) < 25:
-        raise HTTPException(status_code=400, detail="comment text too short")
-
-    # хеш для анти-дубликата
-    h = secrets.token_hex(4)
-    # deterministic-ish: take stable hash of text
-    try:
-        import hashlib
-        h = hashlib.sha256(text.encode("utf-8")).hexdigest()[:10]
-    except Exception:
-        pass
-
-    async with async_session_maker() as session:
-        async with session.begin():
-            user = await get_or_create_user(session, int(req.telegram_id))
-            stat = await get_or_create_daily_stat(session, int(req.telegram_id), day)
-
-            # засчитываем комментарий (без баллов), но учитываем уникальность по посту+тексту
-            key = f"{int(req.post_id)}:{h}"
-            unique = await record_activity_event(session, int(req.telegram_id), day, "comment", key)
-            if not unique:
-                return ActivityResp(ok=False, message="Похоже на повтор — комментарий уже засчитан.", points=int(user.points or 0), awarded=0)
-
-            c = dict(stat.counters or {})
-            count = _counter_get(c, "comments_count", 0) + 1
-            c["comments_count"] = count
-
-            # бонус за 3 коммента/день (+10 один раз)
-            bonus_paid = bool(c.get("comment_bonus_paid", False))
-            awarded = 0
-            msg = "Комментарий засчитан ✅"
-            if (not bonus_paid) and count >= 3:
-                ok2, msg2, awarded2 = await award_activity_points(
-                    session,
-                    int(req.telegram_id),
-                    "comment_bonus",
-                    10,
-                    key="daily",
-                    day=day,
-                )
-                if ok2:
-                    c["comment_bonus_paid"] = True
-                    awarded = awarded2
-                    msg = "✅ +10 баллов — за 3 комментария сегодня."
-                else:
-                    msg = msg2
-
-            stat.counters = c
-            stat.updated_at = datetime.utcnow()
-
-            # бонус за активного реферала (72 часа)
-            try:
-                inviter = int(user.referred_by) if user.referred_by else None
-            except Exception:
-                inviter = None
-            if inviter and not bool(user.ref_active_bonus_paid):
-                try:
-                    joined = user.joined_at or datetime.utcnow()
-                    if isinstance(joined, datetime):
-                        if datetime.utcnow() - joined <= timedelta(hours=72):
-                            await award_points_unlimited(
-                                session,
-                                inviter,
-                                "referral_active_bonus",
-                                10,
-                                meta={"invited_telegram_id": int(req.telegram_id)},
-                            )
-                            user.ref_active_bonus_paid = True
-                except Exception:
-                    pass
-
-            user = await get_or_create_user(session, int(req.telegram_id))
-            return ActivityResp(ok=True, message=msg, points=int(user.points or 0), awarded=awarded)
-
-
-
 @app.get("/api/bot/username")
 async def api_bot_username():
     """
@@ -2877,153 +2344,6 @@ class SpinResp(BaseModel):
     claimable: bool = False
     claim_code: Optional[str] = None
 
-
-
-# -----------------------------------------------------------------------------
-# ACTIVITY (баллы за действия в Mini App)
-# -----------------------------------------------------------------------------
-class ActivityViewReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    post_id: int = Field(..., ge=1)  # message_id поста
-
-
-class ActivityVoteReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    poll_id: str = Field(..., min_length=1, max_length=128)
-
-
-class ActivityChallengeReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    text: str = Field(..., min_length=1, max_length=2000)
-
-
-class ActivityQuestReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-
-
-class ActivityFavoriteReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    brand_tag: str = Field(..., min_length=1, max_length=64)
-
-
-class ActivityRatingReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    product_tag: str = Field(..., min_length=1, max_length=128)
-    stars: int = Field(..., ge=1, le=5)
-    text: Optional[str] = Field(default=None, max_length=2000)
-
-
-class ActivityCommentReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    post_id: int = Field(..., ge=1)
-    text: str = Field(..., min_length=25, max_length=4000)
-
-
-class ActivityResp(BaseModel):
-    ok: bool
-    message: str
-    points: int
-    awarded: int = 0
-
-
-def utc_day_key(dt: Optional[datetime] = None) -> str:
-    d = dt or datetime.utcnow()
-    return d.date().isoformat()
-
-
-def _counter_get(counters: dict, k: str, default=0):
-    try:
-        return int(counters.get(k, default))
-    except Exception:
-        return default
-
-
-async def get_or_create_daily_stat(session: AsyncSession, telegram_id: int, day: str) -> UserDailyStat:
-    row = await session.scalar(
-        select(UserDailyStat).where(UserDailyStat.telegram_id == telegram_id, UserDailyStat.day == day)
-    )
-    if row:
-        return row
-    row = UserDailyStat(telegram_id=telegram_id, day=day, earned_activity_points=0, counters={})
-    session.add(row)
-    await session.flush()
-    return row
-
-
-async def record_activity_event(session: AsyncSession, telegram_id: int, day: str, kind: str, key: str) -> bool:
-    """True если событие уникальное (не было в этот day), иначе False.
-    Делаем мягко через SELECT перед INSERT, чтобы не откатывать всю транзакцию.
-    """
-    existing = await session.scalar(
-        select(ActivityEvent.id).where(
-            ActivityEvent.telegram_id == telegram_id,
-            ActivityEvent.day == day,
-            ActivityEvent.kind == kind,
-            ActivityEvent.key == key,
-        )
-    )
-    if existing:
-        return False
-    session.add(ActivityEvent(telegram_id=telegram_id, day=day, kind=kind, key=key))
-    await session.flush()
-    return True
-
-
-async def award_activity_points(
-    session: AsyncSession,
-    telegram_id: int,
-    kind: str,
-    delta: int,
-    key: str,
-    *,
-    day: Optional[str] = None,
-) -> tuple[bool, str, int]:
-    """Начисление баллов за активности с дневным лимитом DAILY_ACTIVITY_CAP.
-    Возвращает (ok, message, awarded_points).
-    """
-    day = day or utc_day_key()
-    user = await get_or_create_user(session, telegram_id)
-    stat = await get_or_create_daily_stat(session, telegram_id, day)
-
-    # дневной лимит на активности
-    remaining = max(0, int(DAILY_ACTIVITY_CAP) - int(stat.earned_activity_points or 0))
-    if remaining <= 0:
-        return False, "Дневной лимит баллов за активности достигнут.", 0
-
-    award = min(int(delta), remaining)
-
-    # дедупликация
-    unique = await record_activity_event(session, telegram_id, day, kind, key)
-    if not unique:
-        return False, "Похоже на повтор — баллы не начислены.", 0
-
-    # применяем
-    user.points = int(user.points or 0) + award
-    stat.earned_activity_points = int(stat.earned_activity_points or 0) + award
-    stat.updated_at = datetime.utcnow()
-    session.add(
-        PointTransaction(
-            telegram_id=telegram_id,
-            type=f"activity_{kind}",
-            delta=award,
-            meta={"key": key, "day": day},
-        )
-    )
-    await session.flush()
-    return True, f"+{award} баллов начислено.", award
-
-
-async def award_points_unlimited(
-    session: AsyncSession,
-    telegram_id: int,
-    tx_type: str,
-    delta: int,
-    meta: Optional[dict] = None,
-) -> None:
-    user = await get_or_create_user(session, telegram_id)
-    user.points = int(user.points or 0) + int(delta)
-    session.add(PointTransaction(telegram_id=telegram_id, type=tx_type, delta=int(delta), meta=meta or {}))
-    await session.flush()
 
 def pick_roulette_prize(roll: int) -> dict[str, Any]:
     acc = 0
@@ -3244,14 +2564,6 @@ async def roulette_spin(req: SpinReq):
             f"claim: {claim_code}\n"
             f"roll: {roll}\n"
             "👉 Пользователю: отправьте /claim <код> и потом сообщение с контактами/адресом."
-        )
-
-        # Дублируем пользователю в ЛС, чтобы он 100% не потерял инструкцию
-        await notify_user(
-            tid,
-            "💎 Вы выиграли: Dior палетка (ТОП приз)!\n\n"
-            f"Чтобы забрать приз, отправьте в этот чат команду:\n/claim {claim_code}\n\n"
-            "Затем одним сообщением пришлите удобный способ связи (Telegram/WhatsApp) и город/адрес доставки."
         )
 
     return {
