@@ -252,7 +252,7 @@ class RouletteClaim(Base):
     prize_type = Column(String, nullable=False)
     prize_label = Column(String, nullable=False)
 
-    status = Column(String, default="awaiting_choice", nullable=False)  # awaiting_choice|awaiting_contact|submitted|closed
+    status = Column(String, default="awaiting_contact", nullable=False)  # awaiting_contact|submitted|closed
     contact_text = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
@@ -823,14 +823,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(build_help_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 async def claim_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str):
-    """Логика получения физического приза (deep-link /start claim_CODE или /claim CODE)
-
-    Статусы:
-      awaiting_choice   — приз получен, но выбор (забрать/в бонусы) ещё не сделан
-      awaiting_contact  — пользователь нажал "Забрать", ждём контакты/адрес
-      submitted         — контакты получены, заявка отправлена админу
-      closed            — заявка закрыта (конвертировано или выдано)
-    """
+    """Общая логика для /claim и deep-link /start claim_CODE"""
     if not update.message:
         return
     code = (code or "").strip().upper()
@@ -853,29 +846,21 @@ async def claim_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, c
             await update.message.reply_text("⛔️ Этот код принадлежит другому пользователю.")
             return
 
-        st = (claim.status or "").strip()
-
-        if st == "closed":
-            await update.message.reply_text("✅ Эта заявка уже закрыта.")
-            return
-
-        if st == "submitted":
+        if (claim.status or "") == "submitted":
             await update.message.reply_text("✅ Заявка уже отправлена. Мы скоро свяжемся.")
             return
 
-        # если это первый заход по кнопке "Забрать" — фиксируем выбор и блокируем конвертацию в бонусы
-        if st == "awaiting_choice":
-            claim.status = "awaiting_contact"
-            claim.updated_at = datetime.utcnow()
-            await session.commit()
+        # помечаем как ожидание контакта и обновляем время
+        claim.status = "awaiting_contact"
+        claim.updated_at = datetime.utcnow()
+        await session.commit()
 
-        # st == awaiting_contact (или только что перевели) — просим контакты/адрес
-        await update.message.reply_text(
-            "🎁 Вы выбрали получение приза.\n\n"
-            "Напишите одним сообщением удобный способ связи (Telegram/WhatsApp) и адрес/город доставки.\n"
-            f"Код заявки: {code}\n\n"
-            "После отправки данных обмен на бонусы будет недоступен."
-        )
+    await update.message.reply_text(
+        "🎁 Заявка на приз принята!\n\n"
+        "Напишите одним сообщением удобный способ связи (Telegram/WhatsApp) и адрес/город доставки.\n"
+        f"Код заявки: {code}"
+    )
+
 
 async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -1359,633 +1344,1412 @@ def get_webapp_html() -> str:
     html = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>NS · Natural Sense</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
-    *{box-sizing:border-box}
-    :root{
-      --bg:#0c0f14;
-      --card:rgba(255,255,255,0.08);
-      --text:rgba(255,255,255,0.92);
-      --muted:rgba(255,255,255,0.60);
-      --stroke:rgba(255,255,255,0.12);
-      --gold:rgba(230,193,128,0.9);
-      --accent:rgba(230,193,128,0.14);
+    * { margin:0; padding:0; box-sizing:border-box; }
+    :root {
+      --bg: #0c0f14;
+      --card: rgba(255,255,255,0.08);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.60);
+      --gold: rgba(230, 193, 128, 0.9);
+      --stroke: rgba(255,255,255,0.10);
+      --sheetOverlay: rgba(12,15,20,0.55);
+      --sheetCardBg: rgba(255,255,255,0.10);
+      --glassStroke: rgba(255,255,255,0.16);
+      --glassShadow: rgba(0,0,0,0.45);
     }
-    body{
-      margin:0;
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
-      background: radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%), var(--bg);
-      color:var(--text);
-      overflow-x:hidden;
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%),
+                  var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
     }
-    .wrap{padding:18px 16px 26px; max-width:520px; margin:0 auto;}
-    .card{
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.06);
-      border-radius:22px;
-      padding:14px;
-      box-shadow:0 10px 30px rgba(0,0,0,0.35);
-    }
-    .hero{background:linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05)); position:relative; overflow:hidden;}
-    .hero::before{
-      content:"";
-      position:absolute; inset:-2px;
-      background:radial-gradient(600px 300px at 10% 0%, rgba(230,193,128,0.26), transparent 60%);
-      pointer-events:none;
-    }
-    .row{display:flex; justify-content:space-between; align-items:center; gap:10px;}
-    .title{font-size:20px; font-weight:650; letter-spacing:0.2px;}
-    .sub{margin-top:6px; font-size:13px; color:var(--muted);}
-    .pill{
-      display:inline-flex; align-items:center; gap:6px;
-      padding:6px 10px; border-radius:999px;
-      border:1px solid rgba(230,193,128,0.25);
-      background:rgba(230,193,128,0.10);
-      font-size:13px; font-weight:700;
-    }
-    .tabs{display:flex; gap:8px; margin-top:14px;}
-    .tab{
-      flex:1;
-      padding:10px;
-      border-radius:14px;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.06);
-      text-align:center;
-      font-size:13px;
-      user-select:none;
-      cursor:pointer;
-      transition:all .2s;
-    }
-    .tab.active{
-      border:1px solid rgba(230,193,128,0.40);
-      background:rgba(230,193,128,0.12);
-    }
-    .btn{
-      width:100%;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      padding:14px;
-      border-radius:18px;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.06);
-      margin:10px 0;
-      cursor:pointer;
-      user-select:none;
-    }
-    .btn.disabled{opacity:.5; cursor:not-allowed;}
-    .btn .left{display:flex; flex-direction:column; gap:4px;}
-    .btn .label{font-size:15px;}
-    .btn .hint{font-size:12px; color:var(--muted);}
-    .section{margin-top:14px;}
-    .muted{color:var(--muted); font-size:13px;}
-    .post{
-      margin-top:10px;
-      padding:12px;
-      border-radius:18px;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.06);
-      cursor:pointer;
-    }
-    .tagpill{
-      font-size:12px;
-      padding:5px 8px;
-      border-radius:999px;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.08);
-      display:inline-block;
-      margin-right:6px;
-      margin-top:6px;
-    }
-    .grid{display:grid; gap:10px;}
-    .note{
-      margin-top:14px;
-      padding:10px;
-      border-radius:14px;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.08);
-      font-size:13px;
-    }
-    .smallbtn{
-      flex:1;
-      padding:12px;
-      text-align:center;
-      border-radius:14px;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.06);
-      cursor:pointer;
-      user-select:none;
-      font-weight:750;
-    }
-    .smallbtn.gold{
-      border:1px solid rgba(230,193,128,0.35);
-      background:rgba(230,193,128,0.14);
-      font-weight:850;
-    }
-    .hr{height:1px; background:var(--stroke); margin:14px 0 8px;}
-    .center{ text-align:center; }
+    #root { min-height: 100vh; }
   </style>
 </head>
 <body>
-  <div id="app" class="wrap"></div>
+  <div id="root"></div>
 
-<script>
-(function(){
-  const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+    const tg = window.Telegram?.WebApp;
 
-  const CHANNEL = "__CHANNEL__";
-  const BOT_USERNAME = "__BOT_USERNAME__"; // может быть пустым
-  const DEFAULT_BG = "#0c0f14";
+    const DEFAULT_BG = "#0c0f14";
 
-  function hexToRgba(hex, a){
-    if(!hex) return "rgba(12,15,20,"+a+")";
-    let h = String(hex).trim();
-    if(h[0]==="#") h=h.slice(1);
-    if(h.length===3) h=h.split("").map(c=>c+c).join("");
-    if(h.length!==6) return "rgba(12,15,20,"+a+")";
-    const r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
-    return "rgba("+r+","+g+","+b+","+a+")";
-  }
-  function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
+    const hexToRgba = (hex, a) => {
+      if (!hex) return `rgba(12,15,20,${a})`;
+      let h = String(hex).trim();
+      if (h[0] === "#") h = h.slice(1);
+      if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+      if (h.length !== 6) return `rgba(12,15,20,${a})`;
+      const r = parseInt(h.slice(0, 2), 16);
+      const g = parseInt(h.slice(2, 4), 16);
+      const b = parseInt(h.slice(4, 6), 16);
+      return `rgba(${r},${g},${b},${a})`;
+    };
 
-  function applyTelegramTheme(){
-    const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
-    const p = tg && tg.themeParams ? tg.themeParams : {};
-    const bg = p.bg_color || DEFAULT_BG;
-    const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
-    const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
-    setVar("--bg", bg);
-    setVar("--text", text);
-    setVar("--muted", muted);
-    setVar("--stroke", scheme==="dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
-    setVar("--card", scheme==="dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
-    if(tg){
-      try{ tg.setHeaderColor(bg); tg.setBackgroundColor(bg); }catch(e){}
-    }
-  }
+    const setVar = (k, v) => {
+      document.documentElement.style.setProperty(k, v);
+    };
 
-  if(tg){
-    tg.expand();
-    applyTelegramTheme();
-    tg.onEvent("themeChanged", applyTelegramTheme);
-  }
+    const applyTelegramTheme = () => {
+      const scheme = tg?.colorScheme || "dark";
+      const p = tg?.themeParams || {};
 
-  const el = (tag, attrs={}, children=[]) => {
-    const n = document.createElement(tag);
-    Object.entries(attrs||{}).forEach(([k,v])=>{
-      if(k==="class") n.className = v;
-      else if(k==="html") n.innerHTML = v;
-      else if(k==="onclick") n.addEventListener("click", v);
-      else n.setAttribute(k, v);
-    });
-    (children||[]).forEach(c=>{
-      if(c==null) return;
-      if(typeof c==="string") n.appendChild(document.createTextNode(c));
-      else n.appendChild(c);
-    });
-    return n;
-  };
+      const bg = p.bg_color || DEFAULT_BG;
+      const text = p.text_color || (scheme === "dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
+      const muted = p.hint_color || (scheme === "dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
 
-  const state = {
-    activeTab: "home",
-    view: "main", // main|posts|inventory|profile
-    selectedTag: null,
-    user: null,
-    raffle: null,
-    history: [],
-    inventory: null,
-    loading: false,
-    msg: "",
-    invMsg: "",
-    busy: false,
-    botUsername: (BOT_USERNAME || "").trim().replace(/^@/,"")
-  };
+      // базовые токены
+      setVar("--bg", bg);
+      setVar("--text", text);
+      setVar("--muted", muted);
+      setVar("--stroke", scheme === "dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
+      setVar("--card", scheme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
 
-  const tgUserId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
+      // iOS glass (Sheet)
+      setVar("--sheetOverlay", scheme === "dark" ? hexToRgba(bg, 0.55) : hexToRgba(bg, 0.45));
+      setVar("--sheetCardBg", scheme === "dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.80)");
+      setVar("--glassStroke", scheme === "dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
+      setVar("--glassShadow", scheme === "dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
 
-  function openLink(url){
-    if(tg && tg.openTelegramLink) tg.openTelegramLink(url);
-    else window.open(url, "_blank");
-  }
-
-  async function apiGet(url){
-    const r = await fetch(url);
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    return await r.json();
-  }
-  async function apiPost(url, body){
-    const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{})});
-    const data = await r.json().catch(()=> ({}));
-    if(!r.ok) throw new Error(data.detail || ("HTTP "+r.status));
-    return data;
-  }
-
-  function tierLabel(t){
-    return ({free:"🥉 Bronze", premium:"🥈 Silver", vip:"🥇 Gold VIP"}[t] || "🥉 Bronze");
-  }
-
-  async function refreshUser(){
-    if(!tgUserId) return;
-    try{ state.user = await apiGet("/api/user/"+encodeURIComponent(tgUserId)); }catch(e){}
-  }
-  async function loadRaffle(){
-    if(!tgUserId) return;
-    try{ state.raffle = await apiGet("/api/raffle/status?telegram_id="+encodeURIComponent(tgUserId)); }catch(e){ state.raffle=null; }
-  }
-  async function loadHistory(){
-    if(!tgUserId) return;
-    try{ state.history = await apiGet("/api/roulette/history?telegram_id="+encodeURIComponent(tgUserId)+"&limit=5"); }catch(e){ state.history=[]; }
-  }
-  async function loadInventory(){
-    if(!tgUserId) return;
-    try{ state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId)); }catch(e){ state.inventory=null; }
-  }
-  async function loadBotUsername(){
-    try{
-      const d = await apiGet("/api/bot/username");
-      const u = (d && d.bot_username ? String(d.bot_username) : "").trim().replace(/^@/,"");
-      if(u) state.botUsername = u;
-    }catch(e){}
-  }
-
-  async function openPosts(tag){
-    state.view="posts";
-    state.selectedTag=tag;
-    state.loading=true;
-    state.posts=[];
-    render();
-    try{
-      const data = await apiGet("/api/posts?tag="+encodeURIComponent(tag));
-      state.posts = Array.isArray(data) ? data : [];
-    }catch(e){
-      state.posts=[];
-    }finally{
-      state.loading=false;
-      render();
-    }
-  }
-
-  async function openInventory(){
-    state.view="inventory";
-    state.invMsg="";
-    render();
-    await loadInventory();
-    render();
-  }
-
-  async function openProfile(){
-    state.view="profile";
-    state.msg="";
-    render();
-    await Promise.all([loadRaffle(), loadHistory()]);
-    render();
-  }
-
-  async function buyTicket(){
-    if(!tgUserId) return;
-    state.busy=true; state.msg="";
-    render();
-    try{
-      const data = await apiPost("/api/raffle/buy_ticket", {telegram_id: tgUserId, qty: 1});
-      state.msg = "✅ Билет куплен. Твоих билетов: "+data.ticket_count;
-      await refreshUser();
-      await loadRaffle();
-    }catch(e){
-      state.msg = "❌ " + (e.message || "Ошибка");
-    }finally{
-      state.busy=false;
-      render();
-    }
-  }
-
-  async function spin(){
-    if(!tgUserId) return;
-    state.busy=true; state.msg="";
-    render();
-    try{
-      const data = await apiPost("/api/roulette/spin", {telegram_id: tgUserId});
-      state.msg = "🎡 Выпало: " + data.prize_label;
-
-      if(data.claimable && data.claim_code){
-        // сразу показываем кнопку перехода в бота
-        const u = state.botUsername;
-        const link = u ? ("https://t.me/"+u+"?start=claim_"+data.claim_code) : "";
-        if(tg && tg.showPopup){
-          tg.showPopup({
-            title:"💎 Приз",
-            message:"Ваш приз: "+data.prize_label+"\n\nНажмите «Получить» для оформления.",
-            buttons:[{id:"claim", type:"default", text:"Получить"}, {type:"cancel"}]
-          }, (btnId)=>{
-            if(btnId==="claim" && link) openLink(link);
-          });
-        }else{
-          if(link) openLink(link);
-        }
+      if (tg) {
+        tg.setHeaderColor(bg);
+        tg.setBackgroundColor(bg);
       }
-      await refreshUser();
-      await loadRaffle();
-      await loadHistory();
-    }catch(e){
-      state.msg = "❌ " + (e.message || "Ошибка");
-    }finally{
-      state.busy=false;
-      render();
-    }
-  }
+    };
 
-  async function convertPrize(code){
-    if(!tgUserId) return;
-    state.busy=true; state.invMsg="";
-    render();
-    try{
-      const data = await apiPost("/api/inventory/convert_prize", {telegram_id: tgUserId, claim_code: code});
-      state.invMsg = "✅ Приз превращён в бонусы: +"+data.added_points+" баллов";
-      await refreshUser();
-      await loadInventory();
-    }catch(e){
-      state.invMsg = "❌ " + (e.message || "Ошибка");
-    }finally{
-      state.busy=false;
-      render();
-    }
-  }
-
-  function prizeStatusLabel(s){
-    const v = String(s||"");
-    if(v==="awaiting_choice") return "🟡 Выбор: забрать или в бонусы";
-    if(v==="awaiting_contact") return "⏳ Оформление (обмен недоступен)";
-    if(v==="submitted") return "📨 Заявка отправлена";
-    if(v==="closed") return "✅ Закрыт";
-    return v||"-";
-  }
-
-  function buildHero(){
-    const u = state.user;
-    const hero = el("div",{class:"card hero"},[
-      el("div",{class:"row", style:"position:relative;"},[
-        el("div",{},[
-          el("div",{class:"title"} ,["NS · Natural Sense"]),
-          el("div",{class:"sub"},["luxury beauty magazine"])
-        ]),
-        u ? el("div",{class:"pill"},["💎 ", String(u.points), " • ", tierLabel(u.tier)]) : el("div",{class:"pill"},["NS"])
-      ]),
-      el("div",{style:"position:relative; margin-top:14px;"},[
-        !tgUserId ? el("div",{class:"muted"},["Открой приложение через кнопку «📲 Открыть журнал» в боте."]) :
-        (u ? el("div",{class:"muted"},["Привет, ", (u.first_name||"друг"), "! Нажми «Профиль» для бонусов и рулетки."]) :
-             el("div",{class:"muted"},["Загрузка профиля…"]))
-      ])
-    ]);
-    return hero;
-  }
-
-  function buildTabs(){
-    const tabs = [
-      ["home","Главное"],
-      ["cat","Категории"],
-      ["brand","Бренды"],
-      ["sephora","Sephora"],
-      ["ptype","Продукт"]
-    ];
-    const wrap = el("div",{class:"tabs"});
-    tabs.forEach(([id,label])=>{
-      wrap.appendChild(el("div",{class:"tab"+(state.activeTab===id?" active":""), onclick:()=>{state.activeTab=id; state.view="main"; state.selectedTag=null; state.msg=""; state.invMsg=""; render();}},[label]));
-    });
-    return wrap;
-  }
-
-  function button(icon,label, onClick, hint, disabled){
-    return el("div",{class:"btn"+(disabled?" disabled":""), onclick: disabled? null : onClick},[
-      el("div",{class:"left"},[
-        el("div",{class:"label"},[icon+" "+label]),
-        hint ? el("div",{class:"hint"},[hint]) : null
-      ]),
-      el("div",{class:"muted"},["›"])
-    ]);
-  }
-
-  function buildMainPanel(){
-    const panel = el("div",{class:"section card"});
-    if(state.view==="posts"){
-      panel.appendChild(el("div",{class:"muted"},["Посты ", state.selectedTag ? ("#"+state.selectedTag) : ""]));
-      if(state.loading) panel.appendChild(el("div",{class:"muted", style:"margin-top:10px;"},["Загрузка…"]));
-      if(!state.loading && (!state.posts || state.posts.length===0)) panel.appendChild(el("div",{class:"muted", style:"margin-top:10px;"},["Постов с этим тегом пока нет."]));
-      (state.posts||[]).forEach(p=>{
-        const tags = (p.tags||[]).slice(0,6);
-        panel.appendChild(el("div",{class:"post", onclick:()=>openLink(p.url)},[
-          el("div",{class:"muted", style:"font-size:12px;"},["#", (tags[0]||"post"), " • ID ", String(p.message_id)]),
-          el("div",{style:"margin-top:8px; font-size:14px; line-height:1.35;"},[p.preview||"Открыть пост →"]),
-          el("div",{style:"margin-top:8px;"}, tags.map(t=>el("span",{class:"tagpill"},["#",t])))
-        ]));
-      });
-      panel.appendChild(button("←","Назад", ()=>{state.view="main"; render();}, null, false));
-      return panel;
+    if (tg) {
+      tg.expand();
+      applyTelegramTheme();
+      tg.onEvent("themeChanged", applyTelegramTheme);
     }
 
-    if(state.view==="inventory"){
-      const inv = state.inventory;
-      const diorValue = inv ? Number(inv.dior_convert_value||0) : 0;
-      panel.appendChild(el("div",{class:"row"},[
-        el("div",{class:"muted"},["👜 Моя косметичка"]),
-        el("div",{class:"muted", style:"cursor:pointer;", onclick:()=>{state.view="main"; render();}},["Назад"])
-      ]));
-      panel.appendChild(el("div",{style:"margin-top:12px;"},[
-        el("div",{class:"card", style:"padding:12px; border-radius:18px; box-shadow:none; background:rgba(255,255,255,0.06);"},[
-          el("div",{class:"muted"},["Баланс"]),
-          el("div",{style:"margin-top:6px; font-size:16px; font-weight:750;"},["💎 ", String(state.user ? (state.user.points||0):0), " баллов"])
-        ])
-      ]));
+    const CHANNEL = "__CHANNEL__";
+    const BOT_USERNAME = "__BOT_USERNAME__"; // может быть пустым, если не задана переменная окружения
 
-      // Tickets convert left as before? Keep minimal text
-      panel.appendChild(el("div",{class:"card", style:"margin-top:10px; padding:12px; border-radius:18px; box-shadow:none; background:rgba(255,255,255,0.06);"},[
-        el("div",{class:"muted"},["🎁 Призы"]),
-        (!inv || !inv.prizes || inv.prizes.length===0) ? el("div",{class:"muted", style:"margin-top:8px;"},["Пока нет призов."]) :
-        el("div",{class:"grid", style:"margin-top:10px;"}, inv.prizes.map(p=>{
-          const status = String(p.status||"");
-          const box = el("div",{class:"card", style:"padding:12px; border-radius:16px; box-shadow:none; border:1px solid rgba(230,193,128,0.22); background:rgba(230,193,128,0.10);"},[
-            el("div",{style:"font-size:14px; font-weight:800;"},[p.prize_label || "💎 Главный приз"]),
-            el("div",{class:"muted", style:"margin-top:6px; font-size:12px;"},["Статус: ", prizeStatusLabel(status), " • Код: ", p.claim_code])
-          ]);
 
-          const actions = el("div",{class:"row", style:"margin-top:12px; gap:10px;"});
-          // show two buttons ONLY for awaiting_choice
-          if(status==="awaiting_choice"){
-            actions.appendChild(el("div",{class:"smallbtn", onclick:()=>{
-              const u = state.botUsername;
-              if(u && p.claim_code){
-                openLink("https://t.me/"+u+"?start=claim_"+p.claim_code);
-              }else if(p.claim_code){
-                alert("/claim "+p.claim_code);
-              }
-            }},["🎁 Забрать"]));
-            actions.appendChild(el("div",{class:"smallbtn gold", onclick:()=>convertPrize(p.claim_code)},["💎 В бонусы (+", String(diorValue), ")"]));
-          } else {
-            // no actions after choosing "claim"
-            actions.appendChild(el("div",{class:"smallbtn", style:"opacity:.7; cursor:default; text-align:center;"},["Действий нет"]));
-          }
+    const openLink = (url) => {
+      if (tg?.openTelegramLink) tg.openTelegramLink(url);
+      else window.open(url, "_blank");
+    };
 
-          box.appendChild(actions);
-          return box;
-        }))
-      ]));
+    const tierLabel = (tier) => (
+      { free: "🥉 Bronze", premium: "🥈 Silver", vip: "🥇 Gold VIP" }[tier] || "🥉 Bronze"
+    );
 
-      if(state.invMsg){
-        panel.appendChild(el("div",{class:"note"},[state.invMsg]));
-      }
-      return panel;
-    }
+    const Hero = ({ user, onOpenProfile }) => (
+      <div
+        onClick={onOpenProfile}
+        style={{
+          border: "1px solid var(--stroke)",
+          background: "linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05))",
+          borderRadius: "22px",
+          padding: "16px 14px",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+          position: "relative",
+          overflow: "hidden",
+          cursor: user ? "pointer" : "default"
+        }}
+      >
+        <div style={{
+          position: "absolute", inset: "-2px",
+          background: "radial-gradient(600px 300px at 10% 0%, rgba(230,193,128,0.26), transparent 60%)",
+          pointerEvents: "none"
+        }} />
+        <div style={{ position: "relative" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontSize: "20px", fontWeight: 650, letterSpacing: "0.2px" }}>NS · Natural Sense</div>
+              <div style={{ marginTop: "6px", fontSize: "13px", color: "var(--muted)" }}>luxury beauty magazine</div>
+            </div>
+            {user && (
+              <div style={{ fontSize:"14px", color:"var(--muted)", display:"flex", gap:"6px", alignItems:"center" }}>
+                Профиль <span style={{ opacity:0.8 }}>›</span>
+              </div>
+            )}
+          </div>
 
-    if(state.view==="profile"){
-      const u = state.user;
-      panel.appendChild(el("div",{class:"row"},[
-        el("div",{class:"muted"},["👤 Профиль"]),
-        el("div",{class:"muted", style:"cursor:pointer;", onclick:()=>{state.view="main"; render();}},["Закрыть"])
-      ]));
-      if(!u){
-        panel.appendChild(el("div",{class:"muted", style:"margin-top:10px;"},["Профиль недоступен."]));
-        return panel;
-      }
-      panel.appendChild(el("div",{class:"card", style:"margin-top:12px; padding:12px; border-radius:18px; box-shadow:none; background:rgba(255,255,255,0.08); position:relative;"},[
-        el("div",{style:"position:absolute; top:10px; right:10px;"},[
-          el("div",{class:"pill"},["💎 ", String(u.points||0)])
-        ]),
-        el("div",{class:"muted"},["Привет, ", (u.first_name||"друг"), "!"]),
-        el("div",{class:"muted", style:"margin-top:6px;"},[tierLabel(u.tier)]),
-        el("div",{class:"hr"},[]),
-        el("div",{class:"row", style:"margin-top:10px;"},[
-          el("div",{class:"muted"},["🔥 Стрик"]),
-          el("div",{style:"font-weight:700;"},[String(u.daily_streak||0), " (best ", String(u.best_streak||0), ")"])
-        ]),
-        el("div",{class:"row", style:"margin-top:10px;"},[
-          el("div",{class:"muted"},["🎟 Приглашено"]),
-          el("div",{style:"font-weight:700;"},[String(u.referral_count||0)])
-        ])
-      ]));
+          {user && (
+            <div style={{
+              marginTop: "14px",
+              padding: "12px",
+              background: "rgba(230, 193, 128, 0.1)",
+              borderRadius: "14px",
+              border: "1px solid rgba(230, 193, 128, 0.2)"
+            }}>
+              <div style={{ fontSize: "13px", color: "var(--muted)" }}>Привет, {user.first_name}!</div>
+              <div style={{ fontSize: "16px", fontWeight: 600, marginTop: "4px" }}>
+                💎 {user.points} баллов • {tierLabel(user.tier)}
+              </div>
+              <div style={{ marginTop:"6px", fontSize:"12px", color:"var(--muted)" }}>
+                Нажми, чтобы открыть профиль и бонусы
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
 
-      // referral link
-      const ref = (state.botUsername && tgUserId) ? ("https://t.me/"+state.botUsername+"?start="+tgUserId) : "";
-      panel.appendChild(el("div",{class:"hr"},[]));
-      panel.appendChild(el("div",{style:"font-weight:650;"},["🎟 Рефералка"]));
-      panel.appendChild(el("div",{class:"muted", style:"margin-top:8px;"},["За нового пользователя: +20 баллов (1 раз за каждого)."]));
-      if(ref){
-        panel.appendChild(el("div",{class:"note", style:"word-break:break-all;"},[ref]));
-      }
-      // raffle
-      panel.appendChild(el("div",{class:"hr"},[]));
-      panel.appendChild(el("div",{style:"font-weight:650;"},["🎁 Розыгрыши"]));
-      panel.appendChild(el("div",{class:"muted", style:"margin-top:8px;"},["Билет = 500 баллов."]));
-      panel.appendChild(el("div",{class:"muted", style:"margin-top:8px;"},["Твоих билетов: ", String(state.raffle ? (state.raffle.ticket_count||0) : 0)]));
-      panel.appendChild(button("🎟","Купить билет (500)", buyTicket, state.busy ? "Подожди…" : "", state.busy || (u.points||0) < 500));
-
-      // roulette
-      panel.appendChild(el("div",{class:"hr"},[]));
-      panel.appendChild(el("div",{style:"font-weight:650;"},["🎡 Рулетка"]));
-      panel.appendChild(el("div",{class:"muted", style:"margin-top:8px;"},["1 спин = 2000 баллов."]));
-      panel.appendChild(button("🎡","Крутить (2000)", spin, state.busy ? "Подожди…" : "", state.busy || (u.points||0) < 2000));
-
-      // history
-      panel.appendChild(el("div",{class:"hr"},[]));
-      panel.appendChild(el("div",{style:"font-weight:650;"},["🧾 История рулетки"]));
-      if(!state.history || state.history.length===0){
-        panel.appendChild(el("div",{class:"muted", style:"margin-top:8px;"},["Пока пусто."]));
-      }else{
-        state.history.forEach(x=>{
-          panel.appendChild(el("div",{class:"card", style:"margin-top:8px; padding:10px; border-radius:14px; box-shadow:none; background:rgba(255,255,255,0.08);"},[
-            el("div",{class:"muted", style:"font-size:12px;"},[String(x.created_at||"")]),
-            el("div",{style:"margin-top:4px; font-weight:650;"},[String(x.prize_label||"")])
-          ]));
-        });
-      }
-
-      if(state.msg) panel.appendChild(el("div",{class:"note"},[state.msg]));
-      return panel;
-    }
-
-    // main content by tab
-    const tab = state.activeTab;
-
-    if(tab==="home"){
-      panel.appendChild(button("📂","Категории", ()=>{state.activeTab="cat"; render();}));
-      panel.appendChild(button("🏷","Бренды", ()=>{state.activeTab="brand"; render();}));
-      panel.appendChild(button("💸","Sephora", ()=>{state.activeTab="sephora"; render();}));
-      panel.appendChild(button("🧴","Продукт", ()=>{state.activeTab="ptype"; render();}));
-      panel.appendChild(button("👜","Моя косметичка", openInventory, null, !tgUserId));
-      panel.appendChild(button("👤","Профиль", openProfile, null, !tgUserId));
-      panel.appendChild(button("↩️","В канал", ()=>openLink("https://t.me/"+CHANNEL)));
-      return panel;
-    }
-
-    if(tab==="cat"){
-      [
-        ["🆕","Новинка","Новинка"],
-        ["💎","Кратко о люкс продукте","Люкс"],
-        ["🔥","Тренд","Тренд"],
-        ["🏛","История бренда","История"],
-        ["⭐","Личная оценка","Оценка"],
-        ["🧾","Факты","Факты"],
-        ["🧪","Составы продуктов","Состав"],
-      ].forEach(([ic,lab,tag])=>panel.appendChild(button(ic,lab, ()=>openPosts(tag))));
-      return panel;
-    }
-
-    if(tab==="brand"){
-      const brands = [
-        ["The Ordinary","TheOrdinary"],["Dior","Dior"],["Chanel","Chanel"],["Kylie Cosmetics","KylieCosmetics"],
-        ["Gisou","Gisou"],["Rare Beauty","RareBeauty"],["Yves Saint Laurent","YSL"],["Givenchy","Givenchy"],
-        ["Charlotte Tilbury","CharlotteTilbury"],["NARS","NARS"],["Sol de Janeiro","SolDeJaneiro"],["Huda Beauty","HudaBeauty"],
-        ["Rhode","Rhode"],["Tower 28 Beauty","Tower28Beauty"],["Benefit Cosmetics","BenefitCosmetics"],["Estée Lauder","EsteeLauder"],
-        ["Sisley","Sisley"],["Kérastase","Kerastase"],["Armani Beauty","ArmaniBeauty"],["Hourglass","Hourglass"],
-        ["Shiseido","Shiseido"],["Tom Ford Beauty","TomFordBeauty"],["Tarte","Tarte"],["Sephora Collection","SephoraCollection"],
-        ["Clinique","Clinique"],["Dolce & Gabbana","DolceGabbana"],["Kayali","Kayali"],["Guerlain","Guerlain"],
-        ["Fenty Beauty","FentyBeauty"],["Too Faced","TooFaced"],["MAKE UP FOR EVER","MakeUpForEver"],["Erborian","Erborian"],
-        ["Natasha Denona","NatashaDenona"],["Lancôme","Lancome"],["Kosas","Kosas"],["ONE/SIZE","OneSize"],
-        ["Laneige","Laneige"],["Makeup by Mario","MakeupByMario"],["Valentino Beauty","ValentinoBeauty"],["Drunk Elephant","DrunkElephant"],
-        ["Olaplex","Olaplex"],["Anastasia Beverly Hills","AnastasiaBeverlyHills"],["Amika","Amika"],["BYOMA","BYOMA"],
-        ["Glow Recipe","GlowRecipe"],["Milk Makeup","MilkMakeup"],["Summer Fridays","SummerFridays"],["K18","K18"]
+    const Tabs = ({ active, onChange }) => {
+      const tabs = [
+        { id: "home", label: "Главное" },
+        { id: "cat", label: "Категории" },
+        { id: "brand", label: "Бренды" },
+        { id: "sephora", label: "Sephora" },
+        { id: "ptype", label: "Продукт" },
       ];
-      brands.forEach(([lab,tag])=>panel.appendChild(button("✨", lab, ()=>openPosts(tag))));
-      return panel;
-    }
+      return (
+        <div style={{ display: "flex", gap: "8px", marginTop: "14px" }}>
+          {tabs.map(tab => (
+            <div
+              key={tab.id}
+              onClick={() => onChange(tab.id)}
+              style={{
+                flex: 1,
+                border: active === tab.id ? "1px solid rgba(230,193,128,0.40)" : "1px solid var(--stroke)",
+                background: active === tab.id ? "rgba(230,193,128,0.12)" : "rgba(255,255,255,0.06)",
+                color: active === tab.id ? "rgba(255,255,255,0.95)" : "var(--text)",
+                padding: "10px",
+                borderRadius: "14px",
+                fontSize: "13px",
+                textAlign: "center",
+                cursor: "pointer",
+                userSelect: "none",
+                transition: "all 0.2s"
+              }}
+            >
+              {tab.label}
+            </div>
+          ))}
+        </div>
+      );
+    };
 
-    if(tab==="sephora"){
-      panel.appendChild(button("🎁","Подарки / акции", ()=>openPosts("SephoraPromo")));
-      return panel;
-    }
+    const Button = ({ icon, label, onClick, subtitle, disabled }) => (
+      <div
+        onClick={disabled ? undefined : onClick}
+        style={{
+          width: "100%",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "14px",
+          borderRadius: "18px",
+          border: "1px solid var(--stroke)",
+          background: "rgba(255,255,255,0.06)",
+          color: "var(--text)",
+          fontSize: "15px",
+          margin: "10px 0",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.5 : 1
+        }}
+      >
+        <div>
+          <div>{icon} {label}</div>
+          {subtitle && <div style={{ fontSize:"12px", color:"var(--muted)", marginTop:"4px" }}>{subtitle}</div>}
+        </div>
+        <span style={{ opacity: 0.8 }}>›</span>
+      </div>
+    );
 
-    if(tab==="ptype"){
-      [
-        ["Праймер","Праймер"],["Тональная основа","ТональнаяОснова"],["Консилер","Консилер"],["Пудра","Пудра"],
-        ["Румяна","Румяна"],["Скульптор","Скульптор"],["Бронзер","Бронзер"],["Продукт для бровей","ПродуктДляБровей"],
-        ["Хайлайтер","Хайлайтер"],["Тушь","Тушь"],["Тени","Тени"],["Помада","Помада"],["Карандаш для губ","КарандашДляГуб"],
-        ["Палетка","Палетка"],["Фиксатор","Фиксатор"]
-      ].forEach(([lab,tag])=>panel.appendChild(button("🧴", lab, ()=>openPosts(tag))));
-      return panel;
-    }
+    const Panel = ({ children }) => (
+      <div style={{
+        marginTop: "14px",
+        border: "1px solid var(--stroke)",
+        background: "rgba(255,255,255,0.05)",
+        borderRadius: "22px",
+        padding: "12px"
+      }}>
+        {children}
+      </div>
+    );
 
-    return panel;
-  }
+    const PostCard = ({ post }) => (
+      <div
+        onClick={() => openLink(post.url)}
+        style={{
+          marginTop: "10px",
+          padding: "12px",
+          borderRadius: "18px",
+          border: "1px solid var(--stroke)",
+          background: "rgba(255,255,255,0.06)",
+          cursor: "pointer"
+        }}
+      >
+        <div style={{ fontSize:"12px", color:"var(--muted)" }}>
+          {"#" + (post.tags?.[0] || "post")} • ID {post.message_id}
+        </div>
+        <div style={{ marginTop:"8px", fontSize:"14px", lineHeight:"1.35" }}>
+          {post.preview || "Открыть пост →"}
+        </div>
+        <div style={{ marginTop:"8px", display:"flex", gap:"6px", flexWrap:"wrap" }}>
+          {(post.tags || []).slice(0,6).map(t => (
+            <div key={t} style={{
+              fontSize:"12px",
+              padding:"5px 8px",
+              borderRadius:"999px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.08)"
+            }}>#{t}</div>
+          ))}
+        </div>
+      </div>
+    );
 
-  function render(){
-    const root = document.getElementById("app");
-    root.innerHTML="";
-    root.appendChild(buildHero());
-    root.appendChild(buildTabs());
-    root.appendChild(buildMainPanel());
-    root.appendChild(el("div",{class:"muted center", style:"margin-top:20px; font-size:12px;"},["Открывается как Mini App внутри Telegram"]));
-  }
+    const Sheet = ({ open, onClose, children }) => {
+      if (!open) return null;
+      return (
+        <div
+          onClick={onClose}
+          style={{
+            position:"fixed",
+            inset:0,
+            background:"var(--sheetOverlay)",
+            backdropFilter:"blur(22px) saturate(180%)",
+            WebkitBackdropFilter:"blur(22px) saturate(180%)",
+            zIndex:9999,
+            display:"flex",
+            justifyContent:"center",
+            alignItems:"flex-end",
+            padding:"10px"
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width:"100%",
+              maxWidth:"520px",
+              borderRadius:"22px 22px 18px 18px",
+              border:"1px solid var(--glassStroke)",
+              background:"var(--sheetCardBg)",
+              backdropFilter:"blur(28px) saturate(180%)",
+              WebkitBackdropFilter:"blur(28px) saturate(180%)",
+              boxShadow:"0 12px 40px var(--glassShadow)",
+              padding:"14px 14px 10px",
+              maxHeight:"82vh",
+              overflow:"auto"
+            }}
+          >
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontSize:"16px", fontWeight:650 }}>👤 Профиль</div>
+              <div
+                onClick={onClose}
+                style={{ cursor:"pointer", color:"var(--muted)", fontSize:"14px" }}
+              >Закрыть</div>
+            </div>
+            {children}
+          </div>
+        </div>
+      );
+    };
 
-  async function init(){
-    render();
-    if(!tgUserId) return;
-    await Promise.all([loadBotUsername(), refreshUser()]);
-    render();
-  }
 
-  init();
-})();
-</script>
+    const LockedClaimModal = ({ open, message, claimCode, onOk, onClaim }) => {
+      if (!open) return null;
+      return (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) { /* не закрываем по фону */ } }}
+          style={{
+            position:"fixed",
+            inset:0,
+            background:"var(--sheetOverlay)",
+            backdropFilter:"blur(22px) saturate(180%)",
+            WebkitBackdropFilter:"blur(22px) saturate(180%)",
+            zIndex:10000,
+            display:"flex",
+            justifyContent:"center",
+            alignItems:"center",
+            padding:"16px"
+          }}
+        >
+          <div
+            style={{
+              width:"100%",
+              maxWidth:"520px",
+              borderRadius:"22px",
+              border:"1px solid var(--glassStroke)",
+              background:"var(--sheetCardBg)",
+              backdropFilter:"blur(28px) saturate(180%)",
+              WebkitBackdropFilter:"blur(28px) saturate(180%)",
+              boxShadow:"0 12px 40px var(--glassShadow)",
+              padding:"16px"
+            }}
+          >
+            <div style={{ fontSize:"18px", fontWeight:750, marginBottom:"10px" }}>🎡 Рулетка</div>
+            <div style={{ fontSize:"14px", lineHeight:"1.4", whiteSpace:"pre-line" }}>{message}</div>
+
+            <div style={{ display:"flex", gap:"10px", marginTop:"16px" }}>
+              <div
+                onClick={onOk}
+                style={{
+                  flex:1,
+                  padding:"12px",
+                  textAlign:"center",
+                  borderRadius:"14px",
+                  border:"1px solid var(--stroke)",
+                  background:"rgba(255,255,255,0.06)",
+                  cursor:"pointer",
+                  userSelect:"none",
+                  fontWeight:650
+                }}
+              >OK</div>
+
+              <div
+                onClick={onClaim}
+                style={{
+                  flex:1.2,
+                  padding:"12px",
+                  textAlign:"center",
+                  borderRadius:"14px",
+                  border:"1px solid rgba(230,193,128,0.35)",
+                  background:"rgba(230,193,128,0.14)",
+                  cursor:"pointer",
+                  userSelect:"none",
+                  fontWeight:750
+                }}
+              >Получить приз</div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+
+
+
+
+    const ConfirmClaimModal = ({ open, title, message, onCancel, onConfirm }) => {
+      if (!open) return null;
+      return (
+        <div
+          onClick={(e) => { /* не закрываем по фону */ }}
+          style={{
+            position:"fixed",
+            inset:0,
+            background:"var(--sheetOverlay)",
+            backdropFilter:"blur(22px) saturate(180%)",
+            WebkitBackdropFilter:"blur(22px) saturate(180%)",
+            zIndex:10001,
+            display:"flex",
+            justifyContent:"center",
+            alignItems:"center",
+            padding:"16px"
+          }}
+        >
+          <div
+            style={{
+              width:"100%",
+              maxWidth:"520px",
+              borderRadius:"22px",
+              border:"1px solid var(--glassStroke)",
+              background:"var(--sheetCardBg)",
+              backdropFilter:"blur(28px) saturate(180%)",
+              WebkitBackdropFilter:"blur(28px) saturate(180%)",
+              boxShadow:"0 12px 40px var(--glassShadow)",
+              padding:"16px"
+            }}
+          >
+            <div style={{ fontSize:"18px", fontWeight:800, marginBottom:"10px" }}>
+              {title || "Подтверждение"}
+            </div>
+
+            <div style={{ fontSize:"14px", lineHeight:"1.4", whiteSpace:"pre-line" }}>
+              {message || ""}
+            </div>
+
+            <div style={{ display:"flex", gap:"10px", marginTop:"16px" }}>
+              <div
+                onClick={onCancel}
+                style={{
+                  flex:1,
+                  padding:"12px",
+                  textAlign:"center",
+                  borderRadius:"14px",
+                  border:"1px solid var(--stroke)",
+                  background:"rgba(255,255,255,0.06)",
+                  cursor:"pointer",
+                  userSelect:"none",
+                  fontWeight:750
+                }}
+              >Отмена</div>
+
+              <div
+                onClick={onConfirm}
+                style={{
+                  flex:1.2,
+                  padding:"12px",
+                  textAlign:"center",
+                  borderRadius:"14px",
+                  border:"1px solid rgba(230,193,128,0.35)",
+                  background:"rgba(230,193,128,0.14)",
+                  cursor:"pointer",
+                  userSelect:"none",
+                  fontWeight:850
+                }}
+              >Да, забрать</div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const StatRow = ({ left, right }) => (
+      <div style={{ display:"flex", justifyContent:"space-between", marginTop:"10px", fontSize:"14px" }}>
+        <div style={{ color:"var(--muted)" }}>{left}</div>
+        <div style={{ fontWeight:600 }}>{right}</div>
+      </div>
+    );
+
+    const Divider = () => (
+      <div style={{ marginTop:"14px", marginBottom:"8px", height:"1px", background:"var(--stroke)" }} />
+    );
+
+    const PrizeTable = () => (
+      <div style={{ marginTop:"10px" }}>
+        <div style={{ fontSize:"13px", color:"var(--muted)" }}>Шансы рулетки (честно):</div>
+        <div style={{ marginTop:"10px", display:"grid", gap:"8px" }}>
+          {[
+            ["50%", "+500"],
+            ["35%", "+1000"],
+            ["15%", "+1500"],
+            ["10%", "+2000"],
+            ["5%", "🎟 +1 билет"],
+            ["3.5%", "+3000"],
+            ["1.5%", "💎 главный приз"],
+          ].map(([p, t]) => (
+            <div key={p+t} style={{
+              padding:"10px",
+              borderRadius:"14px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.08)",
+              display:"flex",
+              justifyContent:"space-between",
+              fontSize:"14px"
+            }}>
+              <div style={{ color:"var(--muted)" }}>{p}</div>
+              <div style={{ fontWeight:600 }}>{t}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop:"10px", fontSize:"12px", color:"var(--muted)" }}>
+          Лимит: 1 спин / 5с (тест)
+        </div>
+      </div>
+    );
+
+    const App = () => {
+      const [activeTab, setActiveTab] = useState("home");
+      const [user, setUser] = useState(null);
+      const [botUsername, setBotUsername] = useState(BOT_USERNAME || "");
+
+      const [postsMode, setPostsMode] = useState(false);
+      const [inventoryMode, setInventoryMode] = useState(false);
+      const [inventory, setInventory] = useState(null);
+      const [ticketQty, setTicketQty] = useState(1);
+      const [invMsg, setInvMsg] = useState("");
+      const [selectedTag, setSelectedTag] = useState(null);
+      const [posts, setPosts] = useState([]);
+      const [loading, setLoading] = useState(false);
+
+      const [profileOpen, setProfileOpen] = useState(false);
+      const [profileView, setProfileView] = useState("menu"); // menu|raffle|roulette|history
+      const [raffle, setRaffle] = useState(null);
+      const [rouletteHistory, setRouletteHistory] = useState([]);
+      const [busy, setBusy] = useState(false);
+      const [msg, setMsg] = useState("");
+
+      // locked modal для ТОП-приза (нельзя закрыть тапом вне)
+      const [claimModal, setClaimModal] = useState({ open:false, message:"", claim_code:"" });
+      const [confirmClaim, setConfirmClaim] = useState({ open:false, claim_code:"", prize_label:"" });
+
+      const tgUserId = tg?.initDataUnsafe?.user?.id;
+
+      const refreshUser = () => {
+        if (!tgUserId) return Promise.resolve();
+        return fetch(`/api/user/${tgUserId}`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setUser(data))
+          .catch(() => {});
+      };
+
+      const loadPosts = (tag) => {
+        setLoading(true);
+        fetch(`/api/posts?tag=${encodeURIComponent(tag)}`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setPosts(Array.isArray(data) ? data : []))
+          .catch(() => setPosts([]))
+          .finally(() => setLoading(false));
+      };
+
+      const openPosts = (tag) => {
+        setSelectedTag(tag);
+        setPostsMode(true);
+        loadPosts(tag);
+      };
+
+      const changeTab = (tabId) => {
+        setActiveTab(tabId);
+        setPostsMode(false);
+        setInventoryMode(false);
+        setInvMsg("");
+        setSelectedTag(null);
+        setPosts([]);
+        setLoading(false);
+      };
+
+      const loadRaffleStatus = () => {
+        if (!tgUserId) return Promise.resolve();
+        return fetch(`/api/raffle/status?telegram_id=${encodeURIComponent(tgUserId)}`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setRaffle(data))
+          .catch(() => setRaffle(null));
+      };
+
+      const loadRouletteHistory = () => {
+        if (!tgUserId) return Promise.resolve();
+        return fetch(`/api/roulette/history?telegram_id=${encodeURIComponent(tgUserId)}&limit=5`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setRouletteHistory(Array.isArray(data) ? data : []))
+          .catch(() => setRouletteHistory([]));
+      };
+
+      const loadInventory = () => {
+        if (!tgUserId) return Promise.resolve();
+        return fetch(`/api/inventory?telegram_id=${encodeURIComponent(tgUserId)}`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setInventory(data))
+          .catch(() => setInventory(null));
+      };
+
+      const openInventory = async () => {
+        if (!tgUserId) return;
+        setProfileOpen(false);
+        setInvMsg("");
+        setTicketQty(1);
+        setPostsMode(false);
+        setInventoryMode(true);
+        await loadInventory();
+      };
+
+      const closeInventory = () => {
+        setInvMsg("");
+        setInventoryMode(false);
+      };
+
+      const incTicketQty = () => {
+        const max = Math.max(1, Number(inventory?.ticket_count || 0));
+        setTicketQty((q) => Math.min(max, q + 1));
+      };
+      const decTicketQty = () => {
+        setTicketQty((q) => Math.max(1, q - 1));
+      };
+      const maxTicketQty = () => {
+        const max = Math.max(1, Number(inventory?.ticket_count || 0));
+        setTicketQty(max);
+      };
+
+      const convertTickets = async () => {
+        if (!tgUserId) return;
+        const have = Number(inventory?.ticket_count || 0);
+        const qty = Math.max(1, Math.min(have, Number(ticketQty || 1)));
+        if (!have) return;
+
+        setBusy(true);
+        setInvMsg("");
+        try {
+          const r = await fetch(`/api/inventory/convert_ticket`, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ telegram_id: tgUserId, qty })
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || "Ошибка");
+          }
+          const data = await r.json();
+          setInvMsg(`✅ Обмен выполнен: +${data.added_points} баллов`);
+          await refreshUser();
+          await loadRaffleStatus();
+          await loadInventory();
+        } catch (e) {
+          setInvMsg(`❌ ${e.message || "Ошибка"}`);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const convertPrize = async (claimCode) => {
+        if (!tgUserId) return;
+        const code = String(claimCode || "").trim();
+        if (!code) return;
+
+        setBusy(true);
+        setInvMsg("");
+        try {
+          const r = await fetch(`/api/inventory/convert_prize`, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ telegram_id: tgUserId, claim_code: code })
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || "Ошибка");
+          }
+          const data = await r.json();
+          setInvMsg(`✅ Приз превращён в бонусы: +${data.added_points} баллов`);
+          await refreshUser();
+          await loadInventory();
+        } catch (e) {
+          setInvMsg(`❌ ${e.message || "Ошибка"}`);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const openProfile = () => {
+        if (!user) return;
+        setMsg("");
+        setProfileView("menu");
+        setProfileOpen(true);
+      };
+
+      useEffect(() => {
+        if (tgUserId) {
+          refreshUser();
+        }
+      }, []);
+useEffect(() => {
+        // пробуем подтянуть username бота для реф-ссылки
+        fetch(`/api/bot/username`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(d => {
+            const u = (d?.bot_username || "").trim().replace(/^@/, "");
+            if (u) setBotUsername(u);
+          })
+          .catch(() => {});
+      }, []);
+
+
+      
+      useEffect(() => {
+        if (profileOpen) {
+          loadRaffleStatus();
+          loadRouletteHistory();
+        }
+      }, [profileOpen]);
+
+      const referralLink = useMemo(() => {
+        if (!tgUserId) return "";
+        if (!botUsername) return "";
+        return `https://t.me/${botUsername}?start=${tgUserId}`;
+      }, [tgUserId, botUsername]);
+
+      const copyText = async (t) => {
+        if (!t) return;
+        try {
+          await navigator.clipboard.writeText(t);
+          setMsg("✅ Скопировано");
+          if (tg?.HapticFeedback?.impactOccurred) tg.HapticFeedback.impactOccurred("light");
+          return;
+        } catch (e) {
+          // fallback для webview/старых браузеров
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = t;
+            ta.style.position = "fixed";
+            ta.style.left = "-9999px";
+            ta.style.top = "-9999px";
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            const ok = document.execCommand("copy");
+            document.body.removeChild(ta);
+            setMsg(ok ? "✅ Скопировано" : "ℹ️ Не удалось скопировать");
+            if (ok && tg?.HapticFeedback?.impactOccurred) tg.HapticFeedback.impactOccurred("light");
+          } catch (e2) {
+            setMsg("ℹ️ Не удалось скопировать");
+          }
+        }
+      };
+
+      const buyTicket = async () => {
+        if (!tgUserId) return;
+        setBusy(true);
+        setMsg("");
+        try {
+          const r = await fetch(`/api/raffle/buy_ticket`, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ telegram_id: tgUserId, qty: 1 })
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || "Ошибка");
+          }
+          const data = await r.json();
+          setMsg(`✅ Билет куплен. Твоих билетов: ${data.ticket_count}`);
+          // ✅ обновляем сразу, чтобы счётчик билетов менялся моментально
+          setRaffle((prev) => ({ ...(prev || {}), ticket_count: data.ticket_count }));
+          await refreshUser();
+          await loadRaffleStatus();
+        } catch (e) {
+          setMsg(`❌ ${e.message || "Ошибка"}`);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const spinRoulette = async () => {
+        if (!tgUserId) return;
+        setBusy(true);
+        setMsg("");
+        try {
+          const r = await fetch(`/api/roulette/spin`, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ telegram_id: tgUserId })
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || "Ошибка");
+          }
+          const data = await r.json();
+          setMsg(`🎡 Выпало: ${data.prize_label}`);
+          // ✅ всплывающее окно с призом
+          try {
+            if (data.claimable && data.claim_code) {
+              const m = `Ваш приз: ${data.prize_label}
+
+Чтобы забрать: откройте чат с ботом и отправьте
+/claim ${data.claim_code}`;
+              setClaimModal({ open:true, message:m, claim_code:data.claim_code });
+            } else if (tg?.showPopup) {
+              tg.showPopup({
+                title: "🎡 Рулетка",
+                message: `Ваш приз: ${data.prize_label}`,
+                buttons: [{ type: "ok" }]
+              });
+            } else {
+              alert(`Ваш приз: ${data.prize_label}`);
+            }
+          } catch (e) {}          await refreshUser();
+          await loadRaffleStatus();
+          await loadRouletteHistory();
+        } catch (e) {
+          setMsg(`❌ ${e.message || "Ошибка"}`);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const PostsScreen = () => (
+        <Panel>
+          <div style={{ fontSize: "14px", color: "var(--muted)" }}>
+            Посты {selectedTag ? ("#" + selectedTag) : ""}
+          </div>
+
+          {loading && (
+            <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
+              Загрузка…
+            </div>
+          )}
+
+          {!loading && posts.length === 0 && (
+            <div style={{ marginTop: "10px", fontSize: "13px", color: "var(--muted)" }}>
+              Постов с этим тегом пока нет.
+            </div>
+          )}
+
+          {!loading && posts.map(p => <PostCard key={p.message_id} post={p} />)}
+        </Panel>
+      );
+
+      
+      const InventoryScreen = () => {
+        const rate = Number(inventory?.ticket_convert_rate || 0) || 0;
+        const diorValue = Number(inventory?.dior_convert_value || 0) || 0;
+        const haveTickets = Number(inventory?.ticket_count || 0) || 0;
+        const qty = Math.max(1, Math.min(haveTickets || 1, Number(ticketQty || 1)));
+        const calc = rate ? (qty * rate) : 0;
+
+        const statusLabel = (s) => {
+          const v = String(s || "");
+          if (v === "awaiting_contact") return "⏳ Доступен (не получен)";
+          if (v === "submitted") return "📨 Заявка отправлена";
+          if (v === "closed") return "✅ Закрыт";
+          return v || "-";
+        };
+
+        return (
+          <Panel>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontSize:"14px", color:"var(--muted)" }}>👜 Моя косметичка</div>
+              <div
+                onClick={closeInventory}
+                style={{ cursor:"pointer", color:"var(--muted)", fontSize:"14px" }}
+              >Назад</div>
+            </div>
+
+            <div style={{
+              marginTop:"12px",
+              padding:"12px",
+              borderRadius:"18px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.06)"
+            }}>
+              <div style={{ fontSize:"13px", color:"var(--muted)" }}>Баланс</div>
+              <div style={{ marginTop:"6px", fontSize:"16px", fontWeight:750 }}>💎 {user?.points ?? 0} баллов</div>
+            </div>
+
+            <div style={{
+              marginTop:"10px",
+              padding:"12px",
+              borderRadius:"18px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.06)"
+            }}>
+              <div style={{ fontSize:"13px", color:"var(--muted)" }}>🎟 Билеты</div>
+              <div style={{ marginTop:"6px", fontSize:"15px", fontWeight:700 }}>У тебя: {haveTickets}</div>
+              <div style={{ marginTop:"6px", fontSize:"12px", color:"var(--muted)" }}>
+                Курс: 1 билет = {rate} бонусов
+              </div>
+
+              <div style={{ marginTop:"10px", display:"flex", gap:"8px", alignItems:"center" }}>
+                <div
+                  onClick={haveTickets ? decTicketQty : undefined}
+                  style={{
+                    width:"44px", height:"38px",
+                    borderRadius:"12px",
+                    border:"1px solid var(--stroke)",
+                    background:"rgba(255,255,255,0.08)",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    cursor: haveTickets ? "pointer" : "not-allowed",
+                    opacity: haveTickets ? 1 : 0.5,
+                    userSelect:"none",
+                    fontWeight:900
+                  }}
+                >–</div>
+
+                <div style={{
+                  flex:1,
+                  height:"38px",
+                  borderRadius:"12px",
+                  border:"1px solid var(--stroke)",
+                  background:"rgba(255,255,255,0.08)",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  fontSize:"14px", fontWeight:750
+                }}>
+                  {haveTickets ? qty : 0}
+                </div>
+
+                <div
+                  onClick={haveTickets ? incTicketQty : undefined}
+                  style={{
+                    width:"44px", height:"38px",
+                    borderRadius:"12px",
+                    border:"1px solid var(--stroke)",
+                    background:"rgba(255,255,255,0.08)",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    cursor: haveTickets ? "pointer" : "not-allowed",
+                    opacity: haveTickets ? 1 : 0.5,
+                    userSelect:"none",
+                    fontWeight:900
+                  }}
+                >+</div>
+
+                <div
+                  onClick={haveTickets ? maxTicketQty : undefined}
+                  style={{
+                    padding:"10px 12px",
+                    borderRadius:"12px",
+                    border:"1px solid rgba(230,193,128,0.25)",
+                    background:"rgba(230,193,128,0.12)",
+                    cursor: haveTickets ? "pointer" : "not-allowed",
+                    opacity: haveTickets ? 1 : 0.5,
+                    userSelect:"none",
+                    fontWeight:800,
+                    fontSize:"12px"
+                  }}
+                >MAX</div>
+              </div>
+
+              <div style={{ marginTop:"10px", fontSize:"13px", color:"var(--muted)" }}>
+                Получишь: <b style={{ color:"rgba(255,255,255,0.92)" }}>{calc}</b> бонусов
+              </div>
+
+              <Button
+                icon="💎"
+                label={`Обменять (${haveTickets ? qty : 0})`}
+                subtitle={busy ? "Подожди…" : ""}
+                onClick={convertTickets}
+                disabled={busy || !haveTickets}
+              />
+            </div>
+
+            <div style={{
+              marginTop:"10px",
+              padding:"12px",
+              borderRadius:"18px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.06)"
+            }}>
+              <div style={{ fontSize:"13px", color:"var(--muted)" }}>🎁 Призы</div>
+
+              {(!inventory?.prizes || inventory.prizes.length === 0) ? (
+                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                  Пока нет призов.
+                </div>
+              ) : (
+                <div style={{ marginTop:"10px", display:"grid", gap:"10px" }}>
+                  {inventory.prizes.map((p) => (
+                    <div key={p.claim_code} style={{
+                      padding:"12px",
+                      borderRadius:"16px",
+                      border:"1px solid rgba(230,193,128,0.22)",
+                      background:"rgba(230,193,128,0.10)"
+                    }}>
+                      <div style={{ fontSize:"14px", fontWeight:800 }}>{p.prize_label || "💎 Главный приз"}</div>
+                      <div style={{ marginTop:"6px", fontSize:"12px", color:"var(--muted)" }}>
+                        Статус: {statusLabel(p.status)} • Код: {p.claim_code}
+                      </div>
+
+                      <div style={{ display:"flex", gap:"10px", marginTop:"12px" }}>
+                        <div
+                          onClick={() => {
+                            const st = String(p.status || "");
+                            if (st === "submitted" || st === "closed") return;
+
+                            setConfirmClaim({
+                              open: true,
+                              claim_code: p.claim_code,
+                              prize_label: p.prize_label || "Приз"
+                            });
+                          }}
+                          style={{
+                            flex:1,
+                            padding:"12px",
+                            textAlign:"center",
+                            borderRadius:"14px",
+                            border:"1px solid var(--stroke)",
+                            background:"rgba(255,255,255,0.06)",
+                            cursor: (String(p.status||"") === "submitted" || String(p.status||"") === "closed") ? "not-allowed" : "pointer",
+                            userSelect:"none",
+                            fontWeight:750,
+                            opacity: (String(p.status||"") === "submitted" || String(p.status||"") === "closed") ? 0.5 : 1
+                          }}
+                        >🎁 Забрать</div>
+
+                        <div
+                          onClick={() => convertPrize(p.claim_code)}
+                          style={{
+                            flex:1.2,
+                            padding:"12px",
+                            textAlign:"center",
+                            borderRadius:"14px",
+                            border:"1px solid rgba(230,193,128,0.35)",
+                            background:"rgba(230,193,128,0.14)",
+                            cursor:"pointer",
+                            userSelect:"none",
+                            fontWeight:850
+                          }}
+                        >💎 В бонусы (+{diorValue})</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {invMsg && (
+              <div style={{
+                marginTop:"14px",
+                padding:"10px",
+                borderRadius:"14px",
+                border:"1px solid var(--stroke)",
+                background:"rgba(255,255,255,0.08)",
+                fontSize:"13px"
+              }}>{invMsg}</div>
+            )}
+          </Panel>
+        );
+      };
+
+const renderContent = () => {
+        if (postsMode) return <PostsScreen />;
+        if (inventoryMode) return <InventoryScreen />;
+
+        switch (activeTab) {
+          case "home":
+            return (
+              <Panel>
+                <Button icon="📂" label="Категории" onClick={() => changeTab("cat")} />
+                <Button icon="🏷" label="Бренды" onClick={() => changeTab("brand")} />
+                <Button icon="💸" label="Sephora" onClick={() => changeTab("sephora")} />
+                <Button icon="🧴" label="Продукт" onClick={() => changeTab("ptype")} />
+                <Button icon="👜" label="Моя косметичка" onClick={openInventory} />
+                <Button icon="💎" label="Beauty Challenges" onClick={() => openPosts("Challenge")} />
+                <Button icon="↩️" label="В канал" onClick={() => openLink(`https://t.me/${CHANNEL}`)} />
+              </Panel>
+            );
+
+          case "cat":
+            return (
+              <Panel>
+                <Button icon="🆕" label="Новинка" onClick={() => openPosts("Новинка")} />
+                <Button icon="💎" label="Кратко о люкс продукте" onClick={() => openPosts("Люкс")} />
+                <Button icon="🔥" label="Тренд" onClick={() => openPosts("Тренд")} />
+                <Button icon="🏛" label="История бренда" onClick={() => openPosts("История")} />
+                <Button icon="⭐" label="Личная оценка" onClick={() => openPosts("Оценка")} />
+                <Button icon="🧾" label="Факты" onClick={() => openPosts("Факты")} />
+                <Button icon="🧪" label="Составы продуктов" onClick={() => openPosts("Состав")} />
+              </Panel>
+            );
+
+          case "brand":
+            return (
+              <Panel>
+                {[
+                  ["The Ordinary", "TheOrdinary"],
+                  ["Dior", "Dior"],
+                  ["Chanel", "Chanel"],
+                  ["Kylie Cosmetics", "KylieCosmetics"],
+                  ["Gisou", "Gisou"],
+                  ["Rare Beauty", "RareBeauty"],
+                  ["Yves Saint Laurent", "YSL"],
+                  ["Givenchy", "Givenchy"],
+                  ["Charlotte Tilbury", "CharlotteTilbury"],
+                  ["NARS", "NARS"],
+                  ["Sol de Janeiro", "SolDeJaneiro"],
+                  ["Huda Beauty", "HudaBeauty"],
+                  ["Rhode", "Rhode"],
+                  ["Tower 28 Beauty", "Tower28Beauty"],
+                  ["Benefit Cosmetics", "BenefitCosmetics"],
+                  ["Estée Lauder", "EsteeLauder"],
+                  ["Sisley", "Sisley"],
+                  ["Kérastase", "Kerastase"],
+                  ["Armani Beauty", "ArmaniBeauty"],
+                  ["Hourglass", "Hourglass"],
+                  ["Shiseido", "Shiseido"],
+                  ["Tom Ford Beauty", "TomFordBeauty"],
+                  ["Tarte", "Tarte"],
+                  ["Sephora Collection", "SephoraCollection"],
+                  ["Clinique", "Clinique"],
+                  ["Dolce & Gabbana", "DolceGabbana"],
+                  ["Kayali", "Kayali"],
+                  ["Guerlain", "Guerlain"],
+                  ["Fenty Beauty", "FentyBeauty"],
+                  ["Too Faced", "TooFaced"],
+                  ["MAKE UP FOR EVER", "MakeUpForEver"],
+                  ["Erborian", "Erborian"],
+                  ["Natasha Denona", "NatashaDenona"],
+                  ["Lancôme", "Lancome"],
+                  ["Kosas", "Kosas"],
+                  ["ONE/SIZE", "OneSize"],
+                  ["Laneige", "Laneige"],
+                  ["Makeup by Mario", "MakeupByMario"],
+                  ["Valentino Beauty", "ValentinoBeauty"],
+                  ["Drunk Elephant", "DrunkElephant"],
+                  ["Olaplex", "Olaplex"],
+                  ["Anastasia Beverly Hills", "AnastasiaBeverlyHills"],
+                  ["Amika", "Amika"],
+                  ["BYOMA", "BYOMA"],
+                  ["Glow Recipe", "GlowRecipe"],
+                  ["Milk Makeup", "MilkMakeup"],
+                  ["Summer Fridays", "SummerFridays"],
+                  ["K18", "K18"],
+                ].map(([label, tag]) => (
+                  <Button key={tag} icon="✨" label={label} onClick={() => openPosts(tag)} />
+                ))}
+              </Panel>
+            );
+
+          case "sephora":
+            return (
+              <Panel>
+                <Button icon="🎁" label="Подарки / акции" onClick={() => openPosts("SephoraPromo")} />
+              </Panel>
+            );
+
+          case "ptype":
+            return (
+              <Panel>
+                <Button icon="🧴" label="Праймер" onClick={() => openPosts("Праймер")} />
+                <Button icon="🧴" label="Тональная основа" onClick={() => openPosts("ТональнаяОснова")} />
+                <Button icon="🧴" label="Консилер" onClick={() => openPosts("Консилер")} />
+                <Button icon="🧴" label="Пудра" onClick={() => openPosts("Пудра")} />
+                <Button icon="🧴" label="Румяна" onClick={() => openPosts("Румяна")} />
+                <Button icon="🧴" label="Скульптор" onClick={() => openPosts("Скульптор")} />
+                <Button icon="🧴" label="Бронзер" onClick={() => openPosts("Бронзер")} />
+                <Button icon="🧴" label="Продукт для бровей" onClick={() => openPosts("ПродуктДляБровей")} />
+                <Button icon="🧴" label="Хайлайтер" onClick={() => openPosts("Хайлайтер")} />
+                <Button icon="🧴" label="Тушь" onClick={() => openPosts("Тушь")} />
+                <Button icon="🧴" label="Тени" onClick={() => openPosts("Тени")} />
+                <Button icon="🧴" label="Помада" onClick={() => openPosts("Помада")} />
+                <Button icon="🧴" label="Карандаш для губ" onClick={() => openPosts("КарандашДляГуб")} />
+                <Button icon="🧴" label="Палетка" onClick={() => openPosts("Палетка")} />
+                <Button icon="🧴" label="Фиксатор" onClick={() => openPosts("Фиксатор")} />
+              </Panel>
+            );
+
+          default:
+            return null;
+        }
+      };
+
+      return (
+        <div style={{ padding:"18px 16px 26px", maxWidth:"520px", margin:"0 auto" }}>
+          <Hero user={user} onOpenProfile={openProfile} />
+          <Tabs active={activeTab} onChange={changeTab} />
+          {renderContent()}
+
+          <LockedClaimModal
+            open={claimModal.open}
+            message={claimModal.message}
+            claimCode={claimModal.claim_code}
+            onOk={() => setClaimModal({ open:false, message:"", claim_code:"" })}
+            onClaim={() => {
+              if (botUsername && tg?.openTelegramLink && claimModal.claim_code) {
+                tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${claimModal.claim_code}`);
+              }
+              setClaimModal({ open:false, message:"", claim_code:"" });
+            }}
+          />
+
+          <ConfirmClaimModal
+            open={confirmClaim.open}
+            title="🎁 Забрать приз?"
+            message={`Вы уверены?\n\nПосле подтверждения вы НЕ сможете:\n• превратить приз в бонусы\n• отменить действие\n\nПриз: ${confirmClaim.prize_label}\nКод: ${confirmClaim.claim_code}`}
+            onCancel={() => setConfirmClaim({ open:false, claim_code:"", prize_label:"" })}
+            onConfirm={() => {
+              const code = String(confirmClaim.claim_code || "").trim();
+              if (botUsername && tg?.openTelegramLink && code) {
+                tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${code}`);
+              } else if (code) {
+                alert(`/claim ${code}`);
+              }
+              setConfirmClaim({ open:false, claim_code:"", prize_label:"" });
+            }}
+          />
+          <Sheet open={profileOpen} onClose={() => setProfileOpen(false)}>
+            {!user ? (
+              <div style={{ marginTop:"12px", color:"var(--muted)", fontSize:"13px" }}>
+                Профиль недоступен.
+              </div>
+            ) : (
+              <div style={{ marginTop:"12px" }}>
+                <div style={{
+                  padding:"12px",
+                  borderRadius:"18px",
+                  border:"1px solid var(--stroke)",
+                  background:"rgba(255,255,255,0.08)",
+                  position:"relative"
+                }}>
+                  {/* 💎 Баллы — в правом верхнем углу (как просили) */}
+                  <div style={{
+                    position:"absolute",
+                    top:"10px",
+                    right:"10px",
+                    padding:"6px 10px",
+                    borderRadius:"999px",
+                    border:"1px solid rgba(230,193,128,0.25)",
+                    background:"rgba(230,193,128,0.10)",
+                    fontSize:"13px",
+                    fontWeight:700
+                  }}>
+                    💎 {user.points}
+                  </div>
+
+                  <div style={{ fontSize:"13px", color:"var(--muted)" }}>Привет, {user.first_name}!</div>
+                  <div style={{ fontSize:"13px", color:"var(--muted)", marginTop:"6px" }}>{tierLabel(user.tier)}</div>
+
+                  <StatRow left="🔥 Стрик" right={`${user.daily_streak || 0} (best ${user.best_streak || 0})`} />
+                  <StatRow left="🎟 Приглашено" right={`${user.referral_count || 0}`} />
+                </div>
+
+                <Divider />
+
+                <div style={{ fontSize:"14px", fontWeight:650 }}>🎟 Рефералка</div>
+                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                  За нового пользователя: +20 баллов (1 раз за каждого).
+                </div>
+                {botUsername ? (
+                  <div style={{
+                    marginTop:"10px",
+                    padding:"10px",
+                    borderRadius:"14px",
+                    border:"1px solid var(--stroke)",
+                    background:"rgba(255,255,255,0.08)",
+                    fontSize:"12px",
+                    color:"rgba(255,255,255,0.85)",
+                    wordBreak:"break-all"
+                  }}>
+                    {referralLink}
+                  </div>
+                ) : (
+                  <div style={{ marginTop:"10px", fontSize:"12px", color:"var(--muted)" }}>
+                    Если ссылка не показалась — задай переменную окружения <b>BOT_USERNAME</b> или проверь, что бот запущен (мы берём username через Telegram API).
+                  </div>
+                )}
+                <Button
+                  icon="📎"
+                  label="Скопировать ссылку"
+                  onClick={() => copyText(referralLink)}
+                  disabled={!botUsername || !referralLink}
+                />
+
+                <Divider />
+
+                <div style={{ fontSize:"14px", fontWeight:650 }}>💎 На что тратить баллы</div>
+                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                  • 🎁 Билет на розыгрыш — 500 баллов<br/>
+                  • 🎡 Рулетка — 2000 баллов (лимит 1 раз/день)
+                </div>
+
+                <Divider />
+
+                {/* Меню: сначала кнопки, потом открываем раздел */}
+                {profileView === "menu" ? (
+                  <div style={{ marginTop:"2px" }}>
+                    <Button
+                      icon="👜"
+                      label="Моя косметичка"
+                      onClick={openInventory}
+                    />
+                    <Button
+                      icon="🎁"
+                      label="Розыгрыши"
+                      onClick={() => { setMsg(""); setProfileView("raffle"); }}
+                    />
+                    <Button
+                      icon="🎡"
+                      label="Рулетка"
+                      onClick={() => { setMsg(""); setProfileView("roulette"); }}
+                    />
+                    <Button
+                      icon="🧾"
+                      label="История рулетки"
+                      onClick={() => { setMsg(""); setProfileView("history"); }}
+                    />
+                  </div>
+                ) : (
+                  <div style={{ marginTop:"2px" }}>
+                    <div
+                      onClick={() => { setMsg(""); setProfileView("menu"); }}
+                      style={{
+                        display:"inline-flex",
+                        alignItems:"center",
+                        gap:"8px",
+                        padding:"10px 12px",
+                        borderRadius:"14px",
+                        border:"1px solid var(--stroke)",
+                        background:"rgba(255,255,255,0.06)",
+                        cursor:"pointer",
+                        userSelect:"none",
+                        fontWeight:650,
+                        fontSize:"14px"
+                      }}
+                    >
+                      ← Назад
+                    </div>
+
+                    {/* РОЗЫГРЫШИ */}
+                    {profileView === "raffle" && (
+                      <div style={{ marginTop:"14px" }}>
+                        <div style={{ fontSize:"14px", fontWeight:650 }}>🎁 Розыгрыши</div>
+                        <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                          Билет = 500 баллов. Баллы списываются.
+                        </div>
+                        <div style={{ marginTop:"10px", fontSize:"13px", color:"var(--muted)" }}>
+                          Твоих билетов: <b style={{ color:"rgba(255,255,255,0.92)" }}>{raffle?.ticket_count ?? 0}</b>
+                        </div>
+                        <Button
+                          icon="🎟"
+                          label="Купить билет (500)"
+                          subtitle={busy ? "Подожди…" : ""}
+                          onClick={buyTicket}
+                          disabled={busy || (user.points || 0) < 500}
+                        />
+                      </div>
+                    )}
+
+                    {/* РУЛЕТКА */}
+                    {profileView === "roulette" && (
+                      <div style={{ marginTop:"14px" }}>
+                        <div style={{ fontSize:"14px", fontWeight:650 }}>🎡 Рулетка</div>
+                        <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                          1 спин = 2000 баллов. Каждый день (лимит 1 раз/5с (тест)).
+                        </div>
+                        <Button
+                          icon="🎡"
+                          label="Крутить (2000)"
+                          subtitle={busy ? "Подожди…" : ""}
+                          onClick={spinRoulette}
+                          disabled={busy || (user.points || 0) < 2000}
+                        />
+                        <PrizeTable />
+
+                        {msg && (
+                          <div style={{
+                            marginTop:"14px",
+                            padding:"10px",
+                            borderRadius:"14px",
+                            border:"1px solid var(--stroke)",
+                            background:"rgba(255,255,255,0.08)",
+                            fontSize:"13px"
+                          }}>{msg}</div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ИСТОРИЯ РУЛЕТКИ */}
+                    {profileView === "history" && (
+                      <div style={{ marginTop:"14px" }}>
+                        <div style={{ fontSize:"14px", fontWeight:650 }}>🧾 История рулетки</div>
+                        {rouletteHistory.length === 0 ? (
+                          <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                            Пока пусто.
+                          </div>
+                        ) : (
+                          <div style={{ marginTop:"10px", display:"grid", gap:"8px" }}>
+                            {rouletteHistory.map((x) => (
+                              <div key={x.id} style={{
+                                padding:"10px",
+                                borderRadius:"14px",
+                                border:"1px solid var(--stroke)",
+                                background:"rgba(255,255,255,0.08)"
+                              }}>
+                                <div style={{ fontSize:"12px", color:"var(--muted)" }}>{x.created_at}</div>
+                                <div style={{ marginTop:"4px", fontSize:"14px", fontWeight:600 }}>{x.prize_label}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </Sheet>
+
+          <div style={{ marginTop:"20px", color:"var(--muted)", fontSize:"12px", textAlign:"center" }}>
+            Открывается как Mini App внутри Telegram
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.render(<App />, document.getElementById("root"));
+  </script>
 </body>
 </html>
 """
@@ -2414,11 +3178,8 @@ async def inventory_convert_prize(req: ConvertPrizeReq):
                 raise HTTPException(status_code=403, detail="Этот код принадлежит другому пользователю")
             if (claim.prize_type or "") != "physical_dior_palette":
                 raise HTTPException(status_code=400, detail="Этот приз нельзя конвертировать")
-            st = (claim.status or "").strip()
-            if st == "closed":
+            if (claim.status or "") == "closed":
                 raise HTTPException(status_code=400, detail="Этот приз уже закрыт")
-            if st != "awaiting_choice":
-                raise HTTPException(status_code=400, detail="Нельзя конвертировать: вы уже нажали «Забрать» или заявка отправлена")
 
             added = int(DIOR_PALETTE_CONVERT_VALUE)
 
@@ -2554,7 +3315,7 @@ async def roulette_spin(req: SpinReq):
                         spin_id=None,  # id будет после commit, связь не критична
                         prize_type=prize_type,
                         prize_label=prize_label,
-                        status="awaiting_choice",
+                        status="awaiting_contact",
                     )
                 )
 
