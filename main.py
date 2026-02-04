@@ -16,10 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import (
     Update,
-    MessageOriginChannel,
-    MessageOriginChat,
-    MessageOriginUser,
-    MessageOriginHiddenUser,
     ReplyKeyboardMarkup,
     KeyboardButton,
     InlineKeyboardButton,
@@ -715,38 +711,6 @@ tg_task: asyncio.Task | None = None
 sweeper_task: asyncio.Task | None = None
 
 
-
-# -----------------------------------------------------------------------------
-# ADMIN MEDIA SYNC MODE (backfill media for old posts)
-# -----------------------------------------------------------------------------
-_admin_media_sync_until: dict[int, datetime] = {}
-
-def admin_media_sync_active(user_id: int) -> bool:
-    exp = _admin_media_sync_until.get(int(user_id))
-    return bool(exp and exp > datetime.utcnow())
-
-def admin_media_sync_enable(user_id: int, minutes: int = 30) -> None:
-    _admin_media_sync_until[int(user_id)] = datetime.utcnow() + timedelta(minutes=minutes)
-
-def admin_media_sync_disable(user_id: int) -> None:
-    _admin_media_sync_until.pop(int(user_id), None)
-
-async def update_post_media_by_message_id(message_id: int, media_type: str | None, media_file_id: str | None) -> bool:
-    """Update media fields for an existing post row by its channel message_id.
-    Returns True if a row was updated.
-    """
-    if not message_id:
-        return False
-    async with async_session() as session:
-        q = (
-            update(Post)
-            .where(Post.message_id == int(message_id))
-            .values(media_type=media_type, media_file_id=media_file_id)
-        )
-        res = await session.execute(q)
-        await session.commit()
-        return (res.rowcount or 0) > 0
-
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
@@ -1227,130 +1191,6 @@ async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def cmd_sync_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Enable media sync mode: admin forwards channel posts to bot, bot backfills media_file_id."""
-    if not update.message:
-        return
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
-        return
-
-    admin_media_sync_enable(uid, minutes=45)
-    await update.message.reply_text(
-        """🛠️ Режим синхронизации картинок ВКЛ.
-
-Что делать:
-1) Открой канал и выбери посты (лучше те, где есть фото).
-2) Перешли их СЮДА (в этот чат с ботом).
-3) Бот автоматически обновит записи в базе и добавит media_file_id.
-
-Подсказка: можно переслать 30–100 постов подряд.
-
-Выключить: /sync_media_off
-
-Автовыключение через ~45 минут."""
-        ,
-        reply_markup=get_main_keyboard(),
-    )
-
-
-async def cmd_sync_media_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
-        return
-    admin_media_sync_disable(uid)
-    await update.message.reply_text("✅ Режим синхронизации картинок ВЫКЛ.", reply_markup=get_main_keyboard())
-
-
-
-def extract_forward_origin(msg) -> tuple[object | None, int | None]:
-    """Return (forward_chat, forward_message_id) for both old and new Telegram forward fields."""
-    fchat = getattr(msg, "forward_from_chat", None)
-    fmid = getattr(msg, "forward_from_message_id", None)
-    if fchat and fmid:
-        return fchat, fmid
-
-    origin = getattr(msg, "forward_origin", None)
-    try:
-        if isinstance(origin, MessageOriginChannel):
-            return origin.chat, origin.message_id
-        if isinstance(origin, MessageOriginChat):
-            return origin.sender_chat, origin.message_id
-    except Exception:
-        pass
-    return None, None
-
-
-async def on_admin_forward_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle forwarded messages from admin to backfill media for old channel posts."""
-    if not update.message:
-        return
-    uid = update.effective_user.id
-    if not is_admin(uid) or not admin_media_sync_active(uid):
-        return
-
-    msg = update.message
-
-    fchat, fmid = extract_forward_origin(msg)
-
-    if not fchat or not fmid:
-        await msg.reply_text(
-            "ℹ️ Я не вижу оригинал (message_id).
-
-"
-            "Нужно именно *переслать* пост, а не отправить 'как копию'.
-"
-            "Android: удержи пост → *Переслать* → выбери бота → отключи 'как копия/без ссылки' (если есть).
-
-"
-            "Если в канале включено *Restrict saving content* — Telegram не отдаёт данные для синхронизации.",
-            parse_mode="Markdown",
-        )
-        return
-
-    # Optional: verify it's our channel by username (if available)
-    try:
-        ch_u = (getattr(fchat, "username", "") or "").lstrip("@")
-        if CHANNEL_USERNAME and ch_u and ch_u.lower() != CHANNEL_USERNAME.lower():
-            await msg.reply_text("ℹ️ Это не мой канал. Перешли пост из нужного канала.")
-            return
-    except Exception:
-        pass
-
-    media_type = None
-    media_file_id = None
-
-    if msg.photo:
-        media_type = "photo"
-        media_file_id = msg.photo[-1].file_id  # biggest size
-    elif msg.video:
-        media_type = "video"
-        media_file_id = msg.video.file_id
-    elif msg.document:
-        media_type = "document"
-        media_file_id = msg.document.file_id
-    elif msg.animation:
-        media_type = "animation"
-        media_file_id = msg.animation.file_id
-
-    if not media_file_id:
-        await msg.reply_text(f"ℹ️ В этом форварде нет медиа. message_id={fmid}")
-        return
-
-    ok = await update_post_media_by_message_id(int(fmid), media_type, media_file_id)
-    if ok:
-        await msg.reply_text(f"✅ Обновил пост {fmid}: {media_type}")
-    else:
-        await msg.reply_text(
-            f"""⚠️ Пост {fmid} не найден в базе.
-Он появится, если бот уже сохранял этот пост ранее."""
-        )
-
-
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not q:
@@ -1566,10 +1406,6 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
-    tg_app.add_handler(CommandHandler("sync_media", cmd_sync_media))
-    tg_app.add_handler(CommandHandler("sync_media_off", cmd_sync_media_off))
-    tg_app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, on_admin_forward_media))
-
     tg_app.add_handler(CallbackQueryHandler(on_callback))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
 
@@ -1742,7 +1578,72 @@ def get_webapp_html() -> str:
 
     .hScroll{ display:flex; gap: 10px; overflow:auto; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }
     .hScroll::-webkit-scrollbar{ display:none; }
-    .miniCard{
+    .thumbWrap{
+  width: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--stroke);
+  background: rgba(255,255,255,0.05);
+  position: relative;
+  aspect-ratio: 16 / 10;
+  margin-bottom: 10px;
+}
+.thumbImg{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display:block;
+  transform: scale(1.02);
+  filter: saturate(1.05) contrast(1.02);
+}
+.thumbOverlay{
+  position:absolute; inset:0;
+  background: linear-gradient(180deg, rgba(0,0,0,0.00) 35%, rgba(0,0,0,0.72) 100%);
+  pointer-events:none;
+}
+.thumbBadge{
+  position:absolute;
+  left:10px; bottom:10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.20);
+  background: rgba(18,22,30,0.55);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  font-size: 12px;
+  font-weight: 850;
+  color: rgba(255,255,255,0.92);
+  max-width: calc(100% - 20px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thumbFallback{
+  width:100%;
+  height:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color: rgba(255,255,255,0.70);
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  background:
+    radial-gradient(420px 240px at 30% 10%, rgba(230,193,128,0.22), transparent 60%),
+    radial-gradient(380px 220px at 80% 0%, rgba(255,255,255,0.12), transparent 55%),
+    rgba(255,255,255,0.04);
+}
+.thumbNS{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+  text-align:center;
+  padding: 10px;
+}
+.thumbNS .mark{ font-size: 18px; }
+.thumbNS .brand{ font-size: 12px; color: rgba(255,255,255,0.72); font-weight: 800; }
+
+.miniCard{
       min-width: 220px;
       border: 1px solid var(--stroke);
       background: rgba(255,255,255,0.06);
@@ -2041,20 +1942,79 @@ def get_webapp_html() -> str:
       );
     };
 
-    const PostMiniCard = ({ post }) => (
-      <div className="miniCard" onClick={() => { haptic(); openLink(post.url); }}>
-        <div className="miniMeta">{"#" + (post.tags?.[0] || "post")} • ID {post.message_id}</div>
-        {post.media_url ? (
-          <img className="postImgSm" src={post.media_url} alt="" loading="lazy" />
-        ) : null}
-        <div className="miniText">{post.preview || "Открыть пост →"}</div>
-        <div className="chipRow">
-          {(post.tags || []).slice(0,4).map(t => <div key={t} className="chip">#{t}</div>)}
-        </div>
+    const PostMiniCard = ({ post }) => {
+  const [imgOk, setImgOk] = React.useState(true);
+  const hasImg = !!post.media_url;
+  const tagTitle = "#" + (post.tags?.[0] || "post");
+  return (
+    <div className="miniCard" onClick={() => { haptic(); openLink(post.url); }}>
+      <div className="thumbWrap">
+        {hasImg && imgOk ? (
+          <img
+            className="thumbImg"
+            src={post.media_url}
+            loading="lazy"
+            onError={() => setImgOk(false)}
+            alt={post.preview || tagTitle}
+          />
+        ) : (
+          <div className="thumbFallback">
+            <div className="thumbNS">
+              <div className="mark">NS</div>
+              <div className="brand">Natural Sense</div>
+            </div>
+          </div>
+        )}
+        <div className="thumbOverlay" />
+        <div className="thumbBadge">{tagTitle}</div>
       </div>
-    );
 
-    const PostFullCard = ({ post }) => (
+      <div className="miniMeta">{tagTitle} • ID {post.message_id}</div>
+      <div className="miniText">{post.preview || "Открыть пост →"}</div>
+      <div className="chipRow">
+        {(post.tags || []).slice(0,4).map(t => <div key={t} className="chip">#{t}</div>)}
+      </div>
+    </div>
+  );
+};
+
+const PostFullCard = ({ post }) => {
+  const [imgOk, setImgOk] = React.useState(true);
+  const hasImg = !!post.media_url;
+  const tagTitle = "#" + (post.tags?.[0] || "post");
+  return (
+    <div className="card2" style={{ cursor:"pointer" }} onClick={() => { haptic(); openLink(post.url); }}>
+      <div className="thumbWrap" style={{ aspectRatio: "16 / 9" }}>
+        {hasImg && imgOk ? (
+          <img
+            className="thumbImg"
+            src={post.media_url}
+            loading="lazy"
+            onError={() => setImgOk(false)}
+            alt={post.preview || tagTitle}
+          />
+        ) : (
+          <div className="thumbFallback">
+            <div className="thumbNS">
+              <div className="mark">NS</div>
+              <div className="brand">Natural Sense</div>
+            </div>
+          </div>
+        )}
+        <div className="thumbOverlay" />
+        <div className="thumbBadge">{tagTitle}</div>
+      </div>
+
+      <div className="miniMeta">{tagTitle} • ID {post.message_id}</div>
+      <div className="miniText">{post.preview || "Открыть пост →"}</div>
+      <div className="chipRow">
+        {(post.tags || []).slice(0,8).map(t => <div key={t} className="chip">#{t}</div>)}
+      </div>
+    </div>
+  );
+};
+
+ = ({ post }) => (
       <div className="card2" style={{ cursor:"pointer" }} onClick={() => { haptic(); openLink(post.url); }}>
         <div className="miniMeta">{"#" + (post.tags?.[0] || "post")} • ID {post.message_id}</div>
         {post.media_url ? (
