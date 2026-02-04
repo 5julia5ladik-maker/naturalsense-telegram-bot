@@ -115,6 +115,12 @@ ROULETTE_SPIN_COST = 2000
 ROULETTE_LIMIT_WINDOW = timedelta(seconds=5)  # TEST: 5s cooldown
 DEFAULT_RAFFLE_ID = 1
 
+# -----------------------------------------------------------------------------
+# INVENTORY / CONVERSION (FIXED RATES)
+# -----------------------------------------------------------------------------
+TICKET_CONVERT_RATE = 300          # 1 raffle ticket -> 300 points
+DIOR_PALETTE_CONVERT_VALUE = 50_000  # 1 Dior palette -> 50_000 points (fixed)
+
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
 
 # per 1_000_000
@@ -1770,6 +1776,10 @@ def get_webapp_html() -> str:
       const [botUsername, setBotUsername] = useState(BOT_USERNAME || "");
 
       const [postsMode, setPostsMode] = useState(false);
+      const [inventoryMode, setInventoryMode] = useState(false);
+      const [inventory, setInventory] = useState(null);
+      const [ticketQty, setTicketQty] = useState(1);
+      const [invMsg, setInvMsg] = useState("");
       const [selectedTag, setSelectedTag] = useState(null);
       const [posts, setPosts] = useState([]);
       const [loading, setLoading] = useState(false);
@@ -1812,6 +1822,8 @@ def get_webapp_html() -> str:
       const changeTab = (tabId) => {
         setActiveTab(tabId);
         setPostsMode(false);
+        setInventoryMode(false);
+        setInvMsg("");
         setSelectedTag(null);
         setPosts([]);
         setLoading(false);
@@ -1831,6 +1843,99 @@ def get_webapp_html() -> str:
           .then(r => r.ok ? r.json() : Promise.reject())
           .then(data => setRouletteHistory(Array.isArray(data) ? data : []))
           .catch(() => setRouletteHistory([]));
+      };
+
+      const loadInventory = () => {
+        if (!tgUserId) return Promise.resolve();
+        return fetch(`/api/inventory?telegram_id=${encodeURIComponent(tgUserId)}`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setInventory(data))
+          .catch(() => setInventory(null));
+      };
+
+      const openInventory = async () => {
+        if (!tgUserId) return;
+        setProfileOpen(false);
+        setInvMsg("");
+        setTicketQty(1);
+        setPostsMode(false);
+        setInventoryMode(true);
+        await loadInventory();
+      };
+
+      const closeInventory = () => {
+        setInvMsg("");
+        setInventoryMode(false);
+      };
+
+      const incTicketQty = () => {
+        const max = Math.max(1, Number(inventory?.ticket_count || 0));
+        setTicketQty((q) => Math.min(max, q + 1));
+      };
+      const decTicketQty = () => {
+        setTicketQty((q) => Math.max(1, q - 1));
+      };
+      const maxTicketQty = () => {
+        const max = Math.max(1, Number(inventory?.ticket_count || 0));
+        setTicketQty(max);
+      };
+
+      const convertTickets = async () => {
+        if (!tgUserId) return;
+        const have = Number(inventory?.ticket_count || 0);
+        const qty = Math.max(1, Math.min(have, Number(ticketQty || 1)));
+        if (!have) return;
+
+        setBusy(true);
+        setInvMsg("");
+        try {
+          const r = await fetch(`/api/inventory/convert_ticket`, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ telegram_id: tgUserId, qty })
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || "Ошибка");
+          }
+          const data = await r.json();
+          setInvMsg(`✅ Обмен выполнен: +${data.added_points} баллов`);
+          await refreshUser();
+          await loadRaffleStatus();
+          await loadInventory();
+        } catch (e) {
+          setInvMsg(`❌ ${e.message || "Ошибка"}`);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const convertPrize = async (claimCode) => {
+        if (!tgUserId) return;
+        const code = String(claimCode || "").trim();
+        if (!code) return;
+
+        setBusy(true);
+        setInvMsg("");
+        try {
+          const r = await fetch(`/api/inventory/convert_prize`, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ telegram_id: tgUserId, claim_code: code })
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || "Ошибка");
+          }
+          const data = await r.json();
+          setInvMsg(`✅ Приз превращён в бонусы: +${data.added_points} баллов`);
+          await refreshUser();
+          await loadInventory();
+        } catch (e) {
+          setInvMsg(`❌ ${e.message || "Ошибка"}`);
+        } finally {
+          setBusy(false);
+        }
       };
 
       const openProfile = () => {
@@ -1991,8 +2096,215 @@ useEffect(() => {
         </Panel>
       );
 
-      const renderContent = () => {
+      
+      const InventoryScreen = () => {
+        const rate = Number(inventory?.ticket_convert_rate || 0) || 0;
+        const diorValue = Number(inventory?.dior_convert_value || 0) || 0;
+        const haveTickets = Number(inventory?.ticket_count || 0) || 0;
+        const qty = Math.max(1, Math.min(haveTickets || 1, Number(ticketQty || 1)));
+        const calc = rate ? (qty * rate) : 0;
+
+        const statusLabel = (s) => {
+          const v = String(s || "");
+          if (v === "awaiting_contact") return "⏳ Доступен (не получен)";
+          if (v === "submitted") return "📨 Заявка отправлена";
+          if (v === "closed") return "✅ Закрыт";
+          return v || "-";
+        };
+
+        return (
+          <Panel>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontSize:"14px", color:"var(--muted)" }}>👜 Моя косметичка</div>
+              <div
+                onClick={closeInventory}
+                style={{ cursor:"pointer", color:"var(--muted)", fontSize:"14px" }}
+              >Назад</div>
+            </div>
+
+            <div style={{
+              marginTop:"12px",
+              padding:"12px",
+              borderRadius:"18px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.06)"
+            }}>
+              <div style={{ fontSize:"13px", color:"var(--muted)" }}>Баланс</div>
+              <div style={{ marginTop:"6px", fontSize:"16px", fontWeight:750 }}>💎 {user?.points ?? 0} баллов</div>
+            </div>
+
+            <div style={{
+              marginTop:"10px",
+              padding:"12px",
+              borderRadius:"18px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.06)"
+            }}>
+              <div style={{ fontSize:"13px", color:"var(--muted)" }}>🎟 Билеты</div>
+              <div style={{ marginTop:"6px", fontSize:"15px", fontWeight:700 }}>У тебя: {haveTickets}</div>
+              <div style={{ marginTop:"6px", fontSize:"12px", color:"var(--muted)" }}>
+                Курс: 1 билет = {rate} бонусов
+              </div>
+
+              <div style={{ marginTop:"10px", display:"flex", gap:"8px", alignItems:"center" }}>
+                <div
+                  onClick={haveTickets ? decTicketQty : undefined}
+                  style={{
+                    width:"44px", height:"38px",
+                    borderRadius:"12px",
+                    border:"1px solid var(--stroke)",
+                    background:"rgba(255,255,255,0.08)",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    cursor: haveTickets ? "pointer" : "not-allowed",
+                    opacity: haveTickets ? 1 : 0.5,
+                    userSelect:"none",
+                    fontWeight:900
+                  }}
+                >–</div>
+
+                <div style={{
+                  flex:1,
+                  height:"38px",
+                  borderRadius:"12px",
+                  border:"1px solid var(--stroke)",
+                  background:"rgba(255,255,255,0.08)",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  fontSize:"14px", fontWeight:750
+                }}>
+                  {haveTickets ? qty : 0}
+                </div>
+
+                <div
+                  onClick={haveTickets ? incTicketQty : undefined}
+                  style={{
+                    width:"44px", height:"38px",
+                    borderRadius:"12px",
+                    border:"1px solid var(--stroke)",
+                    background:"rgba(255,255,255,0.08)",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    cursor: haveTickets ? "pointer" : "not-allowed",
+                    opacity: haveTickets ? 1 : 0.5,
+                    userSelect:"none",
+                    fontWeight:900
+                  }}
+                >+</div>
+
+                <div
+                  onClick={haveTickets ? maxTicketQty : undefined}
+                  style={{
+                    padding:"10px 12px",
+                    borderRadius:"12px",
+                    border:"1px solid rgba(230,193,128,0.25)",
+                    background:"rgba(230,193,128,0.12)",
+                    cursor: haveTickets ? "pointer" : "not-allowed",
+                    opacity: haveTickets ? 1 : 0.5,
+                    userSelect:"none",
+                    fontWeight:800,
+                    fontSize:"12px"
+                  }}
+                >MAX</div>
+              </div>
+
+              <div style={{ marginTop:"10px", fontSize:"13px", color:"var(--muted)" }}>
+                Получишь: <b style={{ color:"rgba(255,255,255,0.92)" }}>{calc}</b> бонусов
+              </div>
+
+              <Button
+                icon="💎"
+                label={`Обменять (${haveTickets ? qty : 0})`}
+                subtitle={busy ? "Подожди…" : ""}
+                onClick={convertTickets}
+                disabled={busy || !haveTickets}
+              />
+            </div>
+
+            <div style={{
+              marginTop:"10px",
+              padding:"12px",
+              borderRadius:"18px",
+              border:"1px solid var(--stroke)",
+              background:"rgba(255,255,255,0.06)"
+            }}>
+              <div style={{ fontSize:"13px", color:"var(--muted)" }}>🎁 Призы</div>
+
+              {(!inventory?.prizes || inventory.prizes.length === 0) ? (
+                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                  Пока нет призов.
+                </div>
+              ) : (
+                <div style={{ marginTop:"10px", display:"grid", gap:"10px" }}>
+                  {inventory.prizes.map((p) => (
+                    <div key={p.claim_code} style={{
+                      padding:"12px",
+                      borderRadius:"16px",
+                      border:"1px solid rgba(230,193,128,0.22)",
+                      background:"rgba(230,193,128,0.10)"
+                    }}>
+                      <div style={{ fontSize:"14px", fontWeight:800 }}>{p.prize_label || "💎 Главный приз"}</div>
+                      <div style={{ marginTop:"6px", fontSize:"12px", color:"var(--muted)" }}>
+                        Статус: {statusLabel(p.status)} • Код: {p.claim_code}
+                      </div>
+
+                      <div style={{ display:"flex", gap:"10px", marginTop:"12px" }}>
+                        <div
+                          onClick={() => {
+                            if (botUsername && tg?.openTelegramLink && p.claim_code) {
+                              tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${p.claim_code}`);
+                            } else if (p.claim_code) {
+                              alert(`/claim ${p.claim_code}`);
+                            }
+                          }}
+                          style={{
+                            flex:1,
+                            padding:"12px",
+                            textAlign:"center",
+                            borderRadius:"14px",
+                            border:"1px solid var(--stroke)",
+                            background:"rgba(255,255,255,0.06)",
+                            cursor:"pointer",
+                            userSelect:"none",
+                            fontWeight:750
+                          }}
+                        >🎁 Забрать</div>
+
+                        <div
+                          onClick={() => convertPrize(p.claim_code)}
+                          style={{
+                            flex:1.2,
+                            padding:"12px",
+                            textAlign:"center",
+                            borderRadius:"14px",
+                            border:"1px solid rgba(230,193,128,0.35)",
+                            background:"rgba(230,193,128,0.14)",
+                            cursor:"pointer",
+                            userSelect:"none",
+                            fontWeight:850
+                          }}
+                        >💎 В бонусы (+{diorValue})</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {invMsg && (
+              <div style={{
+                marginTop:"14px",
+                padding:"10px",
+                borderRadius:"14px",
+                border:"1px solid var(--stroke)",
+                background:"rgba(255,255,255,0.08)",
+                fontSize:"13px"
+              }}>{invMsg}</div>
+            )}
+          </Panel>
+        );
+      };
+
+const renderContent = () => {
         if (postsMode) return <PostsScreen />;
+        if (inventoryMode) return <InventoryScreen />;
 
         switch (activeTab) {
           case "home":
@@ -2002,6 +2314,7 @@ useEffect(() => {
                 <Button icon="🏷" label="Бренды" onClick={() => changeTab("brand")} />
                 <Button icon="💸" label="Sephora" onClick={() => changeTab("sephora")} />
                 <Button icon="🧴" label="Продукт" onClick={() => changeTab("ptype")} />
+                <Button icon="👜" label="Моя косметичка" onClick={openInventory} />
                 <Button icon="💎" label="Beauty Challenges" onClick={() => openPosts("Challenge")} />
                 <Button icon="↩️" label="В канал" onClick={() => openLink(`https://t.me/${CHANNEL}`)} />
               </Panel>
@@ -2209,6 +2522,11 @@ useEffect(() => {
                 {/* Меню: сначала кнопки, потом открываем раздел */}
                 {profileView === "menu" ? (
                   <div style={{ marginTop:"2px" }}>
+                    <Button
+                      icon="👜"
+                      label="Моя косметичка"
+                      onClick={openInventory}
+                    />
                     <Button
                       icon="🎁"
                       label="Розыгрыши"
@@ -2497,6 +2815,40 @@ class SpinResp(BaseModel):
     claim_code: Optional[str] = None
 
 
+class InventoryResp(BaseModel):
+    telegram_id: int
+    points: int
+    ticket_count: int
+    ticket_convert_rate: int
+    dior_convert_value: int
+    prizes: list[dict[str, Any]]
+
+
+class ConvertTicketsReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    qty: int = Field(..., ge=1, le=10_000)
+
+
+class ConvertTicketsResp(BaseModel):
+    telegram_id: int
+    points: int
+    ticket_count: int
+    converted_qty: int
+    added_points: int
+
+
+class ConvertPrizeReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    claim_code: str = Field(..., min_length=3, max_length=64)
+
+
+class ConvertPrizeResp(BaseModel):
+    telegram_id: int
+    points: int
+    claim_code: str
+    added_points: int
+
+
 def pick_roulette_prize(roll: int) -> dict[str, Any]:
     acc = 0
     for item in ROULETTE_DISTRIBUTION:
@@ -2590,6 +2942,175 @@ async def raffle_buy_ticket(req: BuyTicketReq):
             tickets_now = int(ticket_row.count or 0)
 
     return {"telegram_id": tid, "points": points_now, "ticket_count": tickets_now}
+
+
+# -----------------------------------------------------------------------------
+# INVENTORY API
+# -----------------------------------------------------------------------------
+@app.get("/api/inventory", response_model=InventoryResp)
+async def inventory_api(telegram_id: int):
+    tid = int(telegram_id)
+    async with async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        raffle = (await session.execute(select(Raffle).where(Raffle.id == DEFAULT_RAFFLE_ID))).scalar_one()
+        t = (
+            await session.execute(
+                select(RaffleTicket.count).where(
+                    RaffleTicket.telegram_id == tid,
+                    RaffleTicket.raffle_id == raffle.id,
+                )
+            )
+        ).scalar_one_or_none()
+
+        claims = (
+            await session.execute(
+                select(RouletteClaim)
+                .where(RouletteClaim.telegram_id == tid)
+                .order_by(RouletteClaim.created_at.desc())
+                .limit(50)
+            )
+        ).scalars().all()
+
+    prizes: list[dict[str, Any]] = []
+    for c in claims:
+        # показываем только "физические" призы, которые ещё актуальны
+        if (c.prize_type or "") != "physical_dior_palette":
+            continue
+        if (c.status or "") == "closed":
+            continue
+        prizes.append(
+            {
+                "claim_code": c.claim_code,
+                "prize_type": c.prize_type,
+                "prize_label": c.prize_label,
+                "status": c.status,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            }
+        )
+
+    return {
+        "telegram_id": tid,
+        "points": int(user.points or 0),
+        "ticket_count": int(t or 0),
+        "ticket_convert_rate": int(TICKET_CONVERT_RATE),
+        "dior_convert_value": int(DIOR_PALETTE_CONVERT_VALUE),
+        "prizes": prizes,
+    }
+
+
+@app.post("/api/inventory/convert_ticket", response_model=ConvertTicketsResp)
+async def inventory_convert_ticket(req: ConvertTicketsReq):
+    tid = int(req.telegram_id)
+    qty = max(1, int(req.qty))
+    added = qty * int(TICKET_CONVERT_RATE)
+
+    async with async_session_maker() as session:
+        async with session.begin():
+            user = (
+                await session.execute(
+                    select(User).where(User.telegram_id == tid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            ticket_row = await get_ticket_row(session, tid, DEFAULT_RAFFLE_ID)
+            have = int(ticket_row.count or 0)
+            if qty > have:
+                raise HTTPException(status_code=400, detail=f"Недостаточно билетов. Есть {have}")
+
+            ticket_row.count = have - qty
+            ticket_row.updated_at = datetime.utcnow()
+
+            user.points = int(user.points or 0) + added
+            _recalc_tier(user)
+
+            session.add(
+                PointTransaction(
+                    telegram_id=tid,
+                    type="ticket_convert",
+                    delta=added,
+                    meta={"qty": qty, "rate": int(TICKET_CONVERT_RATE)},
+                )
+            )
+
+            points_now = int(user.points or 0)
+            tickets_now = int(ticket_row.count or 0)
+
+    return {
+        "telegram_id": tid,
+        "points": points_now,
+        "ticket_count": tickets_now,
+        "converted_qty": qty,
+        "added_points": added,
+    }
+
+
+@app.post("/api/inventory/convert_prize", response_model=ConvertPrizeResp)
+async def inventory_convert_prize(req: ConvertPrizeReq):
+    tid = int(req.telegram_id)
+    code = (req.claim_code or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="claim_code required")
+
+    async with async_session_maker() as session:
+        async with session.begin():
+            user = (
+                await session.execute(
+                    select(User).where(User.telegram_id == tid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            claim = (
+                await session.execute(
+                    select(RouletteClaim)
+                    .where(RouletteClaim.claim_code == code)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+
+            if not claim:
+                raise HTTPException(status_code=404, detail="Код не найден")
+            if int(claim.telegram_id) != tid:
+                raise HTTPException(status_code=403, detail="Этот код принадлежит другому пользователю")
+            if (claim.prize_type or "") != "physical_dior_palette":
+                raise HTTPException(status_code=400, detail="Этот приз нельзя конвертировать")
+            if (claim.status or "") == "closed":
+                raise HTTPException(status_code=400, detail="Этот приз уже закрыт")
+
+            added = int(DIOR_PALETTE_CONVERT_VALUE)
+
+            # Закрываем заявку как "конвертировано"
+            claim.status = "closed"
+            note = "CONVERTED_TO_POINTS"
+            if claim.contact_text:
+                if note not in claim.contact_text:
+                    claim.contact_text = (claim.contact_text + "\\n" + note).strip()
+            else:
+                claim.contact_text = note
+            claim.updated_at = datetime.utcnow()
+
+            user.points = int(user.points or 0) + added
+            _recalc_tier(user)
+
+            session.add(
+                PointTransaction(
+                    telegram_id=tid,
+                    type="prize_convert",
+                    delta=added,
+                    meta={"claim_code": code, "value": added},
+                )
+            )
+
+            points_now = int(user.points or 0)
+
+    return {"telegram_id": tid, "points": points_now, "claim_code": code, "added_points": int(DIOR_PALETTE_CONVERT_VALUE)}
 @app.get("/api/roulette/history")
 async def roulette_history(telegram_id: int, limit: int = 5):
     limit = max(1, min(int(limit), 20))
