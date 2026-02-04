@@ -711,6 +711,38 @@ tg_task: asyncio.Task | None = None
 sweeper_task: asyncio.Task | None = None
 
 
+
+# -----------------------------------------------------------------------------
+# ADMIN MEDIA SYNC MODE (backfill media for old posts)
+# -----------------------------------------------------------------------------
+_admin_media_sync_until: dict[int, datetime] = {}
+
+def admin_media_sync_active(user_id: int) -> bool:
+    exp = _admin_media_sync_until.get(int(user_id))
+    return bool(exp and exp > datetime.utcnow())
+
+def admin_media_sync_enable(user_id: int, minutes: int = 30) -> None:
+    _admin_media_sync_until[int(user_id)] = datetime.utcnow() + timedelta(minutes=minutes)
+
+def admin_media_sync_disable(user_id: int) -> None:
+    _admin_media_sync_until.pop(int(user_id), None)
+
+async def update_post_media_by_message_id(message_id: int, media_type: str | None, media_file_id: str | None) -> bool:
+    """Update media fields for an existing post row by its channel message_id.
+    Returns True if a row was updated.
+    """
+    if not message_id:
+        return False
+    async with async_session() as session:
+        q = (
+            update(Post)
+            .where(Post.message_id == int(message_id))
+            .values(media_type=media_type, media_file_id=media_file_id)
+        )
+        res = await session.execute(q)
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
@@ -1191,6 +1223,106 @@ async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_sync_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Enable media sync mode: admin forwards channel posts to bot, bot backfills media_file_id."""
+    if not update.message:
+        return
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
+        return
+
+    admin_media_sync_enable(uid, minutes=45)
+    await update.message.reply_text(
+        "🛠️ Режим синхронизации картинок ВКЛ.
+
+"
+        "Что делать:
+"
+        "1) Открой канал и выбери посты (лучше те, где есть фото).
+"
+        "2) Перешли их СЮДА (в этот чат с ботом).
+"
+        "3) Бот автоматически добавит media_file_id к посту в базе.
+
+"
+        "Подсказка: можно переслать 30–100 постов подряд.
+"
+        "Выключить: /sync_media_off
+"
+        "Автовыключение через ~45 минут.",
+        reply_markup=get_main_keyboard(),
+    )
+
+
+async def cmd_sync_media_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
+        return
+    admin_media_sync_disable(uid)
+    await update.message.reply_text("✅ Режим синхронизации картинок ВЫКЛ.", reply_markup=get_main_keyboard())
+
+
+async def on_admin_forward_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle forwarded messages from admin to backfill media for old channel posts."""
+    if not update.message:
+        return
+    uid = update.effective_user.id
+    if not is_admin(uid) or not admin_media_sync_active(uid):
+        return
+
+    msg = update.message
+
+    fchat = getattr(msg, "forward_from_chat", None)
+    fmid = getattr(msg, "forward_from_message_id", None)
+
+    if not fchat or not fmid:
+        await msg.reply_text("ℹ️ Перешли именно пост из канала (Forward).")
+        return
+
+    # Optional: verify it's our channel by username (if available)
+    try:
+        ch_u = (getattr(fchat, "username", "") or "").lstrip("@")
+        if CHANNEL_USERNAME and ch_u and ch_u.lower() != CHANNEL_USERNAME.lower():
+            await msg.reply_text("ℹ️ Это не мой канал. Перешли пост из нужного канала.")
+            return
+    except Exception:
+        pass
+
+    media_type = None
+    media_file_id = None
+
+    if msg.photo:
+        media_type = "photo"
+        media_file_id = msg.photo[-1].file_id  # biggest size
+    elif msg.video:
+        media_type = "video"
+        media_file_id = msg.video.file_id
+    elif msg.document:
+        media_type = "document"
+        media_file_id = msg.document.file_id
+    elif msg.animation:
+        media_type = "animation"
+        media_file_id = msg.animation.file_id
+
+    if not media_file_id:
+        await msg.reply_text(f"ℹ️ В этом форварде нет медиа. message_id={fmid}")
+        return
+
+    ok = await update_post_media_by_message_id(int(fmid), media_type, media_file_id)
+    if ok:
+        await msg.reply_text(f"✅ Обновил пост {fmid}: {media_type}")
+    else:
+        await msg.reply_text(
+            f"⚠️ Пост {fmid} не найден в базе.
+"
+            "Он появится, если бот уже сохранял этот пост ранее."
+        )
+
+
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not q:
@@ -1274,13 +1406,41 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
     if not msg:
         return
+
     text_ = msg.text or msg.caption or ""
+
+    # Detect media (for Mini App previews)
+    media_type = None
+    media_file_id = None
+
+    # Photos: take the largest size for best preview
+    if getattr(msg, "photo", None):
+        try:
+            media_type = "photo"
+            media_file_id = msg.photo[-1].file_id
+        except Exception:
+            media_type = None
+            media_file_id = None
+    elif getattr(msg, "video", None):
+        try:
+            media_type = "video"
+            media_file_id = msg.video.file_id
+        except Exception:
+            pass
+    elif getattr(msg, "document", None):
+        # Some channels post images as documents; keep it for fallback preview attempts
+        try:
+            media_type = "document"
+            media_file_id = msg.document.file_id
+        except Exception:
+            pass
+
     await upsert_post_from_channel(
         message_id=msg.message_id,
         date=msg.date,
         text_=text_,
-        media_type=None,
-        media_file_id=None,
+        media_type=media_type,
+        media_file_id=media_file_id,
     )
 
 
@@ -1288,13 +1448,39 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
     msg = update.edited_channel_post
     if not msg:
         return
+
     text_ = msg.text or msg.caption or ""
+
+    # Detect media (for Mini App previews)
+    media_type = None
+    media_file_id = None
+
+    if getattr(msg, "photo", None):
+        try:
+            media_type = "photo"
+            media_file_id = msg.photo[-1].file_id
+        except Exception:
+            media_type = None
+            media_file_id = None
+    elif getattr(msg, "video", None):
+        try:
+            media_type = "video"
+            media_file_id = msg.video.file_id
+        except Exception:
+            pass
+    elif getattr(msg, "document", None):
+        try:
+            media_type = "document"
+            media_file_id = msg.document.file_id
+        except Exception:
+            pass
+
     await upsert_post_from_channel(
         message_id=msg.message_id,
         date=msg.date,
         text_=text_,
-        media_type=None,
-        media_file_id=None,
+        media_type=media_type,
+        media_file_id=media_file_id,
     )
 
 
@@ -1351,6 +1537,10 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("admin_user", cmd_admin_user))
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
+
+tg_app.add_handler(CommandHandler("sync_media", cmd_sync_media))
+tg_app.add_handler(CommandHandler("sync_media_off", cmd_sync_media_off))
+tg_app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, on_admin_forward_media))
 
     tg_app.add_handler(CallbackQueryHandler(on_callback))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
@@ -2975,7 +3165,14 @@ async def root():
 
 @app.get("/webapp", response_class=HTMLResponse)
 async def webapp():
-    return HTMLResponse(get_webapp_html())
+    return HTMLResponse(
+        get_webapp_html(),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/api/user/{telegram_id}")
