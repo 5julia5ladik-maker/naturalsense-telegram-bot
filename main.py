@@ -252,7 +252,7 @@ class RouletteClaim(Base):
     prize_type = Column(String, nullable=False)
     prize_label = Column(String, nullable=False)
 
-    status = Column(String, default="awaiting_contact", nullable=False)  # awaiting_contact|submitted|closed
+    status = Column(String, default="awaiting_contact", nullable=False)  # awaiting_contact|submitted|received|closed
     contact_text = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
@@ -855,6 +855,10 @@ async def claim_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, c
             )
             return
 
+        if st == "received":
+            await update.message.reply_text("✅ Статус: ✅ Получено")
+            return
+
         if st == "closed":
             await update.message.reply_text("✅ Эта заявка уже закрыта.")
             return
@@ -1131,6 +1135,55 @@ async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+
+async def cmd_claim_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Админ: отметить заявку на физический приз как 'Получено' (status=received)."""
+    if not update.message:
+        return
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
+        return
+
+    if not context.args:
+        await update.message.reply_text("Используй: /claim_done NS-XXXXXXXX", reply_markup=get_main_keyboard())
+        return
+
+    code = (context.args[0] or "").strip().upper()
+    if not code:
+        await update.message.reply_text("Используй: /claim_done NS-XXXXXXXX", reply_markup=get_main_keyboard())
+        return
+
+    async with async_session_maker() as session:
+        claim = (
+            await session.execute(
+                select(RouletteClaim).where(RouletteClaim.claim_code == code)
+            )
+        ).scalar_one_or_none()
+
+        if not claim:
+            await update.message.reply_text("❌ Код не найден.", reply_markup=get_main_keyboard())
+            return
+
+        claim.status = "received"
+        claim.updated_at = datetime.utcnow()
+        await session.commit()
+
+        # пробуем уведомить пользователя
+        try:
+            if tg_app and BOT_TOKEN:
+                await tg_app.bot.send_message(
+                    chat_id=int(claim.telegram_id),
+                    text=f"✅ Ваш приз отмечен как полученный.
+Код: {code}
+Статус: ✅ Получено"
+                )
+        except Exception:
+            pass
+
+    await update.message.reply_text(f"✅ Готово. {code} → статус: ✅ Получено", reply_markup=get_main_keyboard())
+
+
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not q:
@@ -1291,6 +1344,7 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("admin_user", cmd_admin_user))
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
+    tg_app.add_handler(CommandHandler("claim_done", cmd_claim_done))
 
     tg_app.add_handler(CallbackQueryHandler(on_callback))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
@@ -2198,9 +2252,10 @@ useEffect(() => {
 
         const statusLabel = (s) => {
           const v = String(s || "");
-          if (v === "awaiting_contact") return "⏳ Доступен (не получен)";
-          if (v === "submitted") return "📨 Заявка отправлена";
-          if (v === "closed") return "✅ Закрыт";
+          if (v === "awaiting_contact") return "⏳ Доступен";
+          if (v === "submitted") return "⏳ Ожидает подтверждения";
+          if (v === "received") return "✅ Получено";
+          if (v === "closed") return "✅ Закрыто";
           return v || "-";
         };
 
@@ -2341,7 +2396,7 @@ useEffect(() => {
                         <div
                           onClick={() => {
                             const st = String(p.status || "");
-                            if (st === "submitted" || st === "closed") return;
+                            if (st === "submitted" || st === "received" || st === "closed") return;
 
                             setConfirmClaim({
                               open: true,
@@ -2356,15 +2411,19 @@ useEffect(() => {
                             borderRadius:"14px",
                             border:"1px solid var(--stroke)",
                             background:"rgba(255,255,255,0.06)",
-                            cursor: (String(p.status||"") === "submitted" || String(p.status||"") === "closed") ? "not-allowed" : "pointer",
+                            cursor: (String(p.status||"") === "submitted" || String(p.status||"") === "received" || String(p.status||"") === "closed") ? "not-allowed" : "pointer",
                             userSelect:"none",
                             fontWeight:750,
-                            opacity: (String(p.status||"") === "submitted" || String(p.status||"") === "closed") ? 0.5 : 1
+                            opacity: (String(p.status||"") === "submitted" || String(p.status||"") === "received" || String(p.status||"") === "closed") ? 0.5 : 1
                           }}
                         >🎁 Забрать</div>
 
                         <div
-                          onClick={() => convertPrize(p.claim_code)}
+                          onClick={() => {
+                            const st = String(p.status || "");
+                            if (st === "submitted" || st === "received" || st === "closed") return;
+                            convertPrize(p.claim_code);
+                          }}
                           style={{
                             flex:1.2,
                             padding:"12px",
@@ -2372,9 +2431,10 @@ useEffect(() => {
                             borderRadius:"14px",
                             border:"1px solid rgba(230,193,128,0.35)",
                             background:"rgba(230,193,128,0.14)",
-                            cursor:"pointer",
+                            cursor: (String(p.status||"") === "submitted" || String(p.status||"") === "received" || String(p.status||"") === "closed") ? "not-allowed" : "pointer",
                             userSelect:"none",
-                            fontWeight:850
+                            fontWeight:850,
+                            opacity: (String(p.status||"") === "submitted" || String(p.status||"") === "received" || String(p.status||"") === "closed") ? 0.5 : 1
                           }}
                         >💎 В бонусы (+{diorValue})</div>
                       </div>
