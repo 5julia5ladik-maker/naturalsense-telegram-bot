@@ -1775,6 +1775,7 @@ def get_webapp_html() -> str:
       const [loading, setLoading] = useState(false);
 
       const [profileOpen, setProfileOpen] = useState(false);
+      const [profileView, setProfileView] = useState("menu"); // menu|raffle|roulette|history
       const [raffle, setRaffle] = useState(null);
       const [rouletteHistory, setRouletteHistory] = useState([]);
       const [busy, setBusy] = useState(false);
@@ -1835,6 +1836,7 @@ def get_webapp_html() -> str:
       const openProfile = () => {
         if (!user) return;
         setMsg("");
+        setProfileView("menu");
         setProfileOpen(true);
       };
 
@@ -2204,68 +2206,120 @@ useEffect(() => {
 
                 <Divider />
 
-                <div style={{ fontSize:"14px", fontWeight:650 }}>🎁 Розыгрыши</div>
-                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
-                  Билет = 500 баллов. Баллы списываются.
-                </div>
-                <div style={{ marginTop:"10px", fontSize:"13px", color:"var(--muted)" }}>
-                  Твоих билетов: <b style={{ color:"rgba(255,255,255,0.92)" }}>{raffle?.ticket_count ?? 0}</b>
-                </div>
-                <Button
-                  icon="🎟"
-                  label="Купить билет (500)"
-                  subtitle={busy ? "Подожди…" : ""}
-                  onClick={buyTicket}
-                  disabled={busy || (user.points || 0) < 500}
-                />
-
-                <Divider />
-
-                <div style={{ fontSize:"14px", fontWeight:650 }}>🎡 Рулетка</div>
-                <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
-                  1 спин = 2000 баллов. Каждый день (лимит 1 раз/5с (тест)).
-                </div>
-                <Button
-                  icon="🎡"
-                  label="Крутить (2000)"
-                  subtitle={busy ? "Подожди…" : ""}
-                  onClick={spinRoulette}
-                  disabled={busy || (user.points || 0) < 2000}
-                />
-
-                <PrizeTable />
-
-                {msg && (
-                  <div style={{
-                    marginTop:"14px",
-                    padding:"10px",
-                    borderRadius:"14px",
-                    border:"1px solid var(--stroke)",
-                    background:"rgba(255,255,255,0.08)",
-                    fontSize:"13px"
-                  }}>{msg}</div>
-                )}
-
-                <Divider />
-
-                <div style={{ fontSize:"14px", fontWeight:650 }}>🧾 История рулетки</div>
-                {rouletteHistory.length === 0 ? (
-                  <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
-                    Пока пусто.
+                {/* Меню: сначала кнопки, потом открываем раздел */}
+                {profileView === "menu" ? (
+                  <div style={{ marginTop:"2px" }}>
+                    <Button
+                      icon="🎁"
+                      label="Розыгрыши"
+                      onClick={() => { setMsg(""); setProfileView("raffle"); }}
+                    />
+                    <Button
+                      icon="🎡"
+                      label="Рулетка"
+                      onClick={() => { setMsg(""); setProfileView("roulette"); }}
+                    />
+                    <Button
+                      icon="🧾"
+                      label="История рулетки"
+                      onClick={() => { setMsg(""); setProfileView("history"); }}
+                    />
                   </div>
                 ) : (
-                  <div style={{ marginTop:"10px", display:"grid", gap:"8px" }}>
-                    {rouletteHistory.map((x) => (
-                      <div key={x.id} style={{
-                        padding:"10px",
+                  <div style={{ marginTop:"2px" }}>
+                    <div
+                      onClick={() => { setMsg(""); setProfileView("menu"); }}
+                      style={{
+                        display:"inline-flex",
+                        alignItems:"center",
+                        gap:"8px",
+                        padding:"10px 12px",
                         borderRadius:"14px",
                         border:"1px solid var(--stroke)",
-                        background:"rgba(255,255,255,0.08)"
-                      }}>
-                        <div style={{ fontSize:"12px", color:"var(--muted)" }}>{x.created_at}</div>
-                        <div style={{ marginTop:"4px", fontSize:"14px", fontWeight:600 }}>{x.prize_label}</div>
+                        background:"rgba(255,255,255,0.06)",
+                        cursor:"pointer",
+                        userSelect:"none",
+                        fontWeight:650,
+                        fontSize:"14px"
+                      }}
+                    >
+                      ← Назад
+                    </div>
+
+                    {/* РОЗЫГРЫШИ */}
+                    {profileView === "raffle" && (
+                      <div style={{ marginTop:"14px" }}>
+                        <div style={{ fontSize:"14px", fontWeight:650 }}>🎁 Розыгрыши</div>
+                        <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                          Билет = 500 баллов. Баллы списываются.
+                        </div>
+                        <div style={{ marginTop:"10px", fontSize:"13px", color:"var(--muted)" }}>
+                          Твоих билетов: <b style={{ color:"rgba(255,255,255,0.92)" }}>{raffle?.ticket_count ?? 0}</b>
+                        </div>
+                        <Button
+                          icon="🎟"
+                          label="Купить билет (500)"
+                          subtitle={busy ? "Подожди…" : ""}
+                          onClick={buyTicket}
+                          disabled={busy || (user.points || 0) < 500}
+                        />
                       </div>
-                    ))}
+                    )}
+
+                    {/* РУЛЕТКА */}
+                    {profileView === "roulette" && (
+                      <div style={{ marginTop:"14px" }}>
+                        <div style={{ fontSize:"14px", fontWeight:650 }}>🎡 Рулетка</div>
+                        <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                          1 спин = 2000 баллов. Каждый день (лимит 1 раз/5с (тест)).
+                        </div>
+                        <Button
+                          icon="🎡"
+                          label="Крутить (2000)"
+                          subtitle={busy ? "Подожди…" : ""}
+                          onClick={spinRoulette}
+                          disabled={busy || (user.points || 0) < 2000}
+                        />
+                        <PrizeTable />
+
+                        {msg && (
+                          <div style={{
+                            marginTop:"14px",
+                            padding:"10px",
+                            borderRadius:"14px",
+                            border:"1px solid var(--stroke)",
+                            background:"rgba(255,255,255,0.08)",
+                            fontSize:"13px"
+                          }}>{msg}</div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ИСТОРИЯ РУЛЕТКИ */}
+                    {profileView === "history" && (
+                      <div style={{ marginTop:"14px" }}>
+                        <div style={{ fontSize:"14px", fontWeight:650 }}>🧾 История рулетки</div>
+                        {rouletteHistory.length === 0 ? (
+                          <div style={{ marginTop:"8px", fontSize:"13px", color:"var(--muted)" }}>
+                            Пока пусто.
+                          </div>
+                        ) : (
+                          <div style={{ marginTop:"10px", display:"grid", gap:"8px" }}>
+                            {rouletteHistory.map((x) => (
+                              <div key={x.id} style={{
+                                padding:"10px",
+                                borderRadius:"14px",
+                                border:"1px solid var(--stroke)",
+                                background:"rgba(255,255,255,0.08)"
+                              }}>
+                                <div style={{ fontSize:"12px", color:"var(--muted)" }}>{x.created_at}</div>
+                                <div style={{ marginTop:"4px", fontSize:"14px", fontWeight:600 }}>{x.prize_label}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2493,46 +2547,47 @@ async def raffle_status(telegram_id: int):
 
 @app.post("/api/raffle/buy_ticket", response_model=BuyTicketResp)
 async def raffle_buy_ticket(req: BuyTicketReq):
-    tid = int(req.telegram_id)
-    qty = int(req.qty)
-    cost = RAFFLE_TICKET_COST * qty
 
-    async with async_session_maker() as session:
-        async with session.begin():
-            user = (
-                await session.execute(
-                    select(User).where(User.telegram_id == tid).with_for_update()
-                )
-            ).scalar_one_or_none()
-            if not user:
-                raise HTTPException(status_code=404, detail="User not found")
+tid = int(req.telegram_id)
+qty = int(req.qty)
+cost = RAFFLE_TICKET_COST * qty
 
-            if (user.points or 0) < cost:
-                raise HTTPException(status_code=400, detail=f"Недостаточно баллов. Нужно {cost}")
+async with async_session_maker() as session:
+    async with session.begin():
+        user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-            raffle = (await session.execute(select(Raffle).where(Raffle.id == DEFAULT_RAFFLE_ID))).scalar_one()
-            if not raffle.is_active:
-                raise HTTPException(status_code=400, detail="Розыгрыш сейчас недоступен")
+        if (user.points or 0) < cost:
+            raise HTTPException(status_code=400, detail=f"Недостаточно баллов. Нужно {cost}")
 
-            user.points = (user.points or 0) - cost
-            _recalc_tier(user)
+        raffle = (await session.execute(select(Raffle).where(Raffle.id == DEFAULT_RAFFLE_ID))).scalar_one()
+        if not raffle.is_active:
+            raise HTTPException(status_code=400, detail="Розыгрыш сейчас недоступен")
 
-            ticket_row = await get_ticket_row(session, tid, raffle.id)
-            ticket_row.count = int(ticket_row.count or 0) + qty
-            ticket_row.updated_at = datetime.utcnow()
+        # списываем баллы
+        user.points = (user.points or 0) - cost
+        _recalc_tier(user)
 
-            session.add(PointTransaction(telegram_id=tid, type="raffle_ticket", delta=-cost, meta={"qty": qty, "raffle_id": raffle.id}))
+        # увеличиваем билеты
+        ticket_row = await get_ticket_row(session, tid, raffle.id)
+        ticket_row.count = int(ticket_row.count or 0) + qty
+        ticket_row.updated_at = datetime.utcnow()
 
-        await session.refresh(user)
-        # refresh ticket
-        async with session.begin():
-            ticket_row2 = (
-                await session.execute(
-                    select(RaffleTicket).where(RaffleTicket.telegram_id == tid, RaffleTicket.raffle_id == DEFAULT_RAFFLE_ID)
-                )
-            ).scalar_one()
+        session.add(
+            PointTransaction(
+                telegram_id=tid,
+                type="raffle_ticket",
+                delta=-cost,
+                meta={"qty": qty, "raffle_id": raffle.id},
+            )
+        )
 
-        return {"telegram_id": tid, "points": int(user.points or 0), "ticket_count": int(ticket_row2.count or 0)}
+        # значения для ответа (внутри транзакции уже актуальные)
+        points_now = int(user.points or 0)
+        tickets_now = int(ticket_row.count or 0)
+
+return {"telegram_id": tid, "points": points_now, "ticket_count": tickets_now}
 
 
 @app.get("/api/roulette/history")
