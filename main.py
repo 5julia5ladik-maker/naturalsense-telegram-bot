@@ -846,8 +846,17 @@ async def claim_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, c
             await update.message.reply_text("⛔️ Этот код принадлежит другому пользователю.")
             return
 
-        if (claim.status or "") == "submitted":
-            await update.message.reply_text("✅ Заявка уже отправлена. Мы скоро свяжемся.")
+        st = (claim.status or "").strip()
+        if st == "submitted":
+            await update.message.reply_text(
+                "✅ Данные уже получены.\n\n"
+                "Статус: ⏳ Ожидает подтверждения.\n"
+                "Мы свяжемся с вами после проверки."
+            )
+            return
+
+        if st == "closed":
+            await update.message.reply_text("✅ Эта заявка уже закрыта.")
             return
 
         # помечаем как ожидание контакта и обновляем время
@@ -856,11 +865,12 @@ async def claim_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, c
         await session.commit()
 
     await update.message.reply_text(
-        "🎁 Заявка на приз принята!\n\n"
-        "Напишите одним сообщением удобный способ связи (Telegram/WhatsApp) и адрес/город доставки.\n"
+        "🎁 Заявка на приз создана.\n\n"
+        "Отправьте ОДНИМ сообщением:\n"
+        "1) удобный способ связи (Telegram/WhatsApp)\n"
+        "2) город и адрес доставки\n\n"
         f"Код заявки: {code}"
     )
-
 
 async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -1180,7 +1190,13 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"prize: {pending.prize_label}\n"
                 f"contacts: {txt}"
             )
-            await update.message.reply_text("✅ Спасибо! Заявка отправлена. Мы скоро свяжемся.")
+
+            await update.message.reply_text(
+                "✅ Данные получены.\n\n"
+                "Ваша заявка принята и ожидает подтверждения.\n"
+                "Мы свяжемся с вами после проверки.\n\n"
+                "Статус: ⏳ Ожидает подтверждения"
+            )
             return
 
     if txt == "👤 Профиль":
@@ -1190,7 +1206,6 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if txt == "ℹ️ Помощь":
         await cmd_help(update, context)
         return
-
 
 # -----------------------------------------------------------------------------
 # CHANNEL INDEXING
