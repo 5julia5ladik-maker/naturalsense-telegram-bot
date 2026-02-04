@@ -16,6 +16,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import (
     Update,
+    MessageOriginChannel,
+    MessageOriginChat,
+    MessageOriginUser,
+    MessageOriginHiddenUser,
     ReplyKeyboardMarkup,
     KeyboardButton,
     InlineKeyboardButton,
@@ -1262,6 +1266,25 @@ async def cmd_sync_media_off(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("✅ Режим синхронизации картинок ВЫКЛ.", reply_markup=get_main_keyboard())
 
 
+
+def extract_forward_origin(msg) -> tuple[object | None, int | None]:
+    """Return (forward_chat, forward_message_id) for both old and new Telegram forward fields."""
+    fchat = getattr(msg, "forward_from_chat", None)
+    fmid = getattr(msg, "forward_from_message_id", None)
+    if fchat and fmid:
+        return fchat, fmid
+
+    origin = getattr(msg, "forward_origin", None)
+    try:
+        if isinstance(origin, MessageOriginChannel):
+            return origin.chat, origin.message_id
+        if isinstance(origin, MessageOriginChat):
+            return origin.sender_chat, origin.message_id
+    except Exception:
+        pass
+    return None, None
+
+
 async def on_admin_forward_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle forwarded messages from admin to backfill media for old channel posts."""
     if not update.message:
@@ -1272,11 +1295,21 @@ async def on_admin_forward_media(update: Update, context: ContextTypes.DEFAULT_T
 
     msg = update.message
 
-    fchat = getattr(msg, "forward_from_chat", None)
-    fmid = getattr(msg, "forward_from_message_id", None)
+    fchat, fmid = extract_forward_origin(msg)
 
     if not fchat or not fmid:
-        await msg.reply_text("ℹ️ Перешли именно пост из канала (Forward).")
+        await msg.reply_text(
+            "ℹ️ Я не вижу оригинал (message_id).
+
+"
+            "Нужно именно *переслать* пост, а не отправить 'как копию'.
+"
+            "Android: удержи пост → *Переслать* → выбери бота → отключи 'как копия/без ссылки' (если есть).
+
+"
+            "Если в канале включено *Restrict saving content* — Telegram не отдаёт данные для синхронизации.",
+            parse_mode="Markdown",
+        )
         return
 
     # Optional: verify it's our channel by username (if available)
