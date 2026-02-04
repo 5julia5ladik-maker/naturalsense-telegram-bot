@@ -1234,23 +1234,19 @@ async def cmd_sync_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     admin_media_sync_enable(uid, minutes=45)
     await update.message.reply_text(
-        "🛠️ Режим синхронизации картинок ВКЛ.
+        """🛠️ Режим синхронизации картинок ВКЛ.
 
-"
-        "Что делать:
-"
-        "1) Открой канал и выбери посты (лучше те, где есть фото).
-"
-        "2) Перешли их СЮДА (в этот чат с ботом).
-"
-        "3) Бот автоматически добавит media_file_id к посту в базе.
+Что делать:
+1) Открой канал и выбери посты (лучше те, где есть фото).
+2) Перешли их СЮДА (в этот чат с ботом).
+3) Бот автоматически обновит записи в базе и добавит media_file_id.
 
-"
-        "Подсказка: можно переслать 30–100 постов подряд.
-"
-        "Выключить: /sync_media_off
-"
-        "Автовыключение через ~45 минут.",
+Подсказка: можно переслать 30–100 постов подряд.
+
+Выключить: /sync_media_off
+
+Автовыключение через ~45 минут."""
+        ,
         reply_markup=get_main_keyboard(),
     )
 
@@ -1317,9 +1313,8 @@ async def on_admin_forward_media(update: Update, context: ContextTypes.DEFAULT_T
         await msg.reply_text(f"✅ Обновил пост {fmid}: {media_type}")
     else:
         await msg.reply_text(
-            f"⚠️ Пост {fmid} не найден в базе.
-"
-            "Он появится, если бот уже сохранял этот пост ранее."
+            f"""⚠️ Пост {fmid} не найден в базе.
+Он появится, если бот уже сохранял этот пост ранее."""
         )
 
 
@@ -1538,9 +1533,9 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
-tg_app.add_handler(CommandHandler("sync_media", cmd_sync_media))
-tg_app.add_handler(CommandHandler("sync_media_off", cmd_sync_media_off))
-tg_app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, on_admin_forward_media))
+    tg_app.add_handler(CommandHandler("sync_media", cmd_sync_media))
+    tg_app.add_handler(CommandHandler("sync_media_off", cmd_sync_media_off))
+    tg_app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, on_admin_forward_media))
 
     tg_app.add_handler(CallbackQueryHandler(on_callback))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
