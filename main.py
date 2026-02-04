@@ -252,7 +252,7 @@ class RouletteClaim(Base):
     prize_type = Column(String, nullable=False)
     prize_label = Column(String, nullable=False)
 
-    status = Column(String, default="awaiting_contact", nullable=False)  # awaiting_contact|submitted|closed
+    status = Column(String, default="awaiting_choice", nullable=False)  # awaiting_choice|awaiting_contact|submitted|closed
     contact_text = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
@@ -823,7 +823,14 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(build_help_text(), parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 async def claim_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str):
-    """Общая логика для /claim и deep-link /start claim_CODE"""
+    """Логика получения физического приза (deep-link /start claim_CODE или /claim CODE)
+
+    Статусы:
+      awaiting_choice   — приз получен, но выбор (забрать/в бонусы) ещё не сделан
+      awaiting_contact  — пользователь нажал "Забрать", ждём контакты/адрес
+      submitted         — контакты получены, заявка отправлена админу
+      closed            — заявка закрыта (конвертировано или выдано)
+    """
     if not update.message:
         return
     code = (code or "").strip().upper()
@@ -846,21 +853,29 @@ async def claim_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, c
             await update.message.reply_text("⛔️ Этот код принадлежит другому пользователю.")
             return
 
-        if (claim.status or "") == "submitted":
+        st = (claim.status or "").strip()
+
+        if st == "closed":
+            await update.message.reply_text("✅ Эта заявка уже закрыта.")
+            return
+
+        if st == "submitted":
             await update.message.reply_text("✅ Заявка уже отправлена. Мы скоро свяжемся.")
             return
 
-        # помечаем как ожидание контакта и обновляем время
-        claim.status = "awaiting_contact"
-        claim.updated_at = datetime.utcnow()
-        await session.commit()
+        # если это первый заход по кнопке "Забрать" — фиксируем выбор и блокируем конвертацию в бонусы
+        if st == "awaiting_choice":
+            claim.status = "awaiting_contact"
+            claim.updated_at = datetime.utcnow()
+            await session.commit()
 
-    await update.message.reply_text(
-        "🎁 Заявка на приз принята!\n\n"
-        "Напишите одним сообщением удобный способ связи (Telegram/WhatsApp) и адрес/город доставки.\n"
-        f"Код заявки: {code}"
-    )
-
+        # st == awaiting_contact (или только что перевели) — просим контакты/адрес
+        await update.message.reply_text(
+            "🎁 Вы выбрали получение приза.\n\n"
+            "Напишите одним сообщением удобный способ связи (Telegram/WhatsApp) и адрес/город доставки.\n"
+            f"Код заявки: {code}\n\n"
+            "После отправки данных обмен на бонусы будет недоступен."
+        )
 
 async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -2106,7 +2121,8 @@ useEffect(() => {
 
         const statusLabel = (s) => {
           const v = String(s || "");
-          if (v === "awaiting_contact") return "⏳ Доступен (не получен)";
+          if (v === "awaiting_choice") return "🆕 Выбор (забрать/бонусы)";
+          if (v === "awaiting_contact") return "⏳ Оформление начато";
           if (v === "submitted") return "📨 Заявка отправлена";
           if (v === "closed") return "✅ Закрыт";
           return v || "-";
@@ -2246,42 +2262,86 @@ useEffect(() => {
                       </div>
 
                       <div style={{ display:"flex", gap:"10px", marginTop:"12px" }}>
-                        <div
-                          onClick={() => {
-                            if (botUsername && tg?.openTelegramLink && p.claim_code) {
-                              tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${p.claim_code}`);
-                            } else if (p.claim_code) {
-                              alert(`/claim ${p.claim_code}`);
-                            }
-                          }}
-                          style={{
-                            flex:1,
-                            padding:"12px",
-                            textAlign:"center",
-                            borderRadius:"14px",
-                            border:"1px solid var(--stroke)",
-                            background:"rgba(255,255,255,0.06)",
-                            cursor:"pointer",
-                            userSelect:"none",
-                            fontWeight:750
-                          }}
-                        >🎁 Забрать</div>
+                        {p.status === "awaiting_choice" && (
+                          <>
+                            <div
+                              onClick={() => {
+                                if (botUsername && tg?.openTelegramLink && p.claim_code) {
+                                  tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${p.claim_code}`);
+                                } else if (p.claim_code) {
+                                  alert(`/claim ${p.claim_code}`);
+                                }
+                              }}
+                              style={{
+                                flex:1,
+                                padding:"12px",
+                                textAlign:"center",
+                                borderRadius:"14px",
+                                border:"1px solid var(--stroke)",
+                                background:"rgba(255,255,255,0.06)",
+                                cursor:"pointer",
+                                userSelect:"none",
+                                fontWeight:750
+                              }}
+                            >🎁 Забрать</div>
 
-                        <div
-                          onClick={() => convertPrize(p.claim_code)}
-                          style={{
-                            flex:1.2,
-                            padding:"12px",
-                            textAlign:"center",
-                            borderRadius:"14px",
-                            border:"1px solid rgba(230,193,128,0.35)",
-                            background:"rgba(230,193,128,0.14)",
-                            cursor:"pointer",
-                            userSelect:"none",
-                            fontWeight:850
-                          }}
-                        >💎 В бонусы (+{diorValue})</div>
-                      </div>
+                            <div
+                              onClick={() => convertPrize(p.claim_code)}
+                              style={{
+                                flex:1.2,
+                                padding:"12px",
+                                textAlign:"center",
+                                borderRadius:"14px",
+                                border:"1px solid rgba(230,193,128,0.35)",
+                                background:"rgba(230,193,128,0.14)",
+                                cursor:"pointer",
+                                userSelect:"none",
+                                fontWeight:850
+                              }}
+                            >💎 В бонусы (+{diorValue})</div>
+                          </>
+                        )}
+
+                        {p.status === "awaiting_contact" && (
+                          <div
+                            onClick={() => {
+                              if (botUsername && tg?.openTelegramLink && p.claim_code) {
+                                tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${p.claim_code}`);
+                              } else if (p.claim_code) {
+                                alert(`/claim ${p.claim_code}`);
+                              }
+                            }}
+                            style={{
+                              flex:1,
+                              padding:"12px",
+                              textAlign:"center",
+                              borderRadius:"14px",
+                              border:"1px solid rgba(230,193,128,0.35)",
+                              background:"rgba(230,193,128,0.14)",
+                              cursor:"pointer",
+                              userSelect:"none",
+                              fontWeight:850
+                            }}
+                          >✍️ Продолжить оформление</div>
+                        )}
+
+                        {p.status === "submitted" && (
+                          <div
+                            style={{
+                              flex:1,
+                              padding:"12px",
+                              textAlign:"center",
+                              borderRadius:"14px",
+                              border:"1px solid var(--stroke)",
+                              background:"rgba(255,255,255,0.06)",
+                              cursor:"default",
+                              userSelect:"none",
+                              fontWeight:750,
+                              opacity:0.7
+                            }}
+                          >📨 Заявка отправлена</div>
+                        )}
+                      </div></div>
                     </div>
                   ))}
                 </div>
@@ -3081,8 +3141,11 @@ async def inventory_convert_prize(req: ConvertPrizeReq):
                 raise HTTPException(status_code=403, detail="Этот код принадлежит другому пользователю")
             if (claim.prize_type or "") != "physical_dior_palette":
                 raise HTTPException(status_code=400, detail="Этот приз нельзя конвертировать")
-            if (claim.status or "") == "closed":
+            st = (claim.status or "").strip()
+            if st == "closed":
                 raise HTTPException(status_code=400, detail="Этот приз уже закрыт")
+            if st != "awaiting_choice":
+                raise HTTPException(status_code=400, detail="Нельзя конвертировать: вы уже нажали «Забрать» или заявка отправлена")
 
             added = int(DIOR_PALETTE_CONVERT_VALUE)
 
@@ -3218,7 +3281,7 @@ async def roulette_spin(req: SpinReq):
                         spin_id=None,  # id будет после commit, связь не критична
                         prize_type=prize_type,
                         prize_label=prize_label,
-                        status="awaiting_contact",
+                        status="awaiting_choice",
                     )
                 )
 
