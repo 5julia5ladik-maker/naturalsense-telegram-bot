@@ -2199,8 +2199,8 @@ useEffect(() => {
         const statusLabel = (s) => {
           const v = String(s || "");
           if (v === "awaiting_contact") return "⏳ Доступен (не получен)";
-          if (v === "submitted") return "📨 Заявка отправлена";
-          if (v === "closed") return "✅ Закрыт";
+          if (v === "submitted") return "⏳ Ожидает подтверждения";
+          if (v === "closed") return "✅ Получено";
           return v || "-";
         };
 
@@ -2337,7 +2337,8 @@ useEffect(() => {
                         Статус: {statusLabel(p.status)} • Код: {p.claim_code}
                       </div>
 
-                      <div style={{ display:"flex", gap:"10px", marginTop:"12px" }}>
+                      {(String(p.status||"") === "submitted" || String(p.status||"") === "closed") ? null : (
+<div style={{ display:"flex", gap:"10px", marginTop:"12px" }}>
                         <div
                           onClick={() => {
                             const st = String(p.status || "");
@@ -2378,6 +2379,7 @@ useEffect(() => {
                           }}
                         >💎 В бонусы (+{diorValue})</div>
                       </div>
+                      )}
                     </div>
                   ))}
                 </div>
