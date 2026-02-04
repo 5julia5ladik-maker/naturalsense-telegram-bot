@@ -11,7 +11,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import (
@@ -496,6 +496,66 @@ def preview_text(text_: str | None, limit: int = 180) -> str:
         return ""
     s = re.sub(r"\s+", " ", text_.strip())
     return (s[:limit] + "…") if len(s) > limit else s
+
+
+
+# -----------------------------------------------------------------------------
+# MEDIA (thumbnails for Mini App)
+# -----------------------------------------------------------------------------
+MEDIA_CACHE_DIR = env_get("MEDIA_CACHE_DIR", "./media_cache")
+os.makedirs(MEDIA_CACHE_DIR, exist_ok=True)
+
+_file_path_cache: dict[str, str] = {}
+_media_lock = asyncio.Lock()
+
+
+async def _tg_get_file_path(file_id: str) -> str:
+    """Telegram Bot API: getFile -> file_path"""
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=500, detail="BOT_TOKEN is not set")
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(url, params={"file_id": file_id})
+        r.raise_for_status()
+        data = r.json()
+    if not data.get("ok") or not data.get("result") or not data["result"].get("file_path"):
+        raise HTTPException(status_code=404, detail="Telegram file not found")
+    return str(data["result"]["file_path"])
+
+
+async def get_cached_media_file(file_id: str) -> str:
+    """Downloads media file into MEDIA_CACHE_DIR once and returns local path."""
+    file_id = (file_id or "").strip()
+    if not file_id:
+        raise HTTPException(status_code=404, detail="Empty file_id")
+
+    async with _media_lock:
+        # fast path
+        cached = _file_path_cache.get(file_id)
+        if cached and os.path.exists(cached):
+            return cached
+
+        # Determine local filename (safe)
+        safe = re.sub(r"[^a-zA-Z0-9_\-]", "_", file_id)[:120]
+        local_path = os.path.join(MEDIA_CACHE_DIR, safe)
+
+        if os.path.exists(local_path):
+            _file_path_cache[file_id] = local_path
+            return local_path
+
+        file_path = await _tg_get_file_path(file_id)
+        dl_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            r = await client.get(dl_url)
+            r.raise_for_status()
+            content = r.content
+
+        with open(local_path, "wb") as f:
+            f.write(content)
+
+        _file_path_cache[file_id] = local_path
+        return local_path
 
 
 def make_permalink(message_id: int) -> str:
@@ -1475,6 +1535,9 @@ def get_webapp_html() -> str:
     }
     .miniMeta{ font-size: 12px; color: var(--muted); }
     .miniText{ margin-top: 8px; font-size: 14px; line-height: 1.3; }
+    .postImg{ width:100%; height: 140px; object-fit: cover; border-radius: 16px; border: 1px solid var(--stroke); background: rgba(255,255,255,0.06); }
+    .postImgSm{ width:100%; height: 110px; object-fit: cover; border-radius: 14px; border: 1px solid var(--stroke); background: rgba(255,255,255,0.06); }
+
     .chipRow{ margin-top: 10px; display:flex; gap: 6px; flex-wrap: wrap; }
     .chip{
       font-size: 12px;
@@ -1763,6 +1826,9 @@ def get_webapp_html() -> str:
     const PostMiniCard = ({ post }) => (
       <div className="miniCard" onClick={() => { haptic(); openLink(post.url); }}>
         <div className="miniMeta">{"#" + (post.tags?.[0] || "post")} • ID {post.message_id}</div>
+        {post.media_url ? (
+          <img className="postImgSm" src={post.media_url} alt="" loading="lazy" />
+        ) : null}
         <div className="miniText">{post.preview || "Открыть пост →"}</div>
         <div className="chipRow">
           {(post.tags || []).slice(0,4).map(t => <div key={t} className="chip">#{t}</div>)}
@@ -1773,6 +1839,9 @@ def get_webapp_html() -> str:
     const PostFullCard = ({ post }) => (
       <div className="card2" style={{ cursor:"pointer" }} onClick={() => { haptic(); openLink(post.url); }}>
         <div className="miniMeta">{"#" + (post.tags?.[0] || "post")} • ID {post.message_id}</div>
+        {post.media_url ? (
+          <img className="postImg" src={post.media_url} alt="" loading="lazy" />
+        ) : null}
         <div className="miniText">{post.preview || "Открыть пост →"}</div>
         <div className="chipRow">
           {(post.tags || []).slice(0,8).map(t => <div key={t} className="chip">#{t}</div>)}
@@ -2945,13 +3014,19 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     rows = await list_posts(tag=tag, limit=limit, offset=offset)
     out = []
     for p in rows:
+        media_type = (p.media_type or "").strip().lower()
+        media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else None
+
         out.append({
             "message_id": int(p.message_id),
             "url": p.permalink or make_permalink(int(p.message_id)),
             "tags": p.tags or [],
             "preview": preview_text(p.text),
+            "media_type": media_type or None,
+            "media_url": media_url,
         })
     return out
+
 
 
 @app.get("/api/bot/username")
