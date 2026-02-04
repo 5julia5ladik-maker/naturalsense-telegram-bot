@@ -2547,49 +2547,49 @@ async def raffle_status(telegram_id: int):
 
 @app.post("/api/raffle/buy_ticket", response_model=BuyTicketResp)
 async def raffle_buy_ticket(req: BuyTicketReq):
+    tid = int(req.telegram_id)
+    qty = max(1, int(req.qty))
+    cost = RAFFLE_TICKET_COST * qty
 
-tid = int(req.telegram_id)
-qty = int(req.qty)
-cost = RAFFLE_TICKET_COST * qty
+    async with async_session_maker() as session:
+        async with session.begin():
+            user = (
+                await session.execute(select(User).where(User.telegram_id == tid))
+            ).scalar_one_or_none()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
 
-async with async_session_maker() as session:
-    async with session.begin():
-        user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+            if int(user.points or 0) < cost:
+                raise HTTPException(status_code=400, detail=f"Недостаточно баллов. Нужно {cost}")
 
-        if (user.points or 0) < cost:
-            raise HTTPException(status_code=400, detail=f"Недостаточно баллов. Нужно {cost}")
+            raffle = (
+                await session.execute(select(Raffle).where(Raffle.id == DEFAULT_RAFFLE_ID))
+            ).scalar_one()
+            if not raffle.is_active:
+                raise HTTPException(status_code=400, detail="Розыгрыш сейчас недоступен")
 
-        raffle = (await session.execute(select(Raffle).where(Raffle.id == DEFAULT_RAFFLE_ID))).scalar_one()
-        if not raffle.is_active:
-            raise HTTPException(status_code=400, detail="Розыгрыш сейчас недоступен")
+            # списываем баллы
+            user.points = int(user.points or 0) - cost
+            _recalc_tier(user)
 
-        # списываем баллы
-        user.points = (user.points or 0) - cost
-        _recalc_tier(user)
+            # увеличиваем билеты
+            ticket_row = await get_ticket_row(session, tid, raffle.id)
+            ticket_row.count = int(ticket_row.count or 0) + qty
+            ticket_row.updated_at = datetime.utcnow()
 
-        # увеличиваем билеты
-        ticket_row = await get_ticket_row(session, tid, raffle.id)
-        ticket_row.count = int(ticket_row.count or 0) + qty
-        ticket_row.updated_at = datetime.utcnow()
-
-        session.add(
-            PointTransaction(
-                telegram_id=tid,
-                type="raffle_ticket",
-                delta=-cost,
-                meta={"qty": qty, "raffle_id": raffle.id},
+            session.add(
+                PointTransaction(
+                    telegram_id=tid,
+                    type="raffle_ticket",
+                    delta=-cost,
+                    meta={"qty": qty, "raffle_id": raffle.id},
+                )
             )
-        )
 
-        # значения для ответа (внутри транзакции уже актуальные)
-        points_now = int(user.points or 0)
-        tickets_now = int(ticket_row.count or 0)
+            points_now = int(user.points or 0)
+            tickets_now = int(ticket_row.count or 0)
 
-return {"telegram_id": tid, "points": points_now, "ticket_count": tickets_now}
-
-
+    return {"telegram_id": tid, "points": points_now, "ticket_count": tickets_now}
 @app.get("/api/roulette/history")
 async def roulette_history(telegram_id: int, limit: int = 5):
     limit = max(1, min(int(limit), 20))
