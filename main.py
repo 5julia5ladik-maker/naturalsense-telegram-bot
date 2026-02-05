@@ -1272,26 +1272,24 @@ async def on_admin_forward_media(update: Update, context: ContextTypes.DEFAULT_T
 
     msg = update.message
 
+    # Telegram clients differ:
+    # - "normal forward" provides forward_from_chat + forward_from_message_id
+    # - on newer clients (often iOS) Bot API may provide forward_origin instead
     fchat = getattr(msg, "forward_from_chat", None)
-fmid = getattr(msg, "forward_from_message_id", None)
+    fmid = getattr(msg, "forward_from_message_id", None)
 
-# iOS/новые клиенты Telegram иногда используют forward_origin вместо forward_from_*
-if (not fchat or not fmid):
-    origin = getattr(msg, "forward_origin", None)
-    try:
-        otype = getattr(origin, "type", None)
-        if otype == "channel":
-            fchat = getattr(origin, "chat", None)
-            fmid = getattr(origin, "message_id", None)
-    except Exception:
-        pass
+    if (not fchat or not fmid) and getattr(msg, "forward_origin", None):
+        try:
+            fo = msg.forward_origin
+            # MessageOriginChannel: has chat + message_id
+            fchat = getattr(fo, "chat", None) or fchat
+            fmid = getattr(fo, "message_id", None) or fmid
+        except Exception:
+            pass
 
-if not fchat or not fmid:
-    await msg.reply_text(
-        "ℹ️ Перешли пост *обычным форвардом* из канала (не "как копию" и не со скрытым источником).",
-        parse_mode="Markdown",
-    )
-    return
+    if not fchat or not fmid:
+        await msg.reply_text("ℹ️ Перешли именно пост из канала обычным форвардом (НЕ 'как копию' / НЕ со скрытым источником).")
+        return
 
     # Optional: verify it's our channel by username (if available)
     try:
@@ -2495,1024 +2493,393 @@ def get_webapp_html() -> str:
       tCard.appendChild(el("div","sub",'Rate: 1 = '+rate+' pts'));
 
       // Simple convert all button (no qty selector in vanilla to keep it stable)
-        </div>
-      </div>
-    );
-
-    const App = () => {
-      const [tab, setTab] = useState("journal");
-
-      // core data
-      const [user, setUser] = useState(null);
-      const [botUsername, setBotUsername] = useState(BOT_USERNAME || "");
-      const tgUserId = tg?.initDataUnsafe?.user?.id;
-
-      // overlays / modes
-      const [postsSheet, setPostsSheet] = useState({ open:false, tag:null, title:"" });
-      const [posts, setPosts] = useState([]);
-      const [loadingPosts, setLoadingPosts] = useState(false);
-
-      const [inventoryOpen, setInventoryOpen] = useState(false);
-      const [inventory, setInventory] = useState(null);
-      const [ticketQty, setTicketQty] = useState(1);
-      const [invMsg, setInvMsg] = useState("");
-
-      const [profileOpen, setProfileOpen] = useState(false);
-      const [profileView, setProfileView] = useState("menu"); // menu|raffle|roulette|history
-
-      const [raffle, setRaffle] = useState(null);
-      const [rouletteHistory, setRouletteHistory] = useState([]);
-      const [busy, setBusy] = useState(false);
-      const [msg, setMsg] = useState("");
-
-      const [claimModal, setClaimModal] = useState({ open:false, message:"", claim_code:"" });
-      const [confirmClaim, setConfirmClaim] = useState({ open:false, claim_code:"", prize_label:"" });
-
-      // Discover
-      const [discoverMode, setDiscoverMode] = useState("brands"); // brands|categories
-      const [q, setQ] = useState("");
-
-      const refreshUser = () => {
-        if (!tgUserId) return Promise.resolve();
-        return fetch(`/api/user/${tgUserId}`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setUser(data))
-          .catch(() => {});
-      };
-
-      const loadPosts = (tag) => {
-        if (!tag) return;
-        setLoadingPosts(true);
-        fetch(`/api/posts?tag=${encodeURIComponent(tag)}`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setPosts(Array.isArray(data) ? data : []))
-          .catch(() => setPosts([]))
-          .finally(() => setLoadingPosts(false));
-      };
-
-      const openPosts = (tag, title) => {
-        setPostsSheet({ open:true, tag, title: title || ("#" + tag) });
-        loadPosts(tag);
-      };
-
-      const closePosts = () => {
-        setPostsSheet({ open:false, tag:null, title:"" });
-        setPosts([]);
-        setLoadingPosts(false);
-      };
-
-      const loadRaffleStatus = () => {
-        if (!tgUserId) return Promise.resolve();
-        return fetch(`/api/raffle/status?telegram_id=${encodeURIComponent(tgUserId)}`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setRaffle(data))
-          .catch(() => setRaffle(null));
-      };
-
-      const loadRouletteHistory = () => {
-        if (!tgUserId) return Promise.resolve();
-        return fetch(`/api/roulette/history?telegram_id=${encodeURIComponent(tgUserId)}&limit=5`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setRouletteHistory(Array.isArray(data) ? data : []))
-          .catch(() => setRouletteHistory([]));
-      };
-
-      const loadInventory = () => {
-        if (!tgUserId) return Promise.resolve();
-        return fetch(`/api/inventory?telegram_id=${encodeURIComponent(tgUserId)}`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setInventory(data))
-          .catch(() => setInventory(null));
-      };
-
-      const referralLink = useMemo(() => {
-        if (!tgUserId) return "";
-        if (!botUsername) return "";
-        return `https://t.me/${botUsername}?start=${tgUserId}`;
-      }, [tgUserId, botUsername]);
-
-      const copyText = async (t) => {
-        if (!t) return;
-        try {
-          await navigator.clipboard.writeText(t);
-          setMsg("✅ Скопировано");
-          haptic("light");
-          return;
-        } catch (e) {
-          try {
-            const ta = document.createElement("textarea");
-            ta.value = t;
-            ta.style.position = "fixed";
-            ta.style.left = "-9999px";
-            ta.style.top = "-9999px";
-            document.body.appendChild(ta);
-            ta.focus();
-            ta.select();
-            const ok = document.execCommand("copy");
-            document.body.removeChild(ta);
-            setMsg(ok ? "✅ Скопировано" : "ℹ️ Не удалось скопировать");
-            if (ok) haptic("light");
-          } catch (e2) {
-            setMsg("ℹ️ Не удалось скопировать");
-          }
-        }
-      };
-
-      const buyTicket = async () => {
-        if (!tgUserId) return;
-        setBusy(true);
-        setMsg("");
-        try {
-          const r = await fetch(`/api/raffle/buy_ticket`, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ telegram_id: tgUserId, qty: 1 })
-          });
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            throw new Error(err.detail || "Ошибка");
-          }
-          const data = await r.json();
-          setMsg(`✅ Билет куплен. Твоих билетов: ${data.ticket_count}`);
-          setRaffle((prev) => ({ ...(prev || {}), ticket_count: data.ticket_count }));
+      const convBtn = el("div","btn");
+      convBtn.style.marginTop="10px";
+      convBtn.style.opacity = (!haveTickets || state.busy) ? 0.5 : 1;
+      convBtn.style.cursor = (!haveTickets || state.busy) ? "not-allowed" : "pointer";
+      convBtn.appendChild(el("div",null,'<div class="btnTitle">💎 Convert ALL tickets</div><div class="btnSub">'+(haveTickets ? ('Get ~'+(haveTickets*rate)+' pts') : 'No tickets')+'</div>'));
+      convBtn.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
+      convBtn.addEventListener("click", async ()=>{
+        if(!haveTickets || state.busy) return;
+        state.busy=true; state.invMsg=""; renderInventorySheet();
+        try{
+          const d = await apiPost("/api/inventory/convert_ticket", {telegram_id: tgUserId, qty: haveTickets});
+          state.invMsg = "✅ Обмен выполнен: +"+d.added_points+" баллов";
           await refreshUser();
-          await loadRaffleStatus();
+          state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
           haptic("light");
-        } catch (e) {
-          setMsg(`❌ ${e.message || "Ошибка"}`);
-        } finally {
-          setBusy(false);
+        }catch(e){
+          state.invMsg = "❌ "+(e.message||"Ошибка");
+        }finally{
+          state.busy=false;
+          renderInventorySheet();
         }
-      };
+      });
+      tCard.appendChild(convBtn);
+      content.appendChild(tCard);
 
-      const spinRoulette = async () => {
-        if (!tgUserId) return;
-        setBusy(true);
-        setMsg("");
-        try {
-          const r = await fetch(`/api/roulette/spin`, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ telegram_id: tgUserId })
-          });
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            throw new Error(err.detail || "Ошибка");
-          }
-          const data = await r.json();
-          setMsg(`🎡 Выпало: ${data.prize_label}`);
+      // Prizes list (convert only in vanilla, claim stays in bot)
+      const pCard = el("div","card2");
+      pCard.style.marginTop="12px";
+      pCard.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎁 Prizes</div>'));
 
-          try {
-            if (data.claimable && data.claim_code) {
-              const m = `Ваш приз: ${data.prize_label}
+      const prizes = Array.isArray(inv.prizes) ? inv.prizes : [];
+      if(prizes.length===0){
+        pCard.appendChild(el("div","sub","Пока нет призов."));
+      }else{
+        const list = el("div");
+        list.style.marginTop="10px";
+        list.style.display="grid";
+        list.style.gap="10px";
+        for(const p of prizes){
+          const pc = el("div","card2");
+          pc.style.border="1px solid rgba(230,193,128,0.22)";
+          pc.style.background="rgba(230,193,128,0.10)";
+          pc.appendChild(el("div",null,'<div style="font-size:14px;font-weight:950">'+esc(p.prize_label||"💎 Главный приз")+'</div>'));
+          pc.appendChild(el("div","sub",'Code: '+esc(p.claim_code)+' • Status: '+esc(p.status||"-")+'</div>'));
+          const row = el("div","row");
+          row.style.marginTop="10px";
+          row.style.gap="10px";
 
-Чтобы забрать: откройте чат с ботом и отправьте
-/claim ${data.claim_code}`;
-              setClaimModal({ open:true, message:m, claim_code:data.claim_code });
-            } else if (tg?.showPopup) {
-              tg.showPopup({
-                title: "🎡 Рулетка",
-                message: `Ваш приз: ${data.prize_label}`,
-                buttons: [{ type: "ok" }]
-              });
-            } else {
-              alert(`Ваш приз: ${data.prize_label}`);
+          const claim = el("div","btn");
+          claim.style.justifyContent="center";
+          claim.style.fontWeight="900";
+          claim.addEventListener("click", ()=>{
+            haptic();
+            const code = String(p.claim_code||"").trim();
+            if(!code) return;
+            if(state.botUsername && tg && tg.openTelegramLink){
+              tg.openTelegramLink("https://t.me/"+state.botUsername+"?start=claim_"+encodeURIComponent(code));
+            }else{
+              alert("/claim "+code);
             }
-          } catch (e) {}
-
-          await refreshUser();
-          await loadRaffleStatus();
-          await loadRouletteHistory();
-          haptic("light");
-        } catch (e) {
-          setMsg(`❌ ${e.message || "Ошибка"}`);
-        } finally {
-          setBusy(false);
-        }
-      };
-
-      const incTicketQty = () => {
-        const max = Math.max(1, Number(inventory?.ticket_count || 0));
-        setTicketQty((x) => Math.min(max, x + 1));
-      };
-      const decTicketQty = () => setTicketQty((x) => Math.max(1, x - 1));
-      const maxTicketQty = () => setTicketQty(Math.max(1, Number(inventory?.ticket_count || 0)));
-
-      const convertTickets = async () => {
-        if (!tgUserId) return;
-        const have = Number(inventory?.ticket_count || 0);
-        const qty = Math.max(1, Math.min(have, Number(ticketQty || 1)));
-        if (!have) return;
-
-        setBusy(true);
-        setInvMsg("");
-        try {
-          const r = await fetch(`/api/inventory/convert_ticket`, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ telegram_id: tgUserId, qty })
           });
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            throw new Error(err.detail || "Ошибка");
-          }
-          const data = await r.json();
-          setInvMsg(`✅ Обмен выполнен: +${data.added_points} баллов`);
-          await refreshUser();
-          await loadRaffleStatus();
-          await loadInventory();
-          haptic("light");
-        } catch (e) {
-          setInvMsg(`❌ ${e.message || "Ошибка"}`);
-        } finally {
-          setBusy(false);
-        }
-      };
-
-      const convertPrize = async (claimCode) => {
-        if (!tgUserId) return;
-        const code = String(claimCode || "").trim();
-        if (!code) return;
-
-        setBusy(true);
-        setInvMsg("");
-        try {
-          const r = await fetch(`/api/inventory/convert_prize`, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ telegram_id: tgUserId, claim_code: code })
+          claim.innerHTML = "🎁 Claim";
+          const conv = el("div","btn");
+          conv.style.justifyContent="center";
+          conv.style.fontWeight="950";
+          conv.style.border="1px solid rgba(230,193,128,0.35)";
+          conv.style.background="rgba(230,193,128,0.14)";
+          conv.innerHTML = "💎 Convert (+"+diorValue+")";
+          conv.addEventListener("click", async ()=>{
+            const code = String(p.claim_code||"").trim();
+            if(!code || state.busy) return;
+            state.busy=true; state.invMsg=""; renderInventorySheet();
+            try{
+              const d = await apiPost("/api/inventory/convert_prize", {telegram_id: tgUserId, claim_code: code});
+              state.invMsg = "✅ Приз превращён в бонусы: +"+d.added_points+" баллов";
+              await refreshUser();
+              state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
+              haptic("light");
+            }catch(e){
+              state.invMsg = "❌ "+(e.message||"Ошибка");
+            }finally{
+              state.busy=false;
+              renderInventorySheet();
+            }
           });
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            throw new Error(err.detail || "Ошибка");
-          }
-          const data = await r.json();
-          setInvMsg(`✅ Приз превращён в бонусы: +${data.added_points} баллов`);
-          await refreshUser();
-          await loadInventory();
+
+          row.appendChild(claim);
+          row.appendChild(conv);
+          pc.appendChild(row);
+          list.appendChild(pc);
+        }
+        pCard.appendChild(list);
+      }
+      content.appendChild(pCard);
+
+      if(state.invMsg){
+        const m = el("div","card2", esc(state.invMsg));
+        m.style.marginTop="12px";
+        content.appendChild(m);
+      }
+    }
+
+    function renderProfileSheet(){
+      const overlay = document.getElementById("profileOverlay");
+      overlay.classList.toggle("open", !!state.profileOpen);
+      const content = document.getElementById("profileContent");
+      content.innerHTML = "";
+      if(!state.profileOpen) return;
+
+      if(!state.user){
+        content.appendChild(el("div","sub","Профиль недоступен."));
+        return;
+      }
+
+      const hdr = el("div","row"); hdr.style.alignItems="baseline";
+      hdr.appendChild(el("div","h1","👤 Profile"));
+      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Close</div>');
+      close.addEventListener("click", ()=>{ haptic(); closeProfile(); });
+      hdr.appendChild(close);
+      content.appendChild(hdr);
+      content.appendChild(el("div","sub","Members area"));
+
+      const info = el("div","card2");
+      info.style.marginTop="12px";
+      info.innerHTML =
+        '<div style="position:relative">'+
+          '<div style="position:absolute;top:0;right:0;padding:6px 10px;border-radius:999px;border:1px solid rgba(230,193,128,0.25);background:rgba(230,193,128,0.10);font-size:13px;font-weight:850">💎 '+esc(state.user.points)+'</div>'+
+          '<div style="font-size:13px;color:var(--muted)">Hello, '+esc(state.user.first_name)+'!</div>'+
+          '<div style="margin-top:6px;font-size:13px;color:var(--muted)">'+esc(tierLabel(state.user.tier))+'</div>'+
+          '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🔥 Streak</div><div style="font-weight:800">'+esc(state.user.daily_streak||0)+' (best '+esc(state.user.best_streak||0)+')</div></div>'+
+          '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🎟 Referrals</div><div style="font-weight:800">'+esc(state.user.referral_count||0)+'</div></div>'+
+        '</div>';
+      content.appendChild(info);
+
+      content.appendChild(el("div","hr"));
+
+      // Invite link
+      content.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎟 Invite</div><div class="sub" style="margin-top:6px">+20 points for each new user (once).</div>'));
+      const ref = (tgUserId && state.botUsername) ? ("https://t.me/"+state.botUsername+"?start="+tgUserId) : "";
+      if(ref){
+        const box = el("div","card2");
+        box.style.marginTop="10px";
+        box.innerHTML = '<div style="font-size:12px;color:rgba(255,255,255,0.85);word-break:break-all">'+esc(ref)+'</div>';
+        content.appendChild(box);
+      }else{
+        content.appendChild(el("div","sub",'Если ссылка не показалась — задай переменную окружения <b>BOT_USERNAME</b>.'));
+      }
+      const copy = el("div","btn");
+      copy.style.marginTop="10px";
+      copy.style.opacity = ref ? 1 : 0.5;
+      copy.style.cursor = ref ? "pointer" : "not-allowed";
+      copy.innerHTML = '<div><div class="btnTitle">📎 Copy link</div><div class="btnSub">'+esc(state.msg || "Copy to clipboard")+'</div></div><div style="opacity:0.85">›</div>';
+      copy.addEventListener("click", async ()=>{
+        if(!ref) return;
+        try{
+          await navigator.clipboard.writeText(ref);
+          state.msg = "✅ Скопировано";
           haptic("light");
-        } catch (e) {
-          setInvMsg(`❌ ${e.message || "Ошибка"}`);
-        } finally {
-          setBusy(false);
+        }catch(e){
+          state.msg = "ℹ️ Не удалось скопировать";
         }
-      };
+        renderProfileSheet();
+      });
+      content.appendChild(copy);
 
-      // bootstrap
-      useEffect(() => {
-        if (tgUserId) refreshUser();
-      }, []);
+      content.appendChild(el("div","hr"));
 
-      useEffect(() => {
-        fetch(`/api/bot/username`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(d => {
-            const u = (d?.bot_username || "").trim().replace(/^@/, "");
-            if (u) setBotUsername(u);
-          })
-          .catch(() => {});
-      }, []);
+      // Menu / views
+      if(state.profileView==="menu"){
+        const list = el("div");
+        list.style.display="grid";
+        list.style.gap="10px";
 
-      useEffect(() => {
-        if (profileOpen) {
-          loadRaffleStatus();
-          loadRouletteHistory();
+        function menuBtn(title, sub, onClick){
+          const b = el("div","btn");
+          b.innerHTML = '<div><div class="btnTitle">'+title+'</div><div class="btnSub">'+sub+'</div></div><div style="opacity:0.85">›</div>';
+          b.addEventListener("click", ()=>{ haptic(); onClick(); });
+          return b;
         }
-      }, [profileOpen]);
+        list.appendChild(menuBtn("👜 My Bag","Tickets & prizes", ()=>{ state.profileOpen=false; render(); openInventory(); }));
+        list.appendChild(menuBtn("🎁 Raffle","Buy tickets (500)", ()=>{ state.profileView="raffle"; renderProfileSheet(); }));
+        list.appendChild(menuBtn("🎡 Roulette","Spin (2000)", ()=>{ state.profileView="roulette"; renderProfileSheet(); }));
+        list.appendChild(menuBtn("🧾 Roulette history","Last spins", ()=>{ state.profileView="history"; renderProfileSheet(); }));
+        content.appendChild(list);
+      }else{
+        const back = el("div","btn");
+        back.style.justifyContent="center";
+        back.style.fontWeight="900";
+        back.textContent = "← Back";
+        back.addEventListener("click", ()=>{ haptic(); state.profileView="menu"; state.msg=""; renderProfileSheet(); });
+        content.appendChild(back);
 
-      useEffect(() => {
-        if (inventoryOpen) {
-          setTicketQty(1);
-          setInvMsg("");
-          loadInventory();
+        if(state.profileView==="raffle"){
+          const box = el("div");
+          box.style.marginTop="12px";
+          box.innerHTML =
+            '<div style="font-size:14px;font-weight:900">🎁 Raffle</div>'+
+            '<div class="sub" style="margin-top:6px">Ticket = 500 points.</div>'+
+            '<div class="sub" style="margin-top:8px">Your tickets: <b style="color:rgba(255,255,255,0.92)">'+esc((state.raffle && state.raffle.ticket_count) ? state.raffle.ticket_count : 0)+'</b></div>';
+          content.appendChild(box);
+
+          const can = (state.user.points||0) >= 500 && !state.busy;
+          const b = el("div","btn");
+          b.style.marginTop="10px";
+          b.style.opacity = can ? 1 : 0.5;
+          b.style.cursor = can ? "pointer" : "not-allowed";
+          b.innerHTML = '<div><div class="btnTitle">🎟 Buy ticket</div><div class="btnSub">'+(state.busy?"Подожди…":"Spend 500 points")+'</div></div><div style="opacity:0.85">›</div>';
+          b.addEventListener("click", ()=>{ if(can){ buyTicket(); } });
+          content.appendChild(b);
+
+          if(state.msg){
+            const m = el("div","card2", esc(state.msg));
+            m.style.marginTop="12px";
+            content.appendChild(m);
+          }
         }
-      }, [inventoryOpen]);
 
-      // tab behavior
-      useEffect(() => {
-        if (tab === "profile") {
-          setProfileOpen(true);
-          setProfileView("menu");
-          setTab("journal");
+        if(state.profileView==="roulette"){
+          const box = el("div");
+          box.style.marginTop="12px";
+          box.innerHTML =
+            '<div style="font-size:14px;font-weight:900">🎡 Roulette</div>'+
+            '<div class="sub" style="margin-top:6px">Spin = 2000 points.</div>';
+          content.appendChild(box);
+
+          const can = (state.user.points||0) >= 2000 && !state.busy;
+          const b = el("div","btn");
+          b.style.marginTop="10px";
+          b.style.opacity = can ? 1 : 0.5;
+          b.style.cursor = can ? "pointer" : "not-allowed";
+          b.innerHTML = '<div><div class="btnTitle">🎡 Spin</div><div class="btnSub">'+(state.busy?"Подожди…":"Try your luck")+'</div></div><div style="opacity:0.85">›</div>';
+          b.addEventListener("click", ()=>{ if(can){ spinRoulette(); } });
+          content.appendChild(b);
+
+          // Prize table compact
+          const table = el("div");
+          table.style.marginTop="10px";
+          table.innerHTML = '<div class="sub">Шансы рулетки (честно):</div>';
+          const list = el("div");
+          list.style.marginTop="10px";
+          list.style.display="grid";
+          list.style.gap="8px";
+          const rows = [
+            ["50%","+500"],["35%","+1000"],["15%","+1500"],["10%","+2000"],["5%","🎟 +1 билет"],["3.5%","+3000"],["1.5%","💎 главный приз"]
+          ];
+          for(const [p,t] of rows){
+            const r = el("div");
+            r.style.padding="10px";
+            r.style.borderRadius="14px";
+            r.style.border="1px solid var(--stroke)";
+            r.style.background="rgba(255,255,255,0.08)";
+            r.style.display="flex";
+            r.style.justifyContent="space-between";
+            r.style.fontSize="14px";
+            r.innerHTML = '<div style="color:var(--muted)">'+esc(p)+'</div><div style="font-weight:700">'+esc(t)+'</div>';
+            list.appendChild(r);
+          }
+          table.appendChild(list);
+          const lim = el("div");
+          lim.style.marginTop="10px";
+          lim.style.fontSize="12px";
+          lim.style.color="var(--muted)";
+          lim.textContent = "Лимит: 1 спин / 5с (тест)";
+          table.appendChild(lim);
+          content.appendChild(table);
+
+          if(state.msg){
+            const m = el("div","card2", esc(state.msg));
+            m.style.marginTop="12px";
+            content.appendChild(m);
+          }
         }
-      }, [tab]);
 
-      // curated blocks for Journal
-      const JOURNAL_BLOCKS = [
-        { tag: "Новинка", title: "🆕 New arrivals" },
-        { tag: "Люкс", title: "💎 Luxury picks" },
-        { tag: "Тренд", title: "🔥 Trending" },
-        { tag: "Оценка", title: "⭐ Personal review" },
-        { tag: "Факты", title: "🧾 Facts" },
+        if(state.profileView==="history"){
+          const box = el("div");
+          box.style.marginTop="12px";
+          box.innerHTML = '<div style="font-size:14px;font-weight:900">🧾 History</div>';
+          content.appendChild(box);
+
+          const arr = Array.isArray(state.rouletteHistory) ? state.rouletteHistory : [];
+          if(arr.length===0){
+            content.appendChild(el("div","sub","Пока пусто."));
+          }else{
+            const list = el("div");
+            list.style.marginTop="10px";
+            list.style.display="grid";
+            list.style.gap="10px";
+            for(const x of arr){
+              const it = el("div","card2");
+              it.innerHTML = '<div class="sub">'+esc(x.created_at)+'</div><div style="margin-top:6px;font-size:14px;font-weight:850">'+esc(x.prize_label)+'</div>';
+              list.appendChild(it);
+            }
+            content.appendChild(list);
+          }
+        }
+      }
+    }
+
+    function renderBottomNav(root){
+      const nav = el("div","bottomNav");
+      const inner = el("div","bottomNavInner");
+      const items = [
+        {id:"journal", icon:"📰", label:"Journal"},
+        {id:"discover", icon:"🧭", label:"Discover"},
+        {id:"rewards", icon:"🎁", label:"Rewards"},
+        {id:"profile", icon:"👤", label:"Profile"}
       ];
-
-      const [blockPosts, setBlockPosts] = useState({}); // tag -> posts[]
-      const loadJournalBlocks = () => {
-        JOURNAL_BLOCKS.forEach(async (b) => {
-          try {
-            const r = await fetch(`/api/posts?tag=${encodeURIComponent(b.tag)}`);
-            const data = r.ok ? await r.json() : [];
-            setBlockPosts((prev) => ({ ...prev, [b.tag]: Array.isArray(data) ? data.slice(0, 8) : [] }));
-          } catch(e) {
-            setBlockPosts((prev) => ({ ...prev, [b.tag]: [] }));
-          }
+      for(const it of items){
+        const n = el("div","navItem"+(state.tab===it.id?" navItemActive":""));
+        n.addEventListener("click", ()=>{
+          haptic();
+          if(it.id==="profile") openProfile("menu");
+          else { state.tab = it.id; render(); }
         });
-      };
-
-      useEffect(() => {
-        loadJournalBlocks();
-      }, []);
-
-      // Discover datasets
-      const BRANDS = [
-        ["The Ordinary", "TheOrdinary", "Skincare essentials"],
-        ["Dior", "Dior", "Couture beauty"],
-        ["Chanel", "Chanel", "Iconic classics"],
-        ["Kylie Cosmetics", "KylieCosmetics", "Pop-glam"],
-        ["Gisou", "Gisou", "Honey haircare"],
-        ["Rare Beauty", "RareBeauty", "Soft-focus makeup"],
-        ["Yves Saint Laurent", "YSL", "Bold luxury"],
-        ["Givenchy", "Givenchy", "Haute beauty"],
-        ["Charlotte Tilbury", "CharlotteTilbury", "Red carpet glow"],
-        ["NARS", "NARS", "Editorial makeup"],
-        ["Sol de Janeiro", "SolDeJaneiro", "Body & scent"],
-        ["Huda Beauty", "HudaBeauty", "Full glam"],
-        ["Rhode", "Rhode", "Minimal skincare"],
-        ["Tower 28 Beauty", "Tower28Beauty", "Sensitive skin"],
-        ["Benefit Cosmetics", "BenefitCosmetics", "Brows & cheeks"],
-        ["Estée Lauder", "EsteeLauder", "Skincare icons"],
-        ["Sisley", "Sisley", "Ultra premium"],
-        ["Kérastase", "Kerastase", "Salon haircare"],
-        ["Armani Beauty", "ArmaniBeauty", "Soft luxury"],
-        ["Hourglass", "Hourglass", "Ambient glow"],
-        ["Shiseido", "Shiseido", "Japanese skincare"],
-        ["Tom Ford Beauty", "TomFordBeauty", "Private blend vibe"],
-        ["Tarte", "Tarte", "Everyday glam"],
-        ["Sephora Collection", "SephoraCollection", "Smart basics"],
-        ["Clinique", "Clinique", "Skin first"],
-        ["Dolce & Gabbana", "DolceGabbana", "Italian glamour"],
-        ["Kayali", "Kayali", "Fragrance focus"],
-        ["Guerlain", "Guerlain", "Heritage luxury"],
-        ["Fenty Beauty", "FentyBeauty", "Inclusive glam"],
-        ["Too Faced", "TooFaced", "Playful makeup"],
-        ["MAKE UP FOR EVER", "MakeUpForEver", "Pro artistry"],
-        ["Erborian", "Erborian", "K-beauty meets EU"],
-        ["Natasha Denona", "NatashaDenona", "Palette queen"],
-        ["Lancôme", "Lancome", "French classics"],
-        ["Kosas", "Kosas", "Clean makeup"],
-        ["ONE/SIZE", "OneSize", "Stage-ready"],
-        ["Laneige", "Laneige", "Hydration"],
-        ["Makeup by Mario", "MakeupByMario", "Artist essentials"],
-        ["Valentino Beauty", "ValentinoBeauty", "Couture color"],
-        ["Drunk Elephant", "DrunkElephant", "Active skincare"],
-        ["Olaplex", "Olaplex", "Bond repair"],
-        ["Anastasia Beverly Hills", "AnastasiaBeverlyHills", "Brows & glam"],
-        ["Amika", "Amika", "Hair styling"],
-        ["BYOMA", "BYOMA", "Barrier care"],
-        ["Glow Recipe", "GlowRecipe", "Fruity glow"],
-        ["Milk Makeup", "MilkMakeup", "Cool minimal"],
-        ["Summer Fridays", "SummerFridays", "Clean glow"],
-        ["K18", "K18", "Repair tech"],
-      ];
-
-      const CATEGORIES = [
-        ["Новинка", "Новинка", "New launches"],
-        ["Люкс", "Люкс", "Luxury picks"],
-        ["Тренд", "Тренд", "What’s trending"],
-        ["История", "История", "Brand stories"],
-        ["Оценка", "Оценка", "Personal reviews"],
-        ["Факты", "Факты", "Short facts"],
-        ["Состав", "Состав", "Ingredients / formulas"],
-        ["Challenge", "Challenge", "Beauty challenges"],
-        ["SephoraPromo", "SephoraPromo", "Sephora promos"],
-      ];
-
-      const PRODUCTS = [
-        ["Праймер", "Праймер"], ["Тональная основа", "ТональнаяОснова"], ["Консилер", "Консилер"],
-        ["Пудра", "Пудра"], ["Румяна", "Румяна"], ["Скульптор", "Скульптор"], ["Бронзер", "Бронзер"],
-        ["Продукт для бровей", "ПродуктДляБровей"], ["Хайлайтер", "Хайлайтер"], ["Тушь", "Тушь"],
-        ["Тени", "Тени"], ["Помада", "Помада"], ["Карандаш для губ", "КарандашДляГуб"], ["Палетка", "Палетка"], ["Фиксатор", "Фиксатор"],
-      ];
-
-      const filteredBrands = useMemo(() => {
-        const s = q.trim().toLowerCase();
-        if (!s) return BRANDS;
-        return BRANDS.filter(([name, tag, sub]) =>
-          name.toLowerCase().includes(s) || tag.toLowerCase().includes(s) || String(sub||"").toLowerCase().includes(s)
-        );
-      }, [q]);
-
-      const filteredCats = useMemo(() => {
-        const s = q.trim().toLowerCase();
-        if (!s) return CATEGORIES;
-        return CATEGORIES.filter(([name, tag, sub]) =>
-          name.toLowerCase().includes(s) || tag.toLowerCase().includes(s) || String(sub||"").toLowerCase().includes(s)
-        );
-      }, [q]);
-
-      const openInventory = () => { setInventoryOpen(true); setProfileOpen(false); };
-      const closeInventory = () => { setInventoryOpen(false); setInvMsg(""); };
-
-      const Journal = () => (
-        <div>
-          <div className="card" onClick={() => { if (user) { haptic(); setProfileOpen(true); setProfileView("menu"); } }}>
-            <div style={{
-              position:"absolute", inset:"-2px",
-              background:"radial-gradient(600px 300px at 10% 0%, rgba(230,193,128,0.26), transparent 60%)",
-              pointerEvents:"none"
-            }} />
-            <div style={{ position:"relative" }}>
-              <div className="row">
-                <div>
-                  <div className="h1">NS · Natural Sense</div>
-                  <div className="sub">Today’s Edit · luxury beauty magazine</div>
-                </div>
-                {user && <div className="pill">💎 {user.points} · {tierLabel(user.tier)}</div>}
-              </div>
-              <div style={{ marginTop:"12px", color:"var(--muted)", fontSize:"13px" }}>
-                Curated picks, short facts, luxury reviews — inside Telegram.
-              </div>
-
-              <div style={{ marginTop:"12px", display:"grid", gap:"10px" }}>
-                <div className="btn" onClick={(e) => { e.stopPropagation(); haptic(); openLink(`https://t.me/${CHANNEL}`); }}>
-                  <div>
-                    <div className="btnTitle">↩️ Open Channel</div>
-                    <div className="btnSub">Return to Natural Sense feed</div>
-                  </div>
-                  <div style={{ opacity:0.85 }}>›</div>
-                </div>
-
-                <div className="grid">
-                  <div className="tile" onClick={(e) => { e.stopPropagation(); haptic(); openPosts("Новинка","🆕 New arrivals"); }}>
-                    <div className="tileTitle">🆕 New</div>
-                    <div className="tileSub">Fresh launches & updates</div>
-                  </div>
-                  <div className="tile" onClick={(e) => { e.stopPropagation(); haptic(); openPosts("Люкс","💎 Luxury picks"); }}>
-                    <div className="tileTitle">💎 Luxury</div>
-                    <div className="tileSub">Short & premium</div>
-                  </div>
-                </div>
-
-                <div className="grid">
-                  <div className="tile" onClick={(e) => { e.stopPropagation(); haptic(); openPosts("Тренд","🔥 Trending"); }}>
-                    <div className="tileTitle">🔥 Trending</div>
-                    <div className="tileSub">What everyone wants</div>
-                  </div>
-                  <div className="tile" onClick={(e) => { e.stopPropagation(); haptic(); openInventory(); }}>
-                    <div className="tileTitle">👜 Bag</div>
-                    <div className="tileSub">Tickets & prizes</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {JOURNAL_BLOCKS.map((b) => (
-            <div key={b.tag} style={{ marginTop:"14px" }}>
-              <div className="row" style={{ alignItems:"baseline" }}>
-                <div style={{ fontSize:"15px", fontWeight:850 }}>{b.title}</div>
-                <div
-                  style={{ fontSize:"12px", color:"var(--muted)", cursor:"pointer", userSelect:"none" }}
-                  onClick={() => { haptic(); openPosts(b.tag, b.title); }}
-                >
-                  View all ›
-                </div>
-              </div>
-              <div style={{ marginTop:"10px" }} className="hScroll">
-                {(blockPosts[b.tag] || []).length === 0 ? (
-                  <div className="miniCard" style={{ minWidth:"100%", cursor:"default" }}>
-                    <div className="miniMeta">Пока пусто</div>
-                    <div className="miniText" style={{ color:"var(--muted)" }}>Добавь посты с тегом #{b.tag} в канал.</div>
-                  </div>
-                ) : (
-                  (blockPosts[b.tag] || []).map((p) => <PostMiniCard key={p.message_id} post={p} />)
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      );
-
-      const Discover = () => (
-        <div className="card2">
-          <div className="row">
-            <div>
-              <div className="h1">Discover</div>
-              <div className="sub">Brands · Categories · Products</div>
-            </div>
-            <div className="pill" onClick={() => { haptic(); setInventoryOpen(true); }} style={{ cursor:"pointer" }}>
-              👜 Bag
-            </div>
-          </div>
-
-          <div style={{ marginTop:"12px" }}>
-            <input
-              className="input"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search brands / tags…"
-            />
-          </div>
-
-          <div style={{ marginTop:"12px" }} className="seg">
-            <div className={"segBtn " + (discoverMode==="brands" ? "segBtnActive" : "")} onClick={() => { haptic(); setDiscoverMode("brands"); }}>
-              Brands
-            </div>
-            <div className={"segBtn " + (discoverMode==="categories" ? "segBtnActive" : "")} onClick={() => { haptic(); setDiscoverMode("categories"); }}>
-              Categories
-            </div>
-          </div>
-
-          <div style={{ marginTop:"12px" }} className="grid">
-            {(discoverMode === "brands" ? filteredBrands : filteredCats).map(([name, tag, sub]) => (
-              <div key={tag} className="tile" onClick={() => { haptic(); openPosts(tag, name); }}>
-                <div className="tileTitle">{name}</div>
-                <div className="tileSub">{sub || ("#" + tag)}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="hr" />
-
-          <div style={{ fontSize:"14px", fontWeight:850 }}>🧴 Product types</div>
-          <div className="sub" style={{ marginTop:"6px" }}>Quick access</div>
-          <div style={{ marginTop:"10px" }} className="grid">
-            {PRODUCTS.map(([name, tag]) => (
-              <div key={tag} className="tile" onClick={() => { haptic(); openPosts(tag, name); }}>
-                <div className="tileTitle">{name}</div>
-                <div className="tileSub">#{tag}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-
-      const Rewards = () => (
-        <div className="card2">
-          <div className="row">
-            <div>
-              <div className="h1">Rewards</div>
-              <div className="sub">Roulette · Raffle · Inventory</div>
-            </div>
-            {user && <div className="pill">💎 {user.points} pts</div>}
-          </div>
-
-          <div style={{ marginTop:"12px" }} className="grid">
-            <div className="tile" onClick={() => { haptic(); setProfileOpen(true); setProfileView("roulette"); }}>
-              <div className="tileTitle">🎡 Roulette</div>
-              <div className="tileSub">Try your luck (2000)</div>
-            </div>
-            <div className="tile" onClick={() => { haptic(); setProfileOpen(true); setProfileView("raffle"); }}>
-              <div className="tileTitle">🎁 Raffle</div>
-              <div className="tileSub">Ticket (500)</div>
-            </div>
-            <div className="tile" onClick={() => { haptic(); setInventoryOpen(true); }}>
-              <div className="tileTitle">👜 Bag</div>
-              <div className="tileSub">Tickets & prizes</div>
-            </div>
-            <div className="tile" onClick={() => { haptic(); openPosts("Challenge","💎 Beauty Challenges"); }}>
-              <div className="tileTitle">💎 Challenges</div>
-              <div className="tileSub">Daily motivation</div>
-            </div>
-          </div>
-
-          <div className="hr" />
-
-          <div className="btn" onClick={() => { haptic(); openLink(`https://t.me/${CHANNEL}`); }}>
-            <div>
-              <div className="btnTitle">↩️ Open Channel</div>
-              <div className="btnSub">Natural Sense feed</div>
-            </div>
-            <div style={{ opacity:0.85 }}>›</div>
-          </div>
-        </div>
-      );
-
-      const PostsSheetContent = () => (
-        <div>
-          <div className="row" style={{ alignItems:"baseline" }}>
-            <div className="h1">{postsSheet.title || "Posts"}</div>
-            <div style={{ fontSize:"13px", color:"var(--muted)", cursor:"pointer" }} onClick={() => { haptic(); closePosts(); }}>
-              Close
-            </div>
-          </div>
-          <div className="sub" style={{ marginTop:"6px" }}>
-            Посты {postsSheet.tag ? ("#" + postsSheet.tag) : ""}
-          </div>
-
-          {loadingPosts && (
-            <div className="sub" style={{ marginTop:"12px" }}>Загрузка…</div>
-          )}
-
-          {!loadingPosts && posts.length === 0 && (
-            <div className="sub" style={{ marginTop:"12px" }}>Постов с этим тегом пока нет.</div>
-          )}
-
-          <div style={{ marginTop:"12px", display:"grid", gap:"10px" }}>
-            {posts.map(p => <PostFullCard key={p.message_id} post={p} />)}
-          </div>
-        </div>
-      );
-
-      const InventorySheetContent = () => {
-        const rate = Number(inventory?.ticket_convert_rate || 0) || 0;
-        const diorValue = Number(inventory?.dior_convert_value || 0) || 0;
-        const haveTickets = Number(inventory?.ticket_count || 0) || 0;
-        const qty = Math.max(1, Math.min(haveTickets || 1, Number(ticketQty || 1)));
-        const calc = rate ? (qty * rate) : 0;
-
-        const statusLabel = (s) => {
-          const v = String(s || "");
-          if (v === "awaiting_contact") return "⏳ Доступен";
-          if (v === "submitted") return "⏳ Ожидает подтверждения";
-          if (v === "closed") return "✅ Закрыт";
-          return v || "-";
-        };
-
-        return (
-          <div>
-            <div className="row" style={{ alignItems:"baseline" }}>
-              <div className="h1">👜 My Bag</div>
-              <div style={{ fontSize:"13px", color:"var(--muted)", cursor:"pointer" }} onClick={() => { haptic(); closeInventory(); }}>
-                Close
-              </div>
-            </div>
-            <div className="sub" style={{ marginTop:"6px" }}>Tickets & prizes</div>
-
-            <div style={{ marginTop:"12px" }} className="card2">
-              <div className="row">
-                <div>
-                  <div style={{ fontSize:"13px", color:"var(--muted)" }}>Balance</div>
-                  <div style={{ marginTop:"6px", fontSize:"16px", fontWeight:900 }}>💎 {user?.points ?? 0} pts</div>
-                </div>
-                <div className="pill">{tierLabel(user?.tier)}</div>
-              </div>
-            </div>
-
-            <div style={{ marginTop:"12px" }} className="card2">
-              <div style={{ fontSize:"14px", fontWeight:900 }}>🎟 Tickets</div>
-              <div className="sub" style={{ marginTop:"6px" }}>You have: <b style={{ color:"rgba(255,255,255,0.92)" }}>{haveTickets}</b></div>
-              <div className="sub" style={{ marginTop:"6px" }}>Rate: 1 = {rate} pts</div>
-
-              <div style={{ marginTop:"10px", display:"flex", gap:"8px", alignItems:"center" }}>
-                <div className="tile" style={{ width:"62px", minHeight:"44px", alignItems:"center", justifyContent:"center" }}
-                     onClick={() => { if (haveTickets) { haptic(); decTicketQty(); } }}>
-                  <div style={{ fontWeight:950, fontSize:"18px" }}>–</div>
-                </div>
-
-                <div className="tile" style={{ flex:1, minHeight:"44px", alignItems:"center", justifyContent:"center" }}>
-                  <div style={{ fontWeight:950, fontSize:"15px" }}>{haveTickets ? qty : 0}</div>
-                </div>
-
-                <div className="tile" style={{ width:"62px", minHeight:"44px", alignItems:"center", justifyContent:"center" }}
-                     onClick={() => { if (haveTickets) { haptic(); incTicketQty(); } }}>
-                  <div style={{ fontWeight:950, fontSize:"18px" }}>+</div>
-                </div>
-
-                <div className="tile" style={{ width:"76px", minHeight:"44px" }}
-                     onClick={() => { if (haveTickets) { haptic(); maxTicketQty(); } }}>
-                  <div style={{ fontWeight:950, fontSize:"13px" }}>MAX</div>
-                  <div className="tileSub" style={{ marginTop:"4px" }}>{haveTickets || 0}</div>
-                </div>
-              </div>
-
-              <div className="sub" style={{ marginTop:"10px" }}>
-                You’ll get: <b style={{ color:"rgba(255,255,255,0.92)" }}>{calc}</b> pts
-              </div>
-
-              <div
-                className="btn"
-                onClick={() => { if (!busy && haveTickets) { haptic(); convertTickets(); } }}
-                style={{
-                  marginTop:"10px",
-                  opacity: (busy || !haveTickets) ? 0.5 : 1,
-                  cursor: (busy || !haveTickets) ? "not-allowed" : "pointer"
-                }}
-              >
-                <div>
-                  <div className="btnTitle">💎 Convert tickets</div>
-                  <div className="btnSub">{busy ? "Подожди…" : `Convert (${haveTickets ? qty : 0})`}</div>
-                </div>
-                <div style={{ opacity:0.85 }}>›</div>
-              </div>
-            </div>
-
-            <div style={{ marginTop:"12px" }} className="card2">
-              <div style={{ fontSize:"14px", fontWeight:900 }}>🎁 Prizes</div>
-
-              {(!inventory?.prizes || inventory.prizes.length === 0) ? (
-                <div className="sub" style={{ marginTop:"10px" }}>Пока нет призов.</div>
-              ) : (
-                <div style={{ marginTop:"10px", display:"grid", gap:"10px" }}>
-                  {inventory.prizes.map((p) => (
-                    <div key={p.claim_code} className="card2" style={{
-                      border:"1px solid rgba(230,193,128,0.22)",
-                      background:"rgba(230,193,128,0.10)"
-                    }}>
-                      <div style={{ fontSize:"14px", fontWeight:950 }}>{p.prize_label || "💎 Главный приз"}</div>
-                      <div className="sub" style={{ marginTop:"6px" }}>
-                        Status: {statusLabel(p.status)} • Code: {p.claim_code}
-                      </div>
-
-                      {(String(p.status||"") === "submitted" || String(p.status||"") === "closed") ? null : (
-                        <div style={{ display:"flex", gap:"10px", marginTop:"12px" }}>
-                          <div
-                            className="btn"
-                            style={{ justifyContent:"center", fontWeight:900 }}
-                            onClick={() => {
-                              const st = String(p.status || "");
-                              if (st === "submitted" || st === "closed") return;
-                              setConfirmClaim({ open:true, claim_code: p.claim_code, prize_label: p.prize_label || "Приз" });
-                              haptic();
-                            }}
-                          >
-                            🎁 Claim
-                          </div>
-                          <div
-                            className="btn"
-                            style={{
-                              justifyContent:"center",
-                              fontWeight:950,
-                              border:"1px solid rgba(230,193,128,0.35)",
-                              background:"rgba(230,193,128,0.14)"
-                            }}
-                            onClick={() => { haptic(); convertPrize(p.claim_code); }}
-                          >
-                            💎 Convert (+{diorValue})
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {invMsg && (
-              <div style={{ marginTop:"12px" }} className="card2">
-                <div style={{ fontSize:"13px" }}>{invMsg}</div>
-              </div>
-            )}
-          </div>
-        );
-      };
-
-      const ProfileSheetContent = () => {
-        if (!user) {
-          return <div className="sub">Профиль недоступен.</div>;
-        }
-
-        const StatRow = ({ left, right }) => (
-          <div className="row" style={{ marginTop:"10px", fontSize:"14px" }}>
-            <div style={{ color:"var(--muted)" }}>{left}</div>
-            <div style={{ fontWeight:800 }}>{right}</div>
-          </div>
-        );
-
-        return (
-          <div>
-            <div className="row" style={{ alignItems:"baseline" }}>
-              <div className="h1">👤 Profile</div>
-              <div style={{ fontSize:"13px", color:"var(--muted)", cursor:"pointer" }} onClick={() => { haptic(); setProfileOpen(false); }}>
-                Close
-              </div>
-            </div>
-            <div className="sub" style={{ marginTop:"6px" }}>Members area</div>
-
-            <div style={{ marginTop:"12px" }} className="card2">
-              <div style={{ position:"relative" }}>
-                <div style={{
-                  position:"absolute", top:"0", right:"0",
-                  padding:"6px 10px",
-                  borderRadius:"999px",
-                  border:"1px solid rgba(230,193,128,0.25)",
-                  background:"rgba(230,193,128,0.10)",
-                  fontSize:"13px",
-                  fontWeight:850
-                }}>
-                  💎 {user.points}
-                </div>
-
-                <div style={{ fontSize:"13px", color:"var(--muted)" }}>Hello, {user.first_name}!</div>
-                <div style={{ marginTop:"6px", fontSize:"13px", color:"var(--muted)" }}>{tierLabel(user.tier)}</div>
-
-                <StatRow left="🔥 Streak" right={`${user.daily_streak || 0} (best ${user.best_streak || 0})`} />
-                <StatRow left="🎟 Referrals" right={`${user.referral_count || 0}`} />
-              </div>
-            </div>
-
-            <div className="hr" />
-
-            <div style={{ fontSize:"14px", fontWeight:900 }}>🎟 Invite</div>
-            <div className="sub" style={{ marginTop:"6px" }}>+20 points for each new user (once).</div>
-            {botUsername ? (
-              <div style={{ marginTop:"10px" }} className="card2">
-                <div style={{ fontSize:"12px", color:"rgba(255,255,255,0.85)", wordBreak:"break-all" }}>{referralLink}</div>
-              </div>
-            ) : (
-              <div className="sub" style={{ marginTop:"10px" }}>
-                Если ссылка не показалась — задай переменную окружения <b>BOT_USERNAME</b>.
-              </div>
-            )}
-            <div
-              className="btn"
-              style={{ marginTop:"10px", opacity: (!botUsername || !referralLink) ? 0.5 : 1, cursor: (!botUsername || !referralLink) ? "not-allowed" : "pointer" }}
-              onClick={() => { if (botUsername && referralLink) { haptic(); copyText(referralLink); } }}
-            >
-              <div>
-                <div className="btnTitle">📎 Copy link</div>
-                <div className="btnSub">{msg || "Copy to clipboard"}</div>
-              </div>
-              <div style={{ opacity:0.85 }}>›</div>
-            </div>
-
-            <div className="hr" />
-
-            {profileView === "menu" ? (
-              <div style={{ display:"grid", gap:"10px" }}>
-                <div className="btn" onClick={() => { haptic(); setInventoryOpen(true); setProfileOpen(false); }}>
-                  <div>
-                    <div className="btnTitle">👜 My Bag</div>
-                    <div className="btnSub">Tickets & prizes</div>
-                  </div>
-                  <div style={{ opacity:0.85 }}>›</div>
-                </div>
-                <div className="btn" onClick={() => { haptic(); setProfileView("raffle"); }}>
-                  <div>
-                    <div className="btnTitle">🎁 Raffle</div>
-                    <div className="btnSub">Buy tickets (500)</div>
-                  </div>
-                  <div style={{ opacity:0.85 }}>›</div>
-                </div>
-                <div className="btn" onClick={() => { haptic(); setProfileView("roulette"); }}>
-                  <div>
-                    <div className="btnTitle">🎡 Roulette</div>
-                    <div className="btnSub">Spin (2000)</div>
-                  </div>
-                  <div style={{ opacity:0.85 }}>›</div>
-                </div>
-                <div className="btn" onClick={() => { haptic(); setProfileView("history"); }}>
-                  <div>
-                    <div className="btnTitle">🧾 Roulette history</div>
-                    <div className="btnSub">Last spins</div>
-                  </div>
-                  <div style={{ opacity:0.85 }}>›</div>
-                </div>
-              </div>
-            ) : (
-              <div>
-                <div
-                  className="btn"
-                  style={{ justifyContent:"center", fontWeight:900 }}
-                  onClick={() => { haptic(); setProfileView("menu"); setMsg(""); }}
-                >
-                  ← Back
-                </div>
-
-                {profileView === "raffle" && (
-                  <div style={{ marginTop:"12px" }}>
-                    <div style={{ fontSize:"14px", fontWeight:900 }}>🎁 Raffle</div>
-                    <div className="sub" style={{ marginTop:"6px" }}>Ticket = 500 points.</div>
-                    <div className="sub" style={{ marginTop:"8px" }}>
-                      Your tickets: <b style={{ color:"rgba(255,255,255,0.92)" }}>{raffle?.ticket_count ?? 0}</b>
-                    </div>
-
-                    <div
-                      className="btn"
-                      style={{
-                        marginTop:"10px",
-                        opacity: (busy || (user.points || 0) < 500) ? 0.5 : 1,
-                        cursor: (busy || (user.points || 0) < 500) ? "not-allowed" : "pointer"
-                      }}
-                      onClick={() => { if (!busy && (user.points || 0) >= 500) { haptic(); buyTicket(); } }}
-                    >
-                      <div>
-                        <div className="btnTitle">🎟 Buy ticket</div>
-                        <div className="btnSub">{busy ? "Подожди…" : "Spend 500 points"}</div>
-                      </div>
-                      <div style={{ opacity:0.85 }}>›</div>
-                    </div>
-
-                    {msg && <div style={{ marginTop:"12px" }} className="card2">{msg}</div>}
-                  </div>
-                )}
-
-                {profileView === "roulette" && (
-                  <div style={{ marginTop:"12px" }}>
-                    <div style={{ fontSize:"14px", fontWeight:900 }}>🎡 Roulette</div>
-                    <div className="sub" style={{ marginTop:"6px" }}>Spin = 2000 points.</div>
-
-                    <div
-                      className="btn"
-                      style={{
-                        marginTop:"10px",
-                        opacity: (busy || (user.points || 0) < 2000) ? 0.5 : 1,
-                        cursor: (busy || (user.points || 0) < 2000) ? "not-allowed" : "pointer"
-                      }}
-                      onClick={() => { if (!busy && (user.points || 0) >= 2000) { haptic(); spinRoulette(); } }}
-                    >
-                      <div>
-                        <div className="btnTitle">🎡 Spin</div>
-                        <div className="btnSub">{busy ? "Подожди…" : "Try your luck"}</div>
-                      </div>
-                      <div style={{ opacity:0.85 }}>›</div>
-                    </div>
-
-                    <PrizeTable />
-                    {msg && <div style={{ marginTop:"12px" }} className="card2">{msg}</div>}
-                  </div>
-                )}
-
-                {profileView === "history" && (
-                  <div style={{ marginTop:"12px" }}>
-                    <div style={{ fontSize:"14px", fontWeight:900 }}>🧾 History</div>
-                    {(rouletteHistory || []).length === 0 ? (
-                      <div className="sub" style={{ marginTop:"10px" }}>Пока пусто.</div>
-                    ) : (
-                      <div style={{ marginTop:"10px", display:"grid", gap:"10px" }}>
-                        {rouletteHistory.map((x) => (
-                          <div key={x.id} className="card2">
-                            <div className="sub">{x.created_at}</div>
-                            <div style={{ marginTop:"6px", fontSize:"14px", fontWeight:850 }}>{x.prize_label}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      };
-
-      const MainScreen = () => {
-        if (tab === "journal") return <Journal />;
-        if (tab === "discover") return <Discover />;
-        if (tab === "rewards") return <Rewards />;
-        return <Journal />;
-      };
-
-      return (
-        <div className="safePadBottom">
-          <div className="container">
-            <MainScreen />
-          </div>
-
-          <BottomNav tab={tab} onTab={setTab} />
-
-          <Sheet open={postsSheet.open} onClose={() => { haptic(); closePosts(); }}>
-            <PostsSheetContent />
-          </Sheet>
-
-          <Sheet open={inventoryOpen} onClose={() => { haptic(); closeInventory(); }}>
-            <InventorySheetContent />
-          </Sheet>
-
-          <Sheet open={profileOpen} onClose={() => { haptic(); setProfileOpen(false); }}>
-            <ProfileSheetContent />
-          </Sheet>
-
-          <LockedClaimModal
-            open={claimModal.open}
-            message={claimModal.message}
-            claimCode={claimModal.claim_code}
-            onOk={() => setClaimModal({ open:false, message:"", claim_code:"" })}
-            onClaim={() => {
-              if (botUsername && tg?.openTelegramLink && claimModal.claim_code) {
-                tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${claimModal.claim_code}`);
-              }
-              setClaimModal({ open:false, message:"", claim_code:"" });
-            }}
-          />
-
-          <ConfirmClaimModal
-            open={confirmClaim.open}
-            title="🎁 Забрать приз?"
-            message={`Вы уверены?
-
-После подтверждения вы НЕ сможете:
-• превратить приз в бонусы
-• отменить действие
-
-Приз: ${confirmClaim.prize_label}
-Код: ${confirmClaim.claim_code}`}
-            onCancel={() => setConfirmClaim({ open:false, claim_code:"", prize_label:"" })}
-            onConfirm={() => {
-              const code = String(confirmClaim.claim_code || "").trim();
-              if (botUsername && tg?.openTelegramLink && code) {
-                tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${code}`);
-              } else if (code) {
-                alert(`/claim ${code}`);
-              }
-              setConfirmClaim({ open:false, claim_code:"", prize_label:"" });
-            }}
-          />
-        </div>
-      );
-    };
-
-    ReactDOM.render(<App />, document.getElementById("root"));
+        n.appendChild(el("div","navIcon", it.icon));
+        n.appendChild(el("div","navLabel", it.label));
+        inner.appendChild(n);
+      }
+      nav.appendChild(inner);
+      root.appendChild(nav);
+    }
+
+    function ensureSheets(root){
+      // Posts
+      const pO = el("div","sheetOverlay"); pO.id="postsOverlay";
+      pO.addEventListener("click", (e)=>{ if(e.target===pO){ haptic(); closePosts(); }});
+      const pS = el("div","sheet");
+      pS.addEventListener("click",(e)=>e.stopPropagation());
+      pS.appendChild(el("div","sheetHandle"));
+      const pC = el("div"); pC.id="postsContent";
+      pS.appendChild(pC); pO.appendChild(pS); root.appendChild(pO);
+
+      // Inventory
+      const iO = el("div","sheetOverlay"); iO.id="invOverlay";
+      iO.addEventListener("click", (e)=>{ if(e.target===iO){ haptic(); closeInventory(); }});
+      const iS = el("div","sheet");
+      iS.addEventListener("click",(e)=>e.stopPropagation());
+      iS.appendChild(el("div","sheetHandle"));
+      const iC = el("div"); iC.id="invContent";
+      iS.appendChild(iC); iO.appendChild(iS); root.appendChild(iO);
+
+      // Profile
+      const prO = el("div","sheetOverlay"); prO.id="profileOverlay";
+      prO.addEventListener("click", (e)=>{ if(e.target===prO){ haptic(); closeProfile(); }});
+      const prS = el("div","sheet");
+      prS.addEventListener("click",(e)=>e.stopPropagation());
+      prS.appendChild(el("div","sheetHandle"));
+      const prC = el("div"); prC.id="profileContent";
+      prS.appendChild(prC); prO.appendChild(prS); root.appendChild(prO);
+    }
+
+    function render(){
+      const root = document.getElementById("root");
+      root.innerHTML = "";
+
+      const app = el("div","safePadBottom");
+      const cont = el("div","container");
+      if(state.tab==="journal") renderJournal(cont);
+      else if(state.tab==="discover") renderDiscover(cont);
+      else if(state.tab==="rewards") renderRewards(cont);
+      else renderJournal(cont);
+
+      app.appendChild(cont);
+
+      ensureSheets(app);
+      renderBottomNav(app);
+
+      root.appendChild(app);
+
+      renderPostsSheet();
+      renderInventorySheet();
+      renderProfileSheet();
+    }
+
+    async function boot(){
+      if(tg){
+        try{ tg.expand(); }catch(e){}
+        applyTelegramTheme();
+        try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
+      }
+      await Promise.all([refreshUser(), loadBotUsername()]);
+      await loadJournalBlocks();
+      render();
+    }
+
+    document.addEventListener("DOMContentLoaded", boot);
+  })();
   </script>
 </body>
 </html>
