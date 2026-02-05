@@ -1829,9 +1829,86 @@ def get_webapp_html() -> str:
     }
     .segBtnActive{border:1px solid rgba(230,193,128,0.35);background:rgba(230,193,128,0.12);color:rgba(255,255,255,0.9);font-weight:750}
     .hidden{display:none!important}
+
+    /* Splash loader */
+    .nsSplash{
+      position:fixed; inset:0; z-index:100000;
+      display:flex; align-items:center; justify-content:center;
+      background:inherit; /* uses body background */
+      transition:opacity .35s ease, visibility .35s ease;
+    }
+    .nsSplash.hide{opacity:0; visibility:hidden; pointer-events:none}
+    .nsSplashInner{display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; padding:24px}
+    .nsMarkWrap{position:relative; width:88px; height:88px; display:flex; align-items:center; justify-content:center}
+    .nsMark{
+      width:74px; height:74px; border-radius:24px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.05));
+      box-shadow:0 18px 60px rgba(0,0,0,0.55);
+      display:flex; align-items:center; justify-content:center;
+      font-weight:950; letter-spacing:1px; font-size:22px;
+      position:relative; overflow:hidden;
+      color:rgba(255,255,255,0.92);
+    }
+    .nsMark:before{
+      content:"";
+      position:absolute; inset:-40%;
+      background:conic-gradient(from 180deg, transparent, rgba(230,193,128,0.35), transparent 60%);
+      animation:nsSpin 1.6s linear infinite;
+      opacity:.9;
+      z-index:0;
+    }
+    .nsMark:after{
+      content:"";
+      position:absolute; inset:1px; border-radius:23px;
+      background:rgba(12,15,20,0.88);
+      backdrop-filter:blur(16px) saturate(180%);
+      -webkit-backdrop-filter:blur(16px) saturate(180%);
+      z-index:1;
+    }
+    .nsMarkTxt{position:relative; z-index:2}
+    .nsRing{
+      position:absolute; inset:0;
+      border-radius:999px;
+      border:1px solid rgba(230,193,128,0.30);
+      filter:drop-shadow(0 10px 40px rgba(230,193,128,0.12));
+      animation:nsPulse 1.4s ease-in-out infinite;
+      pointer-events:none;
+    }
+    .nsTitle{font-size:16px;font-weight:900; letter-spacing:.2px}
+    .nsSub{font-size:12px;color:var(--muted)}
+    .nsDots{display:flex; gap:6px; margin-top:2px}
+    .nsDots span{
+      width:6px; height:6px; border-radius:999px;
+      background:rgba(255,255,255,0.45);
+      animation:nsDot 1.1s ease-in-out infinite;
+    }
+    .nsDots span:nth-child(2){animation-delay:.15s}
+    .nsDots span:nth-child(3){animation-delay:.30s}
+    @keyframes nsSpin{to{transform:rotate(360deg)}}
+    @keyframes nsPulse{
+      0%,100%{transform:scale(1); opacity:.55}
+      50%{transform:scale(1.08); opacity:.95}
+    }
+    @keyframes nsDot{
+      0%,100%{transform:translateY(0); opacity:.45}
+      50%{transform:translateY(-4px); opacity:.95}
+    }
+
   </style>
 </head>
 <body>
+  <div id="nsSplash" class="nsSplash">
+    <div class="nsSplashInner">
+      <div class="nsMarkWrap">
+        <div class="nsMark"><span class="nsMarkTxt">NS</span></div>
+        <div class="nsRing"></div>
+      </div>
+      <div class="nsTitle">Natural Sense</div>
+      <div class="nsSub">Loading…</div>
+      <div class="nsDots"><span></span><span></span><span></span></div>
+    </div>
+  </div>
   <div id="root"></div>
 
   <script>
@@ -1842,6 +1919,17 @@ def get_webapp_html() -> str:
     const BOT_USERNAME = "__BOT_USERNAME__"; // может быть пустым
 
     const DEFAULT_BG = "#0c0f14";
+
+    function showSplash(){
+      const s = document.getElementById("nsSplash");
+      if(s) s.classList.remove("hide");
+    }
+    function hideSplash(){
+      const s = document.getElementById("nsSplash");
+      if(!s) return;
+      s.classList.add("hide");
+      setTimeout(()=>{ try{ s.parentNode && s.parentNode.removeChild(s); }catch(e){} }, 450);
+    }
 
     function hexToRgba(hex, a){
       if(!hex) return "rgba(12,15,20,"+a+")";
@@ -2861,6 +2949,9 @@ def get_webapp_html() -> str:
       renderProfileSheet();
     }
 
+    showSplash();
+    setTimeout(()=>{ hideSplash(); }, 6000);
+
     async function boot(){
       if(tg){
         try{ tg.expand(); }catch(e){}
@@ -2870,6 +2961,7 @@ def get_webapp_html() -> str:
       await Promise.all([refreshUser(), loadBotUsername()]);
       await loadJournalBlocks();
       render();
+      hideSplash();
     }
 
     document.addEventListener("DOMContentLoaded", boot);
