@@ -1613,7 +1613,20 @@ def get_webapp_html() -> str:
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>NS · Natural Sense</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://telegram.org/js/telegram-web-app.js">
+// PREMIUM SPLASH CONTROL
+const hideSplash = () => {
+    const s = document.getElementById("splash");
+    if (!s) return;
+    s.classList.add("hide");
+    setTimeout(() => s.remove(), 900);
+};
+
+// Hide splash when app ready or after hard timeout
+window.addEventListener("app:ready", () => { try{ document.getElementById('root')?.classList.add('ready'); }catch(e){} hideSplash(); });
+setTimeout(hideSplash, 6500);
+
+</script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
@@ -1764,40 +1777,48 @@ def get_webapp_html() -> str:
     .thumbNS .brand{font-size:12px;color:rgba(255,255,255,0.72);font-weight:800}
 
     /* Bottom nav */
-    .bottomNav{
-      position:fixed;
-      left:50%;
-      transform:translateX(-50%);
-      bottom:calc(18px + env(safe-area-inset-bottom));
-      width:100%;
-      display:flex;
-      justify-content:center;
-      z-index:9000;
-      pointer-events:none;
-      padding:0;
-    }
-    .bottomNavInner{
-      pointer-events:auto;
-      width:min(560px, calc(100% - 24px));
-      display:flex;gap:10px;padding:10px;
-      border-radius:22px;border:1px solid var(--glassStroke);
-      background:rgba(18,22,30,0.55);
-      backdrop-filter:blur(22px) saturate(180%);
-      -webkit-backdrop-filter:blur(22px) saturate(180%);
-      box-shadow:0 12px 40px var(--glassShadow);
-    }
-    .navItem{
-      flex:1;border-radius:16px;padding:10px 8px;text-align:center;
-      cursor:pointer;user-select:none;border:1px solid transparent;
-      background:rgba(255,255,255,0.05);
-      display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;
-    }
-    .navItemActive{border:1px solid rgba(230,193,128,0.35);background:rgba(230,193,128,0.12)}
-    .navIcon{font-size:18px;line-height:1}
-    .navLabel{font-size:11px;color:var(--muted)}
-    .navItemActive .navLabel{color:rgba(255,255,255,0.85)}
-
-    /* Sheets */
+/* Bottom nav (floating dock) */
+.bottomNav{
+  position:fixed; left:0; right:0; bottom:0;
+  padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+  display:flex; justify-content:center;
+  z-index:9000;
+  pointer-events:none; /* важно: фон дока не перехватывает клики */
+}
+.bottomNavInner{
+  pointer-events:auto; /* важно: кнопки кликабельны */
+  width:min(560px, calc(100% - 24px));
+  display:flex; gap:10px; padding:10px;
+  border-radius:22px;
+  border:1px solid var(--glassStroke);
+  background:rgba(18,22,30,0.55);
+  backdrop-filter:blur(22px) saturate(180%);
+  -webkit-backdrop-filter:blur(22px) saturate(180%);
+  box-shadow:0 12px 40px var(--glassShadow);
+}
+.navItem{
+  flex:1;
+  border-radius:16px;
+  padding:10px 8px;
+  text-align:center;
+  cursor:pointer;
+  user-select:none;
+  border:1px solid transparent;
+  background:rgba(255,255,255,0.05);
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  align-items:center;
+  justify-content:center;
+}
+.navItemActive{
+  border:1px solid rgba(230,193,128,0.35);
+  background:rgba(230,193,128,0.12);
+}
+.navIcon{font-size:18px; line-height:1;}
+.navLabel{font-size:11px; color:var(--muted);}
+.navItemActive .navLabel{color:rgba(255,255,255,0.85);}
+/* Sheets */
     .sheetOverlay{
       position:fixed;inset:0;
       background:var(--sheetOverlay);
@@ -1902,11 +1923,188 @@ def get_webapp_html() -> str:
     }
 
   
+/* PREMIUM WHITE SPLASH */
+/* LUX+ ACCENTS */
+:root{
+  --champagne1: rgba(230,193,128,0.95);
+  --champagne2: rgba(212,170,92,0.85);
+  --ink: #111;
+}
+.splash-card{
+  position: relative;
+  overflow: hidden;
+}
+.splash-card:before{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  border-radius:30px;
+  padding:1px;
+  background: linear-gradient(135deg, rgba(230,193,128,0.70), rgba(0,0,0,0.04), rgba(212,170,92,0.55));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events:none;
+}
+.splash-card:after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:
+    radial-gradient(420px 220px at 30% 10%, rgba(230,193,128,0.22), transparent 60%),
+    radial-gradient(360px 200px at 80% 0%, rgba(0,0,0,0.04), transparent 55%);
+  pointer-events:none;
+}
+.splash-logo{
+  background: linear-gradient(180deg, #111 0%, #111 55%, rgba(230,193,128,0.75) 120%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color: transparent;
+}
+.loader-ring{
+  border: 2px solid rgba(17,17,17,0.10);
+  border-top-color: rgba(212,170,92,0.95);
+  border-right-color: rgba(17,17,17,0.22);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+}
+.loader-dotline{
+  margin-top: 16px;
+  font-size: 12px;
+  letter-spacing: 1.2px;
+  color: rgba(17,17,17,0.45);
+  text-transform: uppercase;
+  font-weight: 700;
+  position: relative;
+}
+.loader-dotline .dots{
+  display:inline-block;
+  width: 22px;
+  text-align:left;
+}
+@keyframes dotPulse {
+  0%{content:"";}
+  25%{content:".";}
+  50%{content:"..";}
+  75%{content:"...";}
+  100%{content:"";}
+}
+.loader-dotline .dots::after{
+  content:"";
+  animation: dotPulse 1.2s infinite;
+}
+.progressTrack{
+  margin-top: 14px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(17,17,17,0.08);
+  overflow:hidden;
+}
+.progressBar{
+  height:100%;
+  width: 35%;
+  background: linear-gradient(90deg, rgba(230,193,128,0.0), rgba(230,193,128,0.95), rgba(230,193,128,0.0));
+  animation: progMove 1.3s ease-in-out infinite;
+}
+@keyframes progMove{
+  0%{transform: translateX(-120%);}
+  100%{transform: translateX(260%);}
+}
+
+/* App reveal */
+#root{opacity:0; transform: translateY(6px); transition: opacity .6s ease, transform .6s ease;}
+#root.ready{opacity:1; transform: translateY(0);}
+
+/* Slightly richer shimmer */
+.shimmer{
+  opacity: .55;
+  mix-blend-mode: soft-light;
+}
+
+#splash {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, #f4f4f4 35%, #ececec 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    transition: opacity .8s ease, transform .8s ease;
+}
+#splash.hide {
+    opacity: 0;
+    transform: scale(1.02);
+    pointer-events: none;
+}
+.splash-card {
+    background: rgba(255,255,255,0.7);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border-radius: 28px;
+    padding: 36px 42px;
+    box-shadow:
+        0 30px 80px rgba(0,0,0,0.10),
+        inset 0 1px 0 rgba(255,255,255,0.8);
+    text-align: center;
+    min-width: 260px;
+}
+.splash-logo {
+    font-size: 34px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    color: #111;
+    margin-bottom: 10px;
+    animation: logoFloat 2.4s ease-in-out infinite;
+}
+.splash-sub {
+    font-size: 13px;
+    letter-spacing: 1.6px;
+    color: #777;
+    text-transform: uppercase;
+    margin-bottom: 22px;
+    animation: fadePulse 2.4s ease-in-out infinite;
+}
+.loader-ring {
+    width: 54px;
+    height: 54px;
+    margin: 0 auto;
+    border-radius: 50%;
+    border: 2px solid rgba(0,0,0,0.08);
+    border-top-color: #111;
+    animation: spin 1.2s linear infinite;
+}
+.shimmer {
+    position: absolute;
+    inset: -40%;
+    background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.6) 50%, transparent 70%);
+    animation: shimmerMove 2.6s infinite;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+@keyframes logoFloat {
+    0%,100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+}
+@keyframes fadePulse {
+    0%,100% { opacity: .55; }
+    50% { opacity: 1; }
+}
+@keyframes shimmerMove {
+    0% { transform: translateX(-60%); }
+    100% { transform: translateX(60%); }
+}
+
 </style>
 </head>
 <body>
 
-<div class="splash-sub">Natural Sense</div>
+<!-- PREMIUM WHITE SPLASH -->
+<div id="splash">
+    <div class="splash-card">
+        <div class="splash-logo">NS</div>
+        <div class="splash-sub">Natural Sense</div>
         <div style="position:relative;">
             <div class="loader-ring"></div>
             <div class="shimmer"></div>
@@ -1946,10 +2144,6 @@ def get_webapp_html() -> str:
       s.classList.add("hide");
       setTimeout(()=>{ try{ s.parentNode && s.parentNode.removeChild(s); }catch(e){} }, 450);
     }
-
-    // Hide NS splash when app is ready (or after hard timeout)
-    window.addEventListener("app:ready", () => { try{ document.getElementById("root")?.classList.add("ready"); }catch(e){} hideSplash(); });
-    setTimeout(hideSplash, 6500);
 
     function hexToRgba(hex, a){
       if(!hex) return "rgba(12,15,20,"+a+")";
@@ -2999,7 +3193,19 @@ def get_webapp_html() -> str:
     document.addEventListener("DOMContentLoaded", boot);
   })();
   
+// PREMIUM SPLASH CONTROL
+const hideSplash = () => {
+    const s = document.getElementById("splash");
+    if (!s) return;
+    s.classList.add("hide");
+    setTimeout(() => s.remove(), 900);
+};
 
+// Hide splash when app ready or after hard timeout
+window.addEventListener("app:ready", () => { try{ document.getElementById('root')?.classList.add('ready'); }catch(e){} hideSplash(); });
+setTimeout(hideSplash, 6500);
+
+</script>
 </body>
 </html>
 """
