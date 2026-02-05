@@ -1905,7 +1905,7 @@ def get_webapp_html() -> str:
         <div class="nsRing"></div>
       </div>
       <div class="nsTitle">Natural Sense</div>
-      <div class="nsSub">Loading…</div>
+      <div class="nsSub">Загрузка…</div>
       <div class="nsDots"><span></span><span></span><span></span></div>
     </div>
   </div>
@@ -2014,11 +2014,11 @@ def get_webapp_html() -> str:
 
     // Data sets
     const JOURNAL_BLOCKS = [
-      { tag: "Новинка", title: "🆕 New arrivals" },
-      { tag: "Люкс", title: "💎 Luxury picks" },
-      { tag: "Тренд", title: "🔥 Trending" },
-      { tag: "Оценка", title: "⭐ Personal review" },
-      { tag: "Факты", title: "🧾 Facts" }
+      { tag: "Новинка", title: "🆕 Новинки" },
+      { tag: "Люкс", title: "💎 Люкс" },
+      { tag: "Тренд", title: "🔥 Тренд" },
+      { tag: "Оценка", title: "⭐ Оценка" },
+      { tag: "Факты", title: "🧾 Факты" }
     ];
     const BRANDS = [
       ["The Ordinary","TheOrdinary","Skincare essentials"],
@@ -2071,15 +2071,15 @@ def get_webapp_html() -> str:
       ["K18","K18","Repair tech"]
     ];
     const CATEGORIES = [
-      ["Новинка","Новинка","New launches"],
-      ["Люкс","Люкс","Luxury picks"],
-      ["Тренд","Тренд","What’s trending"],
-      ["История","История","Brand stories"],
-      ["Оценка","Оценка","Personal reviews"],
-      ["Факты","Факты","Short facts"],
-      ["Состав","Состав","Ingredients / formulas"],
-      ["Challenge","Challenge","Beauty challenges"],
-      ["SephoraPromo","SephoraPromo","Sephora promos"]
+      ["Новинка","Новинка","Новые релизы"],
+      ["Люкс","Люкс","Люкс подборка"],
+      ["Тренд","Тренд","Что в тренде"],
+      ["История","История","Истории брендов"],
+      ["Оценка","Оценка","Личные обзоры"],
+      ["Факты","Факты","Короткие факты"],
+      ["Состав","Состав","Состав / формулы"],
+      ["Challenge","Challenge","Бьюти челленджи"],
+      ["SephoraPromo","SephoraPromo","Промо Sephora"]
     ];
     const PRODUCTS = [
       ["Праймер","Праймер"],["Тональная основа","ТональнаяОснова"],["Консилер","Консилер"],
@@ -2116,7 +2116,7 @@ def get_webapp_html() -> str:
       }catch(e){}
     }
 
-    async function loadJournalBlocks(){
+    async function loadЖурналBlocks(){
       for(const b of JOURNAL_BLOCKS){
         try{
           const arr = await apiGet("/api/posts?tag="+encodeURIComponent(b.tag));
@@ -2188,14 +2188,14 @@ def get_webapp_html() -> str:
       }
     }
 
-    async function openProfile(view){
+    async function openПрофиль(view){
       state.profileOpen = true;
       state.profileView = view || "menu";
       render();
       await Promise.all([loadRaffleStatus(), loadRouletteHistory()]);
       render();
     }
-    function closeProfile(){
+    function closeПрофиль(){
       state.profileOpen = false;
       state.msg = "";
       render();
@@ -2291,9 +2291,9 @@ def get_webapp_html() -> str:
       return f;
     }
 
-    function renderJournal(main){
+    function renderЖурнал(main){
       const hero = el("div","card");
-      hero.addEventListener("click", ()=>{ if(state.user){ haptic(); openProfile("menu"); } });
+      hero.addEventListener("click", ()=>{ if(state.user){ haptic(); openПрофиль("menu"); } });
 
       const glow = el("div");
       glow.style.position="absolute";
@@ -2325,30 +2325,30 @@ def get_webapp_html() -> str:
 
       const openCh = el("div","btn");
       openCh.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openLink("https://t.me/"+CHANNEL); });
-      openCh.appendChild(el("div",null,'<div class="btnTitle">↩️ Open Channel</div><div class="btnSub">Return to Natural Sense feed</div>'));
+      openCh.appendChild(el("div",null,'<div class="btnTitle">↩️ В канал</div><div class="btnSub">Вернуться в ленту Natural Sense</div>'));
       openCh.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
       actions.appendChild(openCh);
 
       const grid1 = el("div","grid");
       const tNew = el("div","tile");
-      tNew.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Новинка","🆕 New arrivals"); });
-      tNew.appendChild(el("div","tileTitle","🆕 New"));
+      tNew.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Новинка","🆕 Новинки"); });
+      tNew.appendChild(el("div","tileTitle","🆕 Новинки"));
       tNew.appendChild(el("div","tileSub","Fresh launches & updates"));
       const tLux = el("div","tile");
-      tLux.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Люкс","💎 Luxury picks"); });
-      tLux.appendChild(el("div","tileTitle","💎 Luxury"));
+      tLux.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Люкс","💎 Люкс"); });
+      tLux.appendChild(el("div","tileTitle","💎 Люкс"));
       tLux.appendChild(el("div","tileSub","Short & premium"));
       grid1.appendChild(tNew); grid1.appendChild(tLux);
 
       const grid2 = el("div","grid");
       const tTrend = el("div","tile");
-      tTrend.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Тренд","🔥 Trending"); });
-      tTrend.appendChild(el("div","tileTitle","🔥 Trending"));
+      tTrend.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Тренд","🔥 Тренд"); });
+      tTrend.appendChild(el("div","tileTitle","🔥 Тренд"));
       tTrend.appendChild(el("div","tileSub","What everyone wants"));
       const tBag = el("div","tile");
       tBag.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openInventory(); });
-      tBag.appendChild(el("div","tileTitle","👜 Bag"));
-      tBag.appendChild(el("div","tileSub","Tickets & prizes"));
+      tBag.appendChild(el("div","tileTitle","👜 Косметичка"));
+      tBag.appendChild(el("div","tileSub","Призы и билеты"));
       grid2.appendChild(tTrend); grid2.appendChild(tBag);
 
       actions.appendChild(grid1);
@@ -2391,16 +2391,16 @@ def get_webapp_html() -> str:
       }
     }
 
-    function renderDiscover(main){
+    function renderПоиск(main){
       const wrap = el("div","card2");
 
       const top = el("div","row");
       const tl = el("div");
-      tl.appendChild(el("div","h1","Discover"));
+      tl.appendChild(el("div","h1","Поиск"));
       tl.appendChild(el("div","sub","Brands · Categories · Products"));
       top.appendChild(tl);
 
-      const bag = el("div","pill","👜 Bag");
+      const bag = el("div","pill","👜 Косметичка");
       bag.style.cursor="pointer";
       bag.addEventListener("click", ()=>{ haptic(); openInventory(); });
       top.appendChild(bag);
@@ -2409,7 +2409,7 @@ def get_webapp_html() -> str:
 
       const inp = document.createElement("input");
       inp.className="input";
-      inp.placeholder="Search brands / tags…";
+      inp.placeholder="Поиск брендов / тегов…";
       inp.value = state.q || "";
       inp.addEventListener("input", (e)=>{ state.q = e.target.value; render(); });
       const inpWrap = el("div");
@@ -2458,11 +2458,11 @@ def get_webapp_html() -> str:
       main.appendChild(wrap);
     }
 
-    function renderRewards(main){
+    function renderБонусы(main){
       const wrap = el("div","card2");
       const top = el("div","row");
       const tl = el("div");
-      tl.appendChild(el("div","h1","Rewards"));
+      tl.appendChild(el("div","h1","Бонусы"));
       tl.appendChild(el("div","sub","Roulette · Raffle · Inventory"));
       top.appendChild(tl);
       if(state.user) top.appendChild(el("div","pill","💎 "+esc(state.user.points)+" pts"));
@@ -2472,17 +2472,17 @@ def get_webapp_html() -> str:
       grid.style.marginTop="12px";
 
       const t1 = el("div","tile");
-      t1.addEventListener("click", ()=>{ haptic(); openProfile("roulette"); });
+      t1.addEventListener("click", ()=>{ haptic(); openПрофиль("roulette"); });
       t1.appendChild(el("div","tileTitle","🎡 Roulette"));
       t1.appendChild(el("div","tileSub","Try your luck (2000)"));
       const t2 = el("div","tile");
-      t2.addEventListener("click", ()=>{ haptic(); openProfile("raffle"); });
+      t2.addEventListener("click", ()=>{ haptic(); openПрофиль("raffle"); });
       t2.appendChild(el("div","tileTitle","🎁 Raffle"));
       t2.appendChild(el("div","tileSub","Ticket (500)"));
       const t3 = el("div","tile");
       t3.addEventListener("click", ()=>{ haptic(); openInventory(); });
-      t3.appendChild(el("div","tileTitle","👜 Bag"));
-      t3.appendChild(el("div","tileSub","Tickets & prizes"));
+      t3.appendChild(el("div","tileTitle","👜 Косметичка"));
+      t3.appendChild(el("div","tileSub","Призы и билеты"));
       const t4 = el("div","tile");
       t4.addEventListener("click", ()=>{ haptic(); openPosts("Challenge","💎 Beauty Challenges"); });
       t4.appendChild(el("div","tileTitle","💎 Challenges"));
@@ -2494,7 +2494,7 @@ def get_webapp_html() -> str:
       wrap.appendChild(el("div","hr"));
       const openCh = el("div","btn");
       openCh.addEventListener("click", ()=>{ haptic(); openLink("https://t.me/"+CHANNEL); });
-      openCh.appendChild(el("div",null,'<div class="btnTitle">↩️ Open Channel</div><div class="btnSub">Natural Sense feed</div>'));
+      openCh.appendChild(el("div",null,'<div class="btnTitle">↩️ В канал</div><div class="btnSub">Natural Sense feed</div>'));
       openCh.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
       wrap.appendChild(openCh);
 
@@ -2511,8 +2511,8 @@ def get_webapp_html() -> str:
 
       const hdr = el("div","row");
       hdr.style.alignItems="baseline";
-      hdr.appendChild(el("div","h1", esc(state.postsSheet.title || "Posts")));
-      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Close</div>');
+      hdr.appendChild(el("div","h1", esc(state.postsSheet.title || "Посты")));
+      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
       close.addEventListener("click", ()=>{ haptic(); closePosts(); });
       hdr.appendChild(close);
       content.appendChild(hdr);
@@ -2545,12 +2545,12 @@ def get_webapp_html() -> str:
       if(!state.inventoryOpen) return;
 
       const hdr = el("div","row"); hdr.style.alignItems="baseline";
-      hdr.appendChild(el("div","h1","👜 My Bag"));
-      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Close</div>');
+      hdr.appendChild(el("div","h1","👜 Моя косметичка"));
+      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
       close.addEventListener("click", ()=>{ haptic(); closeInventory(); });
       hdr.appendChild(close);
       content.appendChild(hdr);
-      content.appendChild(el("div","sub","Tickets & prizes"));
+      content.appendChild(el("div","sub","Призы и билеты"));
 
       const bal = el("div","card2");
       const r1 = el("div","row");
@@ -2677,7 +2677,7 @@ def get_webapp_html() -> str:
       }
     }
 
-    function renderProfileSheet(){
+    function renderПрофильSheet(){
       const overlay = document.getElementById("profileOverlay");
       overlay.classList.toggle("open", !!state.profileOpen);
       const content = document.getElementById("profileContent");
@@ -2690,9 +2690,9 @@ def get_webapp_html() -> str:
       }
 
       const hdr = el("div","row"); hdr.style.alignItems="baseline";
-      hdr.appendChild(el("div","h1","👤 Profile"));
-      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Close</div>');
-      close.addEventListener("click", ()=>{ haptic(); closeProfile(); });
+      hdr.appendChild(el("div","h1","👤 Профиль"));
+      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
+      close.addEventListener("click", ()=>{ haptic(); closeПрофиль(); });
       hdr.appendChild(close);
       content.appendChild(hdr);
       content.appendChild(el("div","sub","Members area"));
@@ -2726,7 +2726,7 @@ def get_webapp_html() -> str:
       copy.style.marginTop="10px";
       copy.style.opacity = ref ? 1 : 0.5;
       copy.style.cursor = ref ? "pointer" : "not-allowed";
-      copy.innerHTML = '<div><div class="btnTitle">📎 Copy link</div><div class="btnSub">'+esc(state.msg || "Copy to clipboard")+'</div></div><div style="opacity:0.85">›</div>';
+      copy.innerHTML = '<div><div class="btnTitle">📎 Скопировать ссылку</div><div class="btnSub">'+esc(state.msg || "Скопировать в буфер")+'</div></div><div style="opacity:0.85">›</div>';
       copy.addEventListener("click", async ()=>{
         if(!ref) return;
         try{
@@ -2736,7 +2736,7 @@ def get_webapp_html() -> str:
         }catch(e){
           state.msg = "ℹ️ Не удалось скопировать";
         }
-        renderProfileSheet();
+        renderПрофильSheet();
       });
       content.appendChild(copy);
 
@@ -2754,17 +2754,17 @@ def get_webapp_html() -> str:
           b.addEventListener("click", ()=>{ haptic(); onClick(); });
           return b;
         }
-        list.appendChild(menuBtn("👜 My Bag","Tickets & prizes", ()=>{ state.profileOpen=false; render(); openInventory(); }));
-        list.appendChild(menuBtn("🎁 Raffle","Buy tickets (500)", ()=>{ state.profileView="raffle"; renderProfileSheet(); }));
-        list.appendChild(menuBtn("🎡 Roulette","Spin (2000)", ()=>{ state.profileView="roulette"; renderProfileSheet(); }));
-        list.appendChild(menuBtn("🧾 Roulette history","Last spins", ()=>{ state.profileView="history"; renderProfileSheet(); }));
+        list.appendChild(menuBtn("👜 Моя косметичка","Призы и билеты", ()=>{ state.profileOpen=false; render(); openInventory(); }));
+        list.appendChild(menuBtn("🎁 Raffle","Buy tickets (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet(); }));
+        list.appendChild(menuBtn("🎡 Roulette","Spin (2000)", ()=>{ state.profileView="roulette"; renderПрофильSheet(); }));
+        list.appendChild(menuBtn("🧾 Roulette history","Last spins", ()=>{ state.profileView="history"; renderПрофильSheet(); }));
         content.appendChild(list);
       }else{
         const back = el("div","btn");
         back.style.justifyContent="center";
         back.style.fontWeight="900";
         back.textContent = "← Back";
-        back.addEventListener("click", ()=>{ haptic(); state.profileView="menu"; state.msg=""; renderProfileSheet(); });
+        back.addEventListener("click", ()=>{ haptic(); state.profileView="menu"; state.msg=""; renderПрофильSheet(); });
         content.appendChild(back);
 
         if(state.profileView==="raffle"){
@@ -2877,16 +2877,16 @@ def get_webapp_html() -> str:
       const nav = el("div","bottomNav");
       const inner = el("div","bottomNavInner");
       const items = [
-        {id:"journal", icon:"📰", label:"Journal"},
-        {id:"discover", icon:"🧭", label:"Discover"},
-        {id:"rewards", icon:"🎁", label:"Rewards"},
-        {id:"profile", icon:"👤", label:"Profile"}
+        {id:"journal", icon:"📰", label:"Журнал"},
+        {id:"discover", icon:"🧭", label:"Поиск"},
+        {id:"rewards", icon:"🎁", label:"Бонусы"},
+        {id:"profile", icon:"👤", label:"Профиль"}
       ];
       for(const it of items){
         const n = el("div","navItem"+(state.tab===it.id?" navItemActive":""));
         n.addEventListener("click", ()=>{
           haptic();
-          if(it.id==="profile") openProfile("menu");
+          if(it.id==="profile") openПрофиль("menu");
           else { state.tab = it.id; render(); }
         });
         n.appendChild(el("div","navIcon", it.icon));
@@ -2916,9 +2916,9 @@ def get_webapp_html() -> str:
       const iC = el("div"); iC.id="invContent";
       iS.appendChild(iC); iO.appendChild(iS); root.appendChild(iO);
 
-      // Profile
+      // Профиль
       const prO = el("div","sheetOverlay"); prO.id="profileOverlay";
-      prO.addEventListener("click", (e)=>{ if(e.target===prO){ haptic(); closeProfile(); }});
+      prO.addEventListener("click", (e)=>{ if(e.target===prO){ haptic(); closeПрофиль(); }});
       const prS = el("div","sheet");
       prS.addEventListener("click",(e)=>e.stopPropagation());
       prS.appendChild(el("div","sheetHandle"));
@@ -2932,10 +2932,10 @@ def get_webapp_html() -> str:
 
       const app = el("div","safePadBottom");
       const cont = el("div","container");
-      if(state.tab==="journal") renderJournal(cont);
-      else if(state.tab==="discover") renderDiscover(cont);
-      else if(state.tab==="rewards") renderRewards(cont);
-      else renderJournal(cont);
+      if(state.tab==="journal") renderЖурнал(cont);
+      else if(state.tab==="discover") renderПоиск(cont);
+      else if(state.tab==="rewards") renderБонусы(cont);
+      else renderЖурнал(cont);
 
       app.appendChild(cont);
 
@@ -2946,7 +2946,7 @@ def get_webapp_html() -> str:
 
       renderPostsSheet();
       renderInventorySheet();
-      renderProfileSheet();
+      renderПрофильSheet();
     }
 
     showSplash();
@@ -2959,7 +2959,7 @@ def get_webapp_html() -> str:
         try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
       }
       await Promise.all([refreshUser(), loadBotUsername()]);
-      await loadJournalBlocks();
+      await loadЖурналBlocks();
       render();
       hideSplash();
     }
