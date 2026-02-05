@@ -1629,7 +1629,52 @@ setTimeout(hideSplash, 6500);
 </script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    :root{
+    /* THEME PALETTES (LUX) */
+:root{
+  --gold: #E6C180;
+  --gold-soft: rgba(230,193,128,0.35);
+
+  /* Light (Ivory Editorial) default */
+  --app-bg: radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.12), transparent 60%),
+            radial-gradient(900px 600px at 80% 0%, rgba(0,0,0,0.04), transparent 55%),
+            #F8F6F2;
+  --text: #1C1C1C;
+  --muted: #7A7772;
+  --stroke: rgba(0,0,0,0.08);
+  --card: rgba(255,255,255,0.72);
+  --card2: rgba(255,255,255,0.66);
+  --sheetOverlay: rgba(12,15,20,0.35);
+  --sheetCardBg: rgba(255,255,255,0.80);
+  --glassStroke: rgba(0,0,0,0.08);
+  --glassShadow: rgba(0,0,0,0.18);
+  --nav-bg: rgba(255,255,255,0.72);
+
+  --splash-bg: radial-gradient(1200px 600px at 50% -10%, #FFFDF8 0%, #F8F6F2 40%, #EFEDE8 100%);
+  --splash-card-bg: rgba(255,255,255,0.74);
+  --splash-sub: rgba(28,28,28,0.45);
+}
+:root[data-theme="dark"]{
+  /* Dark (Midnight Ink) */
+  --app-bg: radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.16), transparent 62%),
+            radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), transparent 55%),
+            #0E1116;
+  --text: #F3F2EF;
+  --muted: rgba(154,157,166,0.92);
+  --stroke: rgba(255,255,255,0.12);
+  --card: rgba(18,22,30,0.72);
+  --card2: rgba(18,22,30,0.62);
+  --sheetOverlay: rgba(7,9,12,0.62);
+  --sheetCardBg: rgba(18,22,30,0.74);
+  --glassStroke: rgba(255,255,255,0.16);
+  --glassShadow: rgba(0,0,0,0.48);
+  --nav-bg: rgba(18,22,30,0.62);
+
+  --splash-bg: radial-gradient(1200px 700px at 50% -15%, rgba(230,193,128,0.18) 0%, rgba(14,17,22,1) 55%, #0A0D12 100%);
+  --splash-card-bg: rgba(18,22,30,0.74);
+  --splash-sub: rgba(243,242,239,0.55);
+}
+
+:root{
       --bg:#0c0f14;
       --card:rgba(255,255,255,0.08);
       --card2:rgba(255,255,255,0.06);
@@ -1646,14 +1691,11 @@ setTimeout(hideSplash, 6500);
       --r-sm:14px;
     }
     body{
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
-      background:
-        radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%),
-        radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), transparent 55%),
-        var(--bg);
-      color:var(--text);
-      overflow-x:hidden;
-    }
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
+  background: var(--app-bg);
+  color: var(--text);
+  overflow-x:hidden;
+}
     #root{min-height:100vh}
     .safePadBottom{padding-bottom:92px}
     .container{max-width:560px;margin:0 auto;padding:16px 16px 24px}
@@ -1755,7 +1797,7 @@ setTimeout(hideSplash, 6500);
       position:absolute;left:10px;bottom:10px;
       padding:6px 10px;border-radius:999px;
       border:1px solid rgba(255,255,255,0.20);
-      background:rgba(18,22,30,0.55);
+      background: var(--nav-bg);
       backdrop-filter:blur(14px) saturate(160%);
       -webkit-backdrop-filter:blur(14px) saturate(160%);
       font-size:12px;font-weight:850;color:rgba(255,255,255,0.92);
@@ -1788,7 +1830,7 @@ setTimeout(hideSplash, 6500);
       width:min(560px, calc(100% - 24px));
       display:flex;gap:10px;padding:10px;
       border-radius:22px;border:1px solid var(--glassStroke);
-      background:rgba(18,22,30,0.55);
+      background: var(--nav-bg);
       backdrop-filter:blur(22px) saturate(180%);
       -webkit-backdrop-filter:blur(22px) saturate(180%);
       box-shadow:0 12px 40px var(--glassShadow);
@@ -2009,9 +2051,9 @@ setTimeout(hideSplash, 6500);
 }
 
 #splash {
-    position: fixed;
-    inset: 0;
-    background: radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, #f4f4f4 35%, #ececec 100%);
+        position: fixed;
+        inset: 0;
+        background: var(--splash-bg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2024,7 +2066,7 @@ setTimeout(hideSplash, 6500);
     pointer-events: none;
 }
 .splash-card {
-    background: rgba(255,255,255,0.7);
+        background: var(--splash-card-bg);
     backdrop-filter: blur(18px) saturate(140%);
     -webkit-backdrop-filter: blur(18px) saturate(140%);
     border-radius: 28px;
@@ -2046,7 +2088,7 @@ setTimeout(hideSplash, 6500);
 .splash-sub {
     font-size: 13px;
     letter-spacing: 1.6px;
-    color: #777;
+    color: var(--splash-sub);
     text-transform: uppercase;
     margin-bottom: 22px;
     animation: fadePulse 2.4s ease-in-out infinite;
@@ -2143,29 +2185,22 @@ setTimeout(hideSplash, 6500);
     function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
 
     function applyTelegramTheme(){
-      const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
-      const p = tg && tg.themeParams ? tg.themeParams : {};
-      const bg = p.bg_color || DEFAULT_BG;
-      const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
-      const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
+  const scheme = (tg && tg.colorScheme) ? tg.colorScheme : "dark";
+  try{ document.documentElement.setAttribute("data-theme", scheme); }catch(e){}
 
-      setVar("--bg", bg);
-      setVar("--text", text);
-      setVar("--muted", muted);
-      setVar("--stroke", scheme==="dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
-      setVar("--card", scheme==="dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
-      setVar("--card2", scheme==="dark" ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)");
-
-      setVar("--sheetOverlay", scheme==="dark" ? hexToRgba(bg,0.55) : hexToRgba(bg,0.45));
-      setVar("--sheetCardBg", scheme==="dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.86)");
-      setVar("--glassStroke", scheme==="dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
-      setVar("--glassShadow", scheme==="dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
-
-      try{
-        if(tg){
-          tg.setHeaderColor(bg);
-          tg.setBackgroundColor(bg);
-        }
+  // Optionally hint Telegram container colors (safe defaults)
+  try{
+    if(tg){
+      if(scheme==="dark"){
+        tg.setHeaderColor("#0E1116");
+        tg.setBackgroundColor("#0E1116");
+      }else{
+        tg.setHeaderColor("#F8F6F2");
+        tg.setBackgroundColor("#F8F6F2");
+      }
+    }
+  }catch(e){}
+}
       }catch(e){}
     }
 
