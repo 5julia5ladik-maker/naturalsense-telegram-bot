@@ -1473,1632 +1473,1270 @@ def get_webapp_html() -> str:
     html = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>NS · Natural Sense</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
+    *{margin:0;padding:0;box-sizing:border-box}
     :root{
-      --bg: #0c0f14;
-      --card: rgba(255,255,255,0.08);
-      --card2: rgba(255,255,255,0.06);
-      --text: rgba(255,255,255,0.92);
-      --muted: rgba(255,255,255,0.60);
-      --gold: rgba(230,193,128,0.90);
-      --stroke: rgba(255,255,255,0.12);
-
-      --sheetOverlay: rgba(12,15,20,0.55);
-      --sheetCardBg: rgba(255,255,255,0.10);
-      --glassStroke: rgba(255,255,255,0.18);
-      --glassShadow: rgba(0,0,0,0.45);
-
-      --r-lg: 22px;
-      --r-md: 16px;
-      --r-sm: 14px;
+      --bg:#0c0f14;
+      --card:rgba(255,255,255,0.08);
+      --card2:rgba(255,255,255,0.06);
+      --text:rgba(255,255,255,0.92);
+      --muted:rgba(255,255,255,0.60);
+      --gold:rgba(230,193,128,0.90);
+      --stroke:rgba(255,255,255,0.12);
+      --sheetOverlay:rgba(12,15,20,0.55);
+      --sheetCardBg:rgba(255,255,255,0.10);
+      --glassStroke:rgba(255,255,255,0.18);
+      --glassShadow:rgba(0,0,0,0.45);
+      --r-lg:22px;
+      --r-md:16px;
+      --r-sm:14px;
     }
     body{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
       background:
         radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%),
         radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), transparent 55%),
         var(--bg);
-      color: var(--text);
+      color:var(--text);
       overflow-x:hidden;
     }
-    #root{ min-height:100vh; }
-    a{ color: inherit; }
+    #root{min-height:100vh}
+    .safePadBottom{padding-bottom:92px}
+    .container{max-width:560px;margin:0 auto;padding:16px 16px 24px}
 
-    .safePadBottom{ padding-bottom: 92px; } /* space for bottom nav */
-    .container{ max-width: 560px; margin: 0 auto; padding: 16px 16px 24px; }
-    .h1{ font-size: 18px; font-weight: 800; letter-spacing: 0.2px; }
-    .sub{ margin-top: 6px; font-size: 13px; color: var(--muted); }
+    .h1{font-size:18px;font-weight:800;letter-spacing:.2px}
+    .sub{margin-top:6px;font-size:13px;color:var(--muted)}
+    .row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .hr{height:1px;background:var(--stroke);margin:14px 0;opacity:.8}
+
     .card{
-      border: 1px solid var(--stroke);
-      background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05));
-      border-radius: var(--r-lg);
-      padding: 14px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-      position: relative;
-      overflow: hidden;
+      border:1px solid var(--stroke);
+      background:linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05));
+      border-radius:var(--r-lg);
+      padding:14px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.35);
+      position:relative;
+      overflow:hidden;
     }
     .card2{
-      border: 1px solid var(--stroke);
-      background: var(--card2);
-      border-radius: var(--r-lg);
-      padding: 12px;
+      border:1px solid var(--stroke);
+      background:var(--card2);
+      border-radius:var(--r-lg);
+      padding:12px;
     }
     .pill{
-      display:inline-flex; align-items:center; gap:8px;
-      padding: 7px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(230,193,128,0.25);
-      background: rgba(230,193,128,0.10);
-      font-size: 12px; font-weight: 700;
+      display:inline-flex;align-items:center;gap:8px;
+      padding:7px 10px;border-radius:999px;
+      border:1px solid rgba(230,193,128,0.25);
+      background:rgba(230,193,128,0.10);
+      font-size:12px;font-weight:700;
+      user-select:none;
     }
-    .row{ display:flex; justify-content:space-between; align-items:center; gap: 12px; }
     .btn{
       width:100%;
-      border: 1px solid var(--stroke);
-      background: rgba(255,255,255,0.06);
-      border-radius: 18px;
-      padding: 14px;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.06);
+      border-radius:18px;
+      padding:14px;
       display:flex;
       justify-content:space-between;
       align-items:center;
       cursor:pointer;
       user-select:none;
     }
-    .btn:active{ transform: translateY(1px); }
-    .btnTitle{ font-size: 15px; font-weight: 750; }
-    .btnSub{ margin-top: 4px; font-size: 12px; color: var(--muted); }
-    .grid{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
+    .btn:active{transform:translateY(1px)}
+    .btnTitle{font-size:15px;font-weight:750}
+    .btnSub{margin-top:4px;font-size:12px;color:var(--muted)}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .tile{
-      border: 1px solid var(--stroke);
-      background: rgba(255,255,255,0.06);
-      border-radius: 18px;
-      padding: 12px;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.06);
+      border-radius:18px;
+      padding:12px;
       cursor:pointer;
       user-select:none;
-      min-height: 82px;
+      min-height:82px;
       display:flex;
       flex-direction:column;
       justify-content:space-between;
     }
-    .tileTitle{ font-size: 14px; font-weight: 800; }
-    .tileSub{ font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.25; }
-    .hr{ height:1px; background: var(--stroke); margin: 14px 0; opacity: 0.8; }
+    .tileTitle{font-size:14px;font-weight:800}
+    .tileSub{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.25}
+    .hScroll{display:flex;gap:10px;overflow:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch}
+    .hScroll::-webkit-scrollbar{display:none}
 
-    .hScroll{ display:flex; gap: 10px; overflow:auto; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }
-    .hScroll::-webkit-scrollbar{ display:none; }
-    .thumbWrap{
-  width: 100%;
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1px solid var(--stroke);
-  background: rgba(255,255,255,0.05);
-  position: relative;
-  aspect-ratio: 16 / 10;
-  margin-bottom: 10px;
-}
-.thumbImg{
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display:block;
-  transform: scale(1.02);
-  filter: saturate(1.05) contrast(1.02);
-}
-.thumbOverlay{
-  position:absolute; inset:0;
-  background: linear-gradient(180deg, rgba(0,0,0,0.00) 35%, rgba(0,0,0,0.72) 100%);
-  pointer-events:none;
-}
-.thumbBadge{
-  position:absolute;
-  left:10px; bottom:10px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.20);
-  background: rgba(18,22,30,0.55);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
-  font-size: 12px;
-  font-weight: 850;
-  color: rgba(255,255,255,0.92);
-  max-width: calc(100% - 20px);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.thumbFallback{
-  width:100%;
-  height:100%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color: rgba(255,255,255,0.70);
-  font-weight: 900;
-  letter-spacing: 0.8px;
-  background:
-    radial-gradient(420px 240px at 30% 10%, rgba(230,193,128,0.22), transparent 60%),
-    radial-gradient(380px 220px at 80% 0%, rgba(255,255,255,0.12), transparent 55%),
-    rgba(255,255,255,0.04);
-}
-.thumbNS{
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap:6px;
-  text-align:center;
-  padding: 10px;
-}
-.thumbNS .mark{ font-size: 18px; }
-.thumbNS .brand{ font-size: 12px; color: rgba(255,255,255,0.72); font-weight: 800; }
-
-.miniCard{
-      min-width: 220px;
-      border: 1px solid var(--stroke);
-      background: rgba(255,255,255,0.06);
-      border-radius: 18px;
-      padding: 12px;
+    .miniCard{
+      min-width:220px;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.06);
+      border-radius:18px;
+      padding:12px;
       cursor:pointer;
       user-select:none;
     }
-    .miniMeta{ font-size: 12px; color: var(--muted); }
-    .miniText{ margin-top: 8px; font-size: 14px; line-height: 1.3; }
-    .postImg{ width:100%; height: 140px; object-fit: cover; border-radius: 16px; border: 1px solid var(--stroke); background: rgba(255,255,255,0.06); }
-    .postImgSm{ width:100%; height: 110px; object-fit: cover; border-radius: 14px; border: 1px solid var(--stroke); background: rgba(255,255,255,0.06); }
+    .miniMeta{font-size:12px;color:var(--muted)}
+    .miniText{margin-top:8px;font-size:14px;line-height:1.3}
+    .chipRow{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+    .chip{font-size:12px;padding:5px 8px;border-radius:999px;border:1px solid var(--stroke);background:rgba(255,255,255,0.08)}
 
-    .chipRow{ margin-top: 10px; display:flex; gap: 6px; flex-wrap: wrap; }
-    .chip{
-      font-size: 12px;
-      padding: 5px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--stroke);
-      background: rgba(255,255,255,0.08);
+    /* Image preview */
+    .thumbWrap{
+      width:100%;
+      border-radius:16px;
+      overflow:hidden;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.05);
+      position:relative;
+      aspect-ratio:16/10;
+      margin-bottom:10px;
     }
+    .thumbImg{
+      width:100%;height:100%;
+      object-fit:cover;display:block;
+      transform:scale(1.02);
+      filter:saturate(1.05) contrast(1.02);
+    }
+    .thumbOverlay{position:absolute;inset:0;background:linear-gradient(180deg, rgba(0,0,0,0.00) 35%, rgba(0,0,0,0.72) 100%);pointer-events:none}
+    .thumbBadge{
+      position:absolute;left:10px;bottom:10px;
+      padding:6px 10px;border-radius:999px;
+      border:1px solid rgba(255,255,255,0.20);
+      background:rgba(18,22,30,0.55);
+      backdrop-filter:blur(14px) saturate(160%);
+      -webkit-backdrop-filter:blur(14px) saturate(160%);
+      font-size:12px;font-weight:850;color:rgba(255,255,255,0.92);
+      max-width:calc(100% - 20px);
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .thumbFallback{
+      width:100%;height:100%;
+      display:flex;align-items:center;justify-content:center;
+      color:rgba(255,255,255,0.70);
+      font-weight:900;letter-spacing:.8px;
+      background:
+        radial-gradient(420px 240px at 30% 10%, rgba(230,193,128,0.22), transparent 60%),
+        radial-gradient(380px 220px at 80% 0%, rgba(255,255,255,0.12), transparent 55%),
+        rgba(255,255,255,0.04);
+    }
+    .thumbNS{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:10px}
+    .thumbNS .mark{font-size:18px}
+    .thumbNS .brand{font-size:12px;color:rgba(255,255,255,0.72);font-weight:800}
 
+    /* Bottom nav */
     .bottomNav{
-      position: fixed;
-      left: 0; right: 0; bottom: 0;
-      padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-      display:flex;
-      justify-content:center;
-      z-index: 9000;
-      pointer-events: none;
+      position:fixed;left:0;right:0;bottom:0;
+      padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+      display:flex;justify-content:center;
+      z-index:9000;pointer-events:none;
     }
     .bottomNavInner{
-      pointer-events: auto;
-      width: min(560px, calc(100% - 24px));
-      display:flex;
-      gap: 10px;
-      padding: 10px;
-      border-radius: 22px;
-      border: 1px solid var(--glassStroke);
-      background: rgba(18,22,30,0.55);
-      backdrop-filter: blur(22px) saturate(180%);
-      -webkit-backdrop-filter: blur(22px) saturate(180%);
-      box-shadow: 0 12px 40px var(--glassShadow);
+      pointer-events:auto;
+      width:min(560px, calc(100% - 24px));
+      display:flex;gap:10px;padding:10px;
+      border-radius:22px;border:1px solid var(--glassStroke);
+      background:rgba(18,22,30,0.55);
+      backdrop-filter:blur(22px) saturate(180%);
+      -webkit-backdrop-filter:blur(22px) saturate(180%);
+      box-shadow:0 12px 40px var(--glassShadow);
     }
     .navItem{
-      flex:1;
-      border-radius: 16px;
-      padding: 10px 8px;
-      text-align:center;
-      cursor:pointer;
-      user-select:none;
-      border: 1px solid transparent;
-      background: rgba(255,255,255,0.05);
-      display:flex;
-      flex-direction:column;
-      gap: 6px;
-      align-items:center;
-      justify-content:center;
+      flex:1;border-radius:16px;padding:10px 8px;text-align:center;
+      cursor:pointer;user-select:none;border:1px solid transparent;
+      background:rgba(255,255,255,0.05);
+      display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;
     }
-    .navItemActive{
-      border: 1px solid rgba(230,193,128,0.35);
-      background: rgba(230,193,128,0.12);
-    }
-    .navIcon{ font-size: 18px; line-height: 1; }
-    .navLabel{ font-size: 11px; color: var(--muted); }
-    .navItemActive .navLabel{ color: rgba(255,255,255,0.85); }
+    .navItemActive{border:1px solid rgba(230,193,128,0.35);background:rgba(230,193,128,0.12)}
+    .navIcon{font-size:18px;line-height:1}
+    .navLabel{font-size:11px;color:var(--muted)}
+    .navItemActive .navLabel{color:rgba(255,255,255,0.85)}
 
+    /* Sheets */
     .sheetOverlay{
-      position: fixed; inset: 0;
-      background: var(--sheetOverlay);
-      backdrop-filter: blur(22px) saturate(180%);
-      -webkit-backdrop-filter: blur(22px) saturate(180%);
-      z-index: 9999;
-      display:flex;
-      justify-content:center;
-      align-items:flex-end;
-      padding: 10px;
+      position:fixed;inset:0;
+      background:var(--sheetOverlay);
+      backdrop-filter:blur(22px) saturate(180%);
+      -webkit-backdrop-filter:blur(22px) saturate(180%);
+      z-index:9999;display:none;
+      justify-content:center;align-items:flex-end;padding:10px;
     }
+    .sheetOverlay.open{display:flex}
     .sheet{
-      width: 100%;
-      max-width: 560px;
-      border-radius: 22px 22px 18px 18px;
-      border: 1px solid var(--glassStroke);
-      background: var(--sheetCardBg);
-      backdrop-filter: blur(28px) saturate(180%);
-      -webkit-backdrop-filter: blur(28px) saturate(180%);
-      box-shadow: 0 12px 40px var(--glassShadow);
-      padding: 14px 14px 10px;
-      max-height: 84vh;
-      overflow:auto;
+      width:100%;max-width:560px;
+      border-radius:22px 22px 18px 18px;
+      border:1px solid var(--glassStroke);
+      background:var(--sheetCardBg);
+      backdrop-filter:blur(28px) saturate(180%);
+      -webkit-backdrop-filter:blur(28px) saturate(180%);
+      box-shadow:0 12px 40px var(--glassShadow);
+      padding:14px 14px 10px;
+      max-height:84vh;overflow:auto;
     }
-    .sheetHandle{
-      width: 46px; height: 5px; border-radius: 999px;
-      background: rgba(255,255,255,0.22);
-      margin: 0 auto 10px;
-    }
+    .sheetHandle{width:46px;height:5px;border-radius:999px;background:rgba(255,255,255,0.22);margin:0 auto 10px}
     .input{
-      width: 100%;
-      border: 1px solid var(--stroke);
-      background: rgba(255,255,255,0.06);
-      border-radius: 16px;
-      padding: 12px 12px;
-      outline: none;
-      color: var(--text);
-      font-size: 14px;
+      width:100%;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.06);
+      border-radius:16px;
+      padding:12px 12px;
+      outline:none;color:var(--text);font-size:14px;
     }
-    .seg{
-      display:flex; gap: 8px;
-      border: 1px solid var(--stroke);
-      background: rgba(255,255,255,0.05);
-      padding: 6px;
-      border-radius: 18px;
-    }
+    .seg{display:flex;gap:8px;border:1px solid var(--stroke);background:rgba(255,255,255,0.05);padding:6px;border-radius:18px}
     .segBtn{
-      flex:1;
-      padding: 10px;
-      border-radius: 14px;
-      text-align:center;
-      cursor:pointer;
-      user-select:none;
-      font-size: 13px;
-      border: 1px solid transparent;
-      color: var(--muted);
-      background: transparent;
+      flex:1;padding:10px;border-radius:14px;text-align:center;
+      cursor:pointer;user-select:none;font-size:13px;border:1px solid transparent;
+      color:var(--muted);background:transparent;
     }
-    .segBtnActive{
-      border: 1px solid rgba(230,193,128,0.35);
-      background: rgba(230,193,128,0.12);
-      color: rgba(255,255,255,0.9);
-      font-weight: 750;
-    }
+    .segBtnActive{border:1px solid rgba(230,193,128,0.35);background:rgba(230,193,128,0.12);color:rgba(255,255,255,0.9);font-weight:750}
+    .hidden{display:none!important}
   </style>
 </head>
 <body>
   <div id="root"></div>
 
-  <script type="text/babel">
-    const { useEffect, useMemo, useState } = React;
-    const tg = window.Telegram?.WebApp;
+  <script>
+  (function(){
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+
+    const CHANNEL = "__CHANNEL__";
+    const BOT_USERNAME = "__BOT_USERNAME__"; // может быть пустым
 
     const DEFAULT_BG = "#0c0f14";
-    const hexToRgba = (hex, a) => {
-      if (!hex) return `rgba(12,15,20,${a})`;
-      let h = String(hex).trim();
-      if (h[0] === "#") h = h.slice(1);
-      if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-      if (h.length !== 6) return `rgba(12,15,20,${a})`;
-      const r = parseInt(h.slice(0, 2), 16);
-      const g = parseInt(h.slice(2, 4), 16);
-      const b = parseInt(h.slice(4, 6), 16);
-      return `rgba(${r},${g},${b},${a})`;
-    };
-    const setVar = (k, v) => document.documentElement.style.setProperty(k, v);
 
-    const applyTelegramTheme = () => {
-      const scheme = tg?.colorScheme || "dark";
-      const p = tg?.themeParams || {};
+    function hexToRgba(hex, a){
+      if(!hex) return "rgba(12,15,20,"+a+")";
+      let h = String(hex).trim();
+      if(h[0]==="#") h=h.slice(1);
+      if(h.length===3) h=h.split("").map(c=>c+c).join("");
+      if(h.length!==6) return "rgba(12,15,20,"+a+")";
+      const r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
+      return "rgba("+r+","+g+","+b+","+a+")";
+    }
+    function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
+
+    function applyTelegramTheme(){
+      const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
+      const p = tg && tg.themeParams ? tg.themeParams : {};
       const bg = p.bg_color || DEFAULT_BG;
-      const text = p.text_color || (scheme === "dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
-      const muted = p.hint_color || (scheme === "dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
+      const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
+      const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
 
       setVar("--bg", bg);
       setVar("--text", text);
       setVar("--muted", muted);
-      setVar("--stroke", scheme === "dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
-      setVar("--card", scheme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
-      setVar("--card2", scheme === "dark" ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)");
+      setVar("--stroke", scheme==="dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
+      setVar("--card", scheme==="dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
+      setVar("--card2", scheme==="dark" ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)");
 
-      setVar("--sheetOverlay", scheme === "dark" ? hexToRgba(bg, 0.55) : hexToRgba(bg, 0.45));
-      setVar("--sheetCardBg", scheme === "dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.86)");
-      setVar("--glassStroke", scheme === "dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
-      setVar("--glassShadow", scheme === "dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
+      setVar("--sheetOverlay", scheme==="dark" ? hexToRgba(bg,0.55) : hexToRgba(bg,0.45));
+      setVar("--sheetCardBg", scheme==="dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.86)");
+      setVar("--glassStroke", scheme==="dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
+      setVar("--glassShadow", scheme==="dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
 
-      if (tg) {
-        tg.setHeaderColor(bg);
-        tg.setBackgroundColor(bg);
-      }
-    };
-
-    if (tg) {
-      tg.expand();
-      applyTelegramTheme();
-      tg.onEvent("themeChanged", applyTelegramTheme);
+      try{
+        if(tg){
+          tg.setHeaderColor(bg);
+          tg.setBackgroundColor(bg);
+        }
+      }catch(e){}
     }
 
-    const CHANNEL = "__CHANNEL__";
-    const BOT_USERNAME = "__BOT_USERNAME__"; // может быть пустым, если не задана переменная окружения
+    function haptic(kind){
+      try{ tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred && tg.HapticFeedback.impactOccurred(kind||"light"); }catch(e){}
+    }
+    function openLink(url){
+      if(!url) return;
+      if(tg && tg.openTelegramLink) tg.openTelegramLink(url);
+      else window.open(url,"_blank");
+    }
+    function esc(s){
+      return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+    function el(tag, cls, html){
+      const n = document.createElement(tag);
+      if(cls) n.className = cls;
+      if(html!==undefined) n.innerHTML = html;
+      return n;
+    }
+    function tierLabel(t){
+      return ( {free:"🥉 Bronze", premium:"🥈 Silver", vip:"🥇 Gold VIP"}[t] ) || "🥉 Bronze";
+    }
 
-    const openLink = (url) => {
-      if (tg?.openTelegramLink) tg.openTelegramLink(url);
-      else window.open(url, "_blank");
+    const state = {
+      tab: "journal",
+      user: null,
+      botUsername: (BOT_USERNAME||"").replace(/^@/,""),
+      postsSheet: {open:false, tag:null, title:""},
+      posts: [],
+      loadingPosts: false,
+      profileOpen:false,
+      profileView:"menu",
+      raffle:null,
+      rouletteHistory:[],
+      inventoryOpen:false,
+      inventory:null,
+      invMsg:"",
+      q:"",
+      discoverMode:"brands",
+      msg:"",
+      busy:false
     };
 
-    const tierLabel = (tier) => (
-      { free: "🥉 Bronze", premium: "🥈 Silver", vip: "🥇 Gold VIP" }[tier] || "🥉 Bronze"
-    );
+    const tgUserId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
 
-    const haptic = (kind="light") => { try { tg?.HapticFeedback?.impactOccurred?.(kind); } catch(e){} };
+    // Data sets
+    const JOURNAL_BLOCKS = [
+      { tag: "Новинка", title: "🆕 New arrivals" },
+      { tag: "Люкс", title: "💎 Luxury picks" },
+      { tag: "Тренд", title: "🔥 Trending" },
+      { tag: "Оценка", title: "⭐ Personal review" },
+      { tag: "Факты", title: "🧾 Facts" }
+    ];
+    const BRANDS = [
+      ["The Ordinary","TheOrdinary","Skincare essentials"],
+      ["Dior","Dior","Couture beauty"],
+      ["Chanel","Chanel","Iconic classics"],
+      ["Kylie Cosmetics","KylieCosmetics","Pop-glam"],
+      ["Gisou","Gisou","Honey haircare"],
+      ["Rare Beauty","RareBeauty","Soft-focus makeup"],
+      ["Yves Saint Laurent","YSL","Bold luxury"],
+      ["Givenchy","Givenchy","Haute beauty"],
+      ["Charlotte Tilbury","CharlotteTilbury","Red carpet glow"],
+      ["NARS","NARS","Editorial makeup"],
+      ["Sol de Janeiro","SolDeJaneiro","Body & scent"],
+      ["Huda Beauty","HudaBeauty","Full glam"],
+      ["Rhode","Rhode","Minimal skincare"],
+      ["Tower 28 Beauty","Tower28Beauty","Sensitive skin"],
+      ["Benefit Cosmetics","BenefitCosmetics","Brows & cheeks"],
+      ["Estée Lauder","EsteeLauder","Skincare icons"],
+      ["Sisley","Sisley","Ultra premium"],
+      ["Kérastase","Kerastase","Salon haircare"],
+      ["Armani Beauty","ArmaniBeauty","Soft luxury"],
+      ["Hourglass","Hourglass","Ambient glow"],
+      ["Shiseido","Shiseido","Japanese skincare"],
+      ["Tom Ford Beauty","TomFordBeauty","Private blend vibe"],
+      ["Tarte","Tarte","Everyday glam"],
+      ["Sephora Collection","SephoraCollection","Smart basics"],
+      ["Clinique","Clinique","Skin first"],
+      ["Dolce & Gabbana","DolceGabbana","Italian glamour"],
+      ["Kayali","Kayali","Fragrance focus"],
+      ["Guerlain","Guerlain","Heritage luxury"],
+      ["Fenty Beauty","FentyBeauty","Inclusive glam"],
+      ["Too Faced","TooFaced","Playful makeup"],
+      ["MAKE UP FOR EVER","MakeUpForEver","Pro artistry"],
+      ["Erborian","Erborian","K-beauty meets EU"],
+      ["Natasha Denona","NatashaDenona","Palette queen"],
+      ["Lancôme","Lancome","French classics"],
+      ["Kosas","Kosas","Clean makeup"],
+      ["ONE/SIZE","OneSize","Stage-ready"],
+      ["Laneige","Laneige","Hydration"],
+      ["Makeup by Mario","MakeupByMario","Artist essentials"],
+      ["Valentino Beauty","ValentinoBeauty","Couture color"],
+      ["Drunk Elephant","DrunkElephant","Active skincare"],
+      ["Olaplex","Olaplex","Bond repair"],
+      ["Anastasia Beverly Hills","AnastasiaBeverlyHills","Brows & glam"],
+      ["Amika","Amika","Hair styling"],
+      ["BYOMA","BYOMA","Barrier care"],
+      ["Glow Recipe","GlowRecipe","Fruity glow"],
+      ["Milk Makeup","MilkMakeup","Cool minimal"],
+      ["Summer Fridays","SummerFridays","Clean glow"],
+      ["K18","K18","Repair tech"]
+    ];
+    const CATEGORIES = [
+      ["Новинка","Новинка","New launches"],
+      ["Люкс","Люкс","Luxury picks"],
+      ["Тренд","Тренд","What’s trending"],
+      ["История","История","Brand stories"],
+      ["Оценка","Оценка","Personal reviews"],
+      ["Факты","Факты","Short facts"],
+      ["Состав","Состав","Ingredients / formulas"],
+      ["Challenge","Challenge","Beauty challenges"],
+      ["SephoraPromo","SephoraPromo","Sephora promos"]
+    ];
+    const PRODUCTS = [
+      ["Праймер","Праймер"],["Тональная основа","ТональнаяОснова"],["Консилер","Консилер"],
+      ["Пудра","Пудра"],["Румяна","Румяна"],["Скульптор","Скульптор"],["Бронзер","Бронзер"],
+      ["Продукт для бровей","ПродуктДляБровей"],["Хайлайтер","Хайлайтер"],["Тушь","Тушь"],
+      ["Тени","Тени"],["Помада","Помада"],["Карандаш для губ","КарандашДляГуб"],["Палетка","Палетка"],["Фиксатор","Фиксатор"]
+    ];
 
-    const Sheet = ({ open, onClose, children }) => {
-      if (!open) return null;
-      return (
-        <div className="sheetOverlay" onClick={onClose}>
-          <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheetHandle" />
-            {children}
-          </div>
-        </div>
-      );
-    };
+    const journalCache = {}; // tag->posts preview list
 
-    const LockedClaimModal = ({ open, message, claimCode, onOk, onClaim }) => {
-      if (!open) return null;
-      return (
-        <div
-          onClick={(e) => { if (e.target === e.currentTarget) { /* no close */ } }}
-          style={{
-            position:"fixed", inset:0, background:"var(--sheetOverlay)",
-            backdropFilter:"blur(22px) saturate(180%)",
-            WebkitBackdropFilter:"blur(22px) saturate(180%)",
-            zIndex:10000, display:"flex", justifyContent:"center", alignItems:"center", padding:"16px"
-          }}
-        >
-          <div style={{
-            width:"100%", maxWidth:"560px",
-            borderRadius:"22px", border:"1px solid var(--glassStroke)",
-            background:"var(--sheetCardBg)",
-            backdropFilter:"blur(28px) saturate(180%)",
-            WebkitBackdropFilter:"blur(28px) saturate(180%)",
-            boxShadow:"0 12px 40px var(--glassShadow)",
-            padding:"16px"
-          }}>
-            <div style={{ fontSize:"18px", fontWeight:850, marginBottom:"10px" }}>🎡 Рулетка</div>
-            <div style={{ fontSize:"14px", lineHeight:"1.4", whiteSpace:"pre-line" }}>{message}</div>
+    async function apiGet(url){
+      const r = await fetch(url);
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      return r.json();
+    }
+    async function apiPost(url, body){
+      const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{})});
+      const data = await r.json().catch(()=> ({}));
+      if(!r.ok) throw new Error(data.detail || ("HTTP "+r.status));
+      return data;
+    }
 
-            <div style={{ display:"flex", gap:"10px", marginTop:"16px" }}>
-              <div onClick={onOk} className="btn" style={{ justifyContent:"center", fontWeight:850 }}>OK</div>
-              <div
-                onClick={onClaim}
-                className="btn"
-                style={{
-                  justifyContent:"center",
-                  fontWeight:900,
-                  border:"1px solid rgba(230,193,128,0.35)",
-                  background:"rgba(230,193,128,0.14)"
-                }}
-              >
-                Получить приз
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    };
+    async function refreshUser(){
+      if(!tgUserId) return;
+      try{
+        state.user = await apiGet("/api/user/"+encodeURIComponent(tgUserId));
+      }catch(e){}
+    }
+    async function loadBotUsername(){
+      try{
+        const d = await apiGet("/api/bot/username");
+        const u = String(d.bot_username||"").trim().replace(/^@/,"");
+        if(u) state.botUsername = u;
+      }catch(e){}
+    }
 
-    const ConfirmClaimModal = ({ open, title, message, onCancel, onConfirm }) => {
-      if (!open) return null;
-      return (
-        <div
-          onClick={(e) => { /* no close */ }}
-          style={{
-            position:"fixed", inset:0, background:"var(--sheetOverlay)",
-            backdropFilter:"blur(22px) saturate(180%)",
-            WebkitBackdropFilter:"blur(22px) saturate(180%)",
-            zIndex:10001, display:"flex", justifyContent:"center", alignItems:"center", padding:"16px"
-          }}
-        >
-          <div style={{
-            width:"100%", maxWidth:"560px",
-            borderRadius:"22px", border:"1px solid var(--glassStroke)",
-            background:"var(--sheetCardBg)",
-            backdropFilter:"blur(28px) saturate(180%)",
-            WebkitBackdropFilter:"blur(28px) saturate(180%)",
-            boxShadow:"0 12px 40px var(--glassShadow)",
-            padding:"16px"
-          }}>
-            <div style={{ fontSize:"18px", fontWeight:900, marginBottom:"10px" }}>{title || "Подтверждение"}</div>
-            <div style={{ fontSize:"14px", lineHeight:"1.4", whiteSpace:"pre-line" }}>{message || ""}</div>
-            <div style={{ display:"flex", gap:"10px", marginTop:"16px" }}>
-              <div onClick={onCancel} className="btn" style={{ justifyContent:"center", fontWeight:900 }}>Отмена</div>
-              <div
-                onClick={onConfirm}
-                className="btn"
-                style={{
-                  justifyContent:"center",
-                  fontWeight:950,
-                  border:"1px solid rgba(230,193,128,0.35)",
-                  background:"rgba(230,193,128,0.14)"
-                }}
-              >
-                Да, забрать
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    };
+    async function loadJournalBlocks(){
+      for(const b of JOURNAL_BLOCKS){
+        try{
+          const arr = await apiGet("/api/posts?tag="+encodeURIComponent(b.tag));
+          journalCache[b.tag] = Array.isArray(arr) ? arr.slice(0,8) : [];
+        }catch(e){
+          journalCache[b.tag] = [];
+        }
+      }
+    }
 
-    const PostMiniCard = ({ post }) => {
-  const [imgOk, setImgOk] = React.useState(true);
-  const hasImg = !!post.media_url;
-  const tagTitle = "#" + (post.tags?.[0] || "post");
-  return (
-    <div className="miniCard" onClick={() => { haptic(); openLink(post.url); }}>
-      <div className="thumbWrap">
-        {hasImg && imgOk ? (
-          <img
-            className="thumbImg"
-            src={post.media_url}
-            loading="lazy"
-            onError={() => setImgOk(false)}
-            alt={post.preview || tagTitle}
-          />
-        ) : (
-          <div className="thumbFallback">
-            <div className="thumbNS">
-              <div className="mark">NS</div>
-              <div className="brand">Natural Sense</div>
-            </div>
-          </div>
-        )}
-        <div className="thumbOverlay" />
-        <div className="thumbBadge">{tagTitle}</div>
-      </div>
+    async function openPosts(tag, title){
+      state.postsSheet.open = true;
+      state.postsSheet.tag = tag;
+      state.postsSheet.title = title || ("#"+tag);
+      state.posts = [];
+      state.loadingPosts = true;
+      render();
+      try{
+        const arr = await apiGet("/api/posts?tag="+encodeURIComponent(tag));
+        state.posts = Array.isArray(arr) ? arr : [];
+      }catch(e){
+        state.posts = [];
+      }finally{
+        state.loadingPosts = false;
+        render();
+      }
+    }
 
-      <div className="miniMeta">{tagTitle} • ID {post.message_id}</div>
-      <div className="miniText">{post.preview || "Открыть пост →"}</div>
-      <div className="chipRow">
-        {(post.tags || []).slice(0,4).map(t => <div key={t} className="chip">#{t}</div>)}
-      </div>
-    </div>
-  );
-};
+    function closePosts(){
+      state.postsSheet = {open:false, tag:null, title:""};
+      state.posts = [];
+      state.loadingPosts = false;
+      render();
+    }
 
-const PostFullCard = ({ post }) => {
-  const [imgOk, setImgOk] = React.useState(true);
-  const hasImg = !!post.media_url;
-  const tagTitle = "#" + (post.tags?.[0] || "post");
-  return (
-    <div className="card2" style={{ cursor:"pointer" }} onClick={() => { haptic(); openLink(post.url); }}>
-      <div className="thumbWrap" style={{ aspectRatio: "16 / 9" }}>
-        {hasImg && imgOk ? (
-          <img
-            className="thumbImg"
-            src={post.media_url}
-            loading="lazy"
-            onError={() => setImgOk(false)}
-            alt={post.preview || tagTitle}
-          />
-        ) : (
-          <div className="thumbFallback">
-            <div className="thumbNS">
-              <div className="mark">NS</div>
-              <div className="brand">Natural Sense</div>
-            </div>
-          </div>
-        )}
-        <div className="thumbOverlay" />
-        <div className="thumbBadge">{tagTitle}</div>
-      </div>
+    async function openInventory(){
+      state.inventoryOpen = true;
+      state.invMsg = "";
+      render();
+      if(!tgUserId) return;
+      try{
+        state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
+      }catch(e){
+        state.inventory = null;
+      }
+      render();
+    }
+    function closeInventory(){
+      state.inventoryOpen = false;
+      state.invMsg = "";
+      render();
+    }
 
-      <div className="miniMeta">{tagTitle} • ID {post.message_id}</div>
-      <div className="miniText">{post.preview || "Открыть пост →"}</div>
-      <div className="chipRow">
-        {(post.tags || []).slice(0,8).map(t => <div key={t} className="chip">#{t}</div>)}
-      </div>
-    </div>
-  );
-};
+    async function loadRaffleStatus(){
+      if(!tgUserId) return;
+      try{
+        state.raffle = await apiGet("/api/raffle/status?telegram_id="+encodeURIComponent(tgUserId));
+      }catch(e){
+        state.raffle = null;
+      }
+    }
+    async function loadRouletteHistory(){
+      if(!tgUserId) return;
+      try{
+        const arr = await apiGet("/api/roulette/history?telegram_id="+encodeURIComponent(tgUserId)+"&limit=5");
+        state.rouletteHistory = Array.isArray(arr) ? arr : [];
+      }catch(e){
+        state.rouletteHistory = [];
+      }
+    }
 
- = ({ post }) => (
-      <div className="card2" style={{ cursor:"pointer" }} onClick={() => { haptic(); openLink(post.url); }}>
-        <div className="miniMeta">{"#" + (post.tags?.[0] || "post")} • ID {post.message_id}</div>
-        {post.media_url ? (
-          <img className="postImg" src={post.media_url} alt="" loading="lazy" />
-        ) : null}
-        <div className="miniText">{post.preview || "Открыть пост →"}</div>
-        <div className="chipRow">
-          {(post.tags || []).slice(0,8).map(t => <div key={t} className="chip">#{t}</div>)}
-        </div>
-      </div>
-    );
+    async function openProfile(view){
+      state.profileOpen = true;
+      state.profileView = view || "menu";
+      render();
+      await Promise.all([loadRaffleStatus(), loadRouletteHistory()]);
+      render();
+    }
+    function closeProfile(){
+      state.profileOpen = false;
+      state.msg = "";
+      render();
+    }
 
-    const BottomNav = ({ tab, onTab }) => {
-      const items = [
-        { id:"journal", icon:"📰", label:"Journal" },
-        { id:"discover", icon:"🧭", label:"Discover" },
-        { id:"rewards", icon:"🎁", label:"Rewards" },
-        { id:"profile", icon:"👤", label:"Profile" },
-      ];
-      return (
-        <div className="bottomNav">
-          <div className="bottomNavInner">
-            {items.map(it => (
-              <div
-                key={it.id}
-                className={"navItem " + (tab === it.id ? "navItemActive" : "")}
-                onClick={() => { haptic(); onTab(it.id); }}
-              >
-                <div className="navIcon">{it.icon}</div>
-                <div className="navLabel">{it.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    };
+    async function buyTicket(){
+      if(!tgUserId || state.busy) return;
+      state.busy = true; state.msg = ""; render();
+      try{
+        const d = await apiPost("/api/raffle/buy_ticket", {telegram_id: tgUserId, qty: 1});
+        state.msg = "✅ Билет куплен. Твоих билетов: "+d.ticket_count;
+        await refreshUser();
+        await loadRaffleStatus();
+        haptic("light");
+      }catch(e){
+        state.msg = "❌ "+(e.message||"Ошибка");
+      }finally{
+        state.busy = false;
+        render();
+      }
+    }
 
-    const PrizeTable = () => (
-      <div style={{ marginTop:"10px" }}>
-        <div className="sub">Шансы рулетки (честно):</div>
-        <div style={{ marginTop:"10px", display:"grid", gap:"8px" }}>
-          {[
-            ["50%", "+500"],
-            ["35%", "+1000"],
-            ["15%", "+1500"],
-            ["10%", "+2000"],
-            ["5%", "🎟 +1 билет"],
-            ["3.5%", "+3000"],
-            ["1.5%", "💎 главный приз"],
-          ].map(([p, t]) => (
-            <div key={p+t} style={{
-              padding:"10px",
-              borderRadius:"14px",
-              border:"1px solid var(--stroke)",
-              background:"rgba(255,255,255,0.08)",
-              display:"flex",
-              justifyContent:"space-between",
-              fontSize:"14px"
-            }}>
-              <div style={{ color:"var(--muted)" }}>{p}</div>
-              <div style={{ fontWeight:700 }}>{t}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ marginTop:"10px", fontSize:"12px", color:"var(--muted)" }}>
-          Лимит: 1 спин / 5с (тест)
-        </div>
-      </div>
-    );
+    async function spinRoulette(){
+      if(!tgUserId || state.busy) return;
+      state.busy = true; state.msg = ""; render();
+      try{
+        const d = await apiPost("/api/roulette/spin", {telegram_id: tgUserId});
+        state.msg = "🎡 Выпало: "+d.prize_label;
+        try{
+          if(tg && tg.showPopup){
+            tg.showPopup({title:"🎡 Рулетка", message:"Ваш приз: "+d.prize_label, buttons:[{type:"ok"}]});
+          }
+        }catch(e){}
+        await refreshUser();
+        await loadRaffleStatus();
+        await loadRouletteHistory();
+        haptic("light");
+      }catch(e){
+        state.msg = "❌ "+(e.message||"Ошибка");
+      }finally{
+        state.busy = false;
+        render();
+      }
+    }
 
-    const App = () => {
-      const [tab, setTab] = useState("journal");
+    // Rendering helpers
+    function postCard(post, full){
+      const tagTitle = "#"+((post.tags && post.tags[0]) ? post.tags[0] : "post");
+      const wrap = el("div", full ? "card2" : "miniCard");
+      wrap.style.cursor = "pointer";
+      wrap.addEventListener("click", ()=>{ haptic(); openLink(post.url); });
 
-      // core data
-      const [user, setUser] = useState(null);
-      const [botUsername, setBotUsername] = useState(BOT_USERNAME || "");
-      const tgUserId = tg?.initDataUnsafe?.user?.id;
+      const tw = el("div","thumbWrap");
+      if(full) tw.style.aspectRatio = "16 / 9";
 
-      // overlays / modes
-      const [postsSheet, setPostsSheet] = useState({ open:false, tag:null, title:"" });
-      const [posts, setPosts] = useState([]);
-      const [loadingPosts, setLoadingPosts] = useState(false);
+      const badge = el("div","thumbBadge", esc(tagTitle));
+      const overlay = el("div","thumbOverlay");
 
-      const [inventoryOpen, setInventoryOpen] = useState(false);
-      const [inventory, setInventory] = useState(null);
-      const [ticketQty, setTicketQty] = useState(1);
-      const [invMsg, setInvMsg] = useState("");
+      if(post.media_url){
+        const img = document.createElement("img");
+        img.className = "thumbImg";
+        img.loading = "lazy";
+        img.src = post.media_url;
+        img.alt = post.preview || tagTitle;
+        img.onerror = ()=>{ tw.innerHTML=""; tw.appendChild(fallbackThumb()); tw.appendChild(overlay); tw.appendChild(badge); };
+        tw.appendChild(img);
+      }else{
+        tw.appendChild(fallbackThumb());
+      }
 
-      const [profileOpen, setProfileOpen] = useState(false);
-      const [profileView, setProfileView] = useState("menu"); // menu|raffle|roulette|history
+      tw.appendChild(overlay);
+      tw.appendChild(badge);
 
-      const [raffle, setRaffle] = useState(null);
-      const [rouletteHistory, setRouletteHistory] = useState([]);
-      const [busy, setBusy] = useState(false);
-      const [msg, setMsg] = useState("");
+      wrap.appendChild(tw);
+      wrap.appendChild(el("div","miniMeta", esc(tagTitle)+" • ID "+esc(post.message_id)));
+      wrap.appendChild(el("div","miniText", esc(post.preview || "Открыть пост →")));
 
-      const [claimModal, setClaimModal] = useState({ open:false, message:"", claim_code:"" });
-      const [confirmClaim, setConfirmClaim] = useState({ open:false, claim_code:"", prize_label:"" });
+      const chips = el("div","chipRow");
+      const tags = Array.isArray(post.tags) ? post.tags.slice(0, full?8:4) : [];
+      for(const t of tags){
+        chips.appendChild(el("div","chip", "#"+esc(t)));
+      }
+      wrap.appendChild(chips);
 
-      // Discover
-      const [discoverMode, setDiscoverMode] = useState("brands"); // brands|categories
-      const [q, setQ] = useState("");
+      return wrap;
+    }
+    function fallbackThumb(){
+      const f = el("div","thumbFallback");
+      const ns = el("div","thumbNS");
+      ns.appendChild(el("div","mark","NS"));
+      ns.appendChild(el("div","brand","Natural Sense"));
+      f.appendChild(ns);
+      return f;
+    }
 
-      const refreshUser = () => {
-        if (!tgUserId) return Promise.resolve();
-        return fetch(`/api/user/${tgUserId}`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setUser(data))
-          .catch(() => {});
-      };
+    function renderJournal(main){
+      const hero = el("div","card");
+      hero.addEventListener("click", ()=>{ if(state.user){ haptic(); openProfile("menu"); } });
 
-      const loadPosts = (tag) => {
-        if (!tag) return;
-        setLoadingPosts(true);
-        fetch(`/api/posts?tag=${encodeURIComponent(tag)}`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setPosts(Array.isArray(data) ? data : []))
-          .catch(() => setPosts([]))
-          .finally(() => setLoadingPosts(false));
-      };
+      const glow = el("div");
+      glow.style.position="absolute";
+      glow.style.inset="-2px";
+      glow.style.background="radial-gradient(600px 300px at 10% 0%, rgba(230,193,128,0.26), transparent 60%)";
+      glow.style.pointerEvents="none";
+      hero.appendChild(glow);
 
-      const openPosts = (tag, title) => {
-        setPostsSheet({ open:true, tag, title: title || ("#" + tag) });
-        loadPosts(tag);
-      };
+      const inner = el("div");
+      inner.style.position="relative";
 
-      const closePosts = () => {
-        setPostsSheet({ open:false, tag:null, title:"" });
-        setPosts([]);
-        setLoadingPosts(false);
-      };
+      const topRow = el("div","row");
+      const left = el("div");
+      left.appendChild(el("div","h1","NS · Natural Sense"));
+      left.appendChild(el("div","sub","Today’s Edit · luxury beauty magazine"));
+      topRow.appendChild(left);
 
-      const loadRaffleStatus = () => {
-        if (!tgUserId) return Promise.resolve();
-        return fetch(`/api/raffle/status?telegram_id=${encodeURIComponent(tgUserId)}`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setRaffle(data))
-          .catch(() => setRaffle(null));
-      };
+      if(state.user){
+        topRow.appendChild(el("div","pill","💎 "+esc(state.user.points)+" · "+esc(tierLabel(state.user.tier))));
+      }
+      inner.appendChild(topRow);
 
-      const loadRouletteHistory = () => {
-        if (!tgUserId) return Promise.resolve();
-        return fetch(`/api/roulette/history?telegram_id=${encodeURIComponent(tgUserId)}&limit=5`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setRouletteHistory(Array.isArray(data) ? data : []))
-          .catch(() => setRouletteHistory([]));
-      };
+      inner.appendChild(el("div",null,'<div style="margin-top:12px;color:var(--muted);font-size:13px">Curated picks, short facts, luxury reviews — inside Telegram.</div>'));
 
-      const loadInventory = () => {
-        if (!tgUserId) return Promise.resolve();
-        return fetch(`/api/inventory?telegram_id=${encodeURIComponent(tgUserId)}`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => setInventory(data))
-          .catch(() => setInventory(null));
-      };
+      const actions = el("div");
+      actions.style.marginTop="12px";
+      actions.style.display="grid";
+      actions.style.gap="10px";
 
-      const referralLink = useMemo(() => {
-        if (!tgUserId) return "";
-        if (!botUsername) return "";
-        return `https://t.me/${botUsername}?start=${tgUserId}`;
-      }, [tgUserId, botUsername]);
+      const openCh = el("div","btn");
+      openCh.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openLink("https://t.me/"+CHANNEL); });
+      openCh.appendChild(el("div",null,'<div class="btnTitle">↩️ Open Channel</div><div class="btnSub">Return to Natural Sense feed</div>'));
+      openCh.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
+      actions.appendChild(openCh);
 
-      const copyText = async (t) => {
-        if (!t) return;
-        try {
-          await navigator.clipboard.writeText(t);
-          setMsg("✅ Скопировано");
-          haptic("light");
-          return;
-        } catch (e) {
-          try {
-            const ta = document.createElement("textarea");
-            ta.value = t;
-            ta.style.position = "fixed";
-            ta.style.left = "-9999px";
-            ta.style.top = "-9999px";
-            document.body.appendChild(ta);
-            ta.focus();
-            ta.select();
-            const ok = document.execCommand("copy");
-            document.body.removeChild(ta);
-            setMsg(ok ? "✅ Скопировано" : "ℹ️ Не удалось скопировать");
-            if (ok) haptic("light");
-          } catch (e2) {
-            setMsg("ℹ️ Не удалось скопировать");
+      const grid1 = el("div","grid");
+      const tNew = el("div","tile");
+      tNew.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Новинка","🆕 New arrivals"); });
+      tNew.appendChild(el("div","tileTitle","🆕 New"));
+      tNew.appendChild(el("div","tileSub","Fresh launches & updates"));
+      const tLux = el("div","tile");
+      tLux.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Люкс","💎 Luxury picks"); });
+      tLux.appendChild(el("div","tileTitle","💎 Luxury"));
+      tLux.appendChild(el("div","tileSub","Short & premium"));
+      grid1.appendChild(tNew); grid1.appendChild(tLux);
+
+      const grid2 = el("div","grid");
+      const tTrend = el("div","tile");
+      tTrend.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Тренд","🔥 Trending"); });
+      tTrend.appendChild(el("div","tileTitle","🔥 Trending"));
+      tTrend.appendChild(el("div","tileSub","What everyone wants"));
+      const tBag = el("div","tile");
+      tBag.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openInventory(); });
+      tBag.appendChild(el("div","tileTitle","👜 Bag"));
+      tBag.appendChild(el("div","tileSub","Tickets & prizes"));
+      grid2.appendChild(tTrend); grid2.appendChild(tBag);
+
+      actions.appendChild(grid1);
+      actions.appendChild(grid2);
+      inner.appendChild(actions);
+
+      hero.appendChild(inner);
+      main.appendChild(hero);
+
+      for(const b of JOURNAL_BLOCKS){
+        const block = el("div");
+        block.style.marginTop="14px";
+
+        const hdr = el("div","row");
+        hdr.style.alignItems="baseline";
+        hdr.appendChild(el("div",null,'<div style="font-size:15px;font-weight:850">'+esc(b.title)+'</div>'));
+
+        const viewAll = el("div",null,'<div style="font-size:12px;color:var(--muted);cursor:pointer;user-select:none">View all ›</div>');
+        viewAll.addEventListener("click", ()=>{ haptic(); openPosts(b.tag, b.title); });
+        hdr.appendChild(viewAll);
+        block.appendChild(hdr);
+
+        const sc = el("div","hScroll");
+        sc.style.marginTop="10px";
+        const arr = journalCache[b.tag] || [];
+        if(arr.length===0){
+          const empty = el("div","miniCard");
+          empty.style.minWidth="100%";
+          empty.style.cursor="default";
+          empty.appendChild(el("div","miniMeta","Пока пусто"));
+          empty.appendChild(el("div","miniText",'<span style="color:var(--muted)">Добавь посты с тегом #'+esc(b.tag)+' в канал.</span>'));
+          sc.appendChild(empty);
+        }else{
+          for(const p of arr){
+            sc.appendChild(postCard(p,false));
           }
         }
-      };
+        block.appendChild(sc);
+        main.appendChild(block);
+      }
+    }
 
-      const buyTicket = async () => {
-        if (!tgUserId) return;
-        setBusy(true);
-        setMsg("");
-        try {
-          const r = await fetch(`/api/raffle/buy_ticket`, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ telegram_id: tgUserId, qty: 1 })
-          });
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            throw new Error(err.detail || "Ошибка");
-          }
-          const data = await r.json();
-          setMsg(`✅ Билет куплен. Твоих билетов: ${data.ticket_count}`);
-          setRaffle((prev) => ({ ...(prev || {}), ticket_count: data.ticket_count }));
+    function renderDiscover(main){
+      const wrap = el("div","card2");
+
+      const top = el("div","row");
+      const tl = el("div");
+      tl.appendChild(el("div","h1","Discover"));
+      tl.appendChild(el("div","sub","Brands · Categories · Products"));
+      top.appendChild(tl);
+
+      const bag = el("div","pill","👜 Bag");
+      bag.style.cursor="pointer";
+      bag.addEventListener("click", ()=>{ haptic(); openInventory(); });
+      top.appendChild(bag);
+
+      wrap.appendChild(top);
+
+      const inp = document.createElement("input");
+      inp.className="input";
+      inp.placeholder="Search brands / tags…";
+      inp.value = state.q || "";
+      inp.addEventListener("input", (e)=>{ state.q = e.target.value; render(); });
+      const inpWrap = el("div");
+      inpWrap.style.marginTop="12px";
+      inpWrap.appendChild(inp);
+      wrap.appendChild(inpWrap);
+
+      const seg = el("div","seg");
+      seg.style.marginTop="12px";
+      const b1 = el("div","segBtn "+(state.discoverMode==="brands"?"segBtnActive":""),"Brands");
+      const b2 = el("div","segBtn "+(state.discoverMode==="categories"?"segBtnActive":""),"Categories");
+      b1.addEventListener("click", ()=>{ haptic(); state.discoverMode="brands"; render(); });
+      b2.addEventListener("click", ()=>{ haptic(); state.discoverMode="categories"; render(); });
+      seg.appendChild(b1); seg.appendChild(b2);
+      wrap.appendChild(seg);
+
+      const grid = el("div","grid");
+      grid.style.marginTop="12px";
+      const s = (state.q||"").trim().toLowerCase();
+      const data = state.discoverMode==="brands" ? BRANDS : CATEGORIES;
+      const filtered = !s ? data : data.filter(x => (x[0]||"").toLowerCase().includes(s) || (x[1]||"").toLowerCase().includes(s) || (x[2]||"").toLowerCase().includes(s));
+      for(const [name, tag, sub] of filtered){
+        const t = el("div","tile");
+        t.addEventListener("click", ()=>{ haptic(); openPosts(tag, name); });
+        t.appendChild(el("div","tileTitle", esc(name)));
+        t.appendChild(el("div","tileSub", esc(sub || ("#"+tag))));
+        grid.appendChild(t);
+      }
+      wrap.appendChild(grid);
+
+      wrap.appendChild(el("div","hr"));
+
+      wrap.appendChild(el("div",null,'<div style="font-size:14px;font-weight:850">🧴 Product types</div><div class="sub" style="margin-top:6px">Quick access</div>'));
+
+      const grid2 = el("div","grid");
+      grid2.style.marginTop="10px";
+      for(const [name, tag] of PRODUCTS){
+        const t = el("div","tile");
+        t.addEventListener("click", ()=>{ haptic(); openPosts(tag, name); });
+        t.appendChild(el("div","tileTitle", esc(name)));
+        t.appendChild(el("div","tileSub", "#"+esc(tag)));
+        grid2.appendChild(t);
+      }
+      wrap.appendChild(grid2);
+
+      main.appendChild(wrap);
+    }
+
+    function renderRewards(main){
+      const wrap = el("div","card2");
+      const top = el("div","row");
+      const tl = el("div");
+      tl.appendChild(el("div","h1","Rewards"));
+      tl.appendChild(el("div","sub","Roulette · Raffle · Inventory"));
+      top.appendChild(tl);
+      if(state.user) top.appendChild(el("div","pill","💎 "+esc(state.user.points)+" pts"));
+      wrap.appendChild(top);
+
+      const grid = el("div","grid");
+      grid.style.marginTop="12px";
+
+      const t1 = el("div","tile");
+      t1.addEventListener("click", ()=>{ haptic(); openProfile("roulette"); });
+      t1.appendChild(el("div","tileTitle","🎡 Roulette"));
+      t1.appendChild(el("div","tileSub","Try your luck (2000)"));
+      const t2 = el("div","tile");
+      t2.addEventListener("click", ()=>{ haptic(); openProfile("raffle"); });
+      t2.appendChild(el("div","tileTitle","🎁 Raffle"));
+      t2.appendChild(el("div","tileSub","Ticket (500)"));
+      const t3 = el("div","tile");
+      t3.addEventListener("click", ()=>{ haptic(); openInventory(); });
+      t3.appendChild(el("div","tileTitle","👜 Bag"));
+      t3.appendChild(el("div","tileSub","Tickets & prizes"));
+      const t4 = el("div","tile");
+      t4.addEventListener("click", ()=>{ haptic(); openPosts("Challenge","💎 Beauty Challenges"); });
+      t4.appendChild(el("div","tileTitle","💎 Challenges"));
+      t4.appendChild(el("div","tileSub","Daily motivation"));
+
+      grid.appendChild(t1);grid.appendChild(t2);grid.appendChild(t3);grid.appendChild(t4);
+      wrap.appendChild(grid);
+
+      wrap.appendChild(el("div","hr"));
+      const openCh = el("div","btn");
+      openCh.addEventListener("click", ()=>{ haptic(); openLink("https://t.me/"+CHANNEL); });
+      openCh.appendChild(el("div",null,'<div class="btnTitle">↩️ Open Channel</div><div class="btnSub">Natural Sense feed</div>'));
+      openCh.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
+      wrap.appendChild(openCh);
+
+      main.appendChild(wrap);
+    }
+
+    function renderPostsSheet(){
+      const overlay = document.getElementById("postsOverlay");
+      overlay.classList.toggle("open", !!state.postsSheet.open);
+      const content = document.getElementById("postsContent");
+      content.innerHTML = "";
+
+      if(!state.postsSheet.open) return;
+
+      const hdr = el("div","row");
+      hdr.style.alignItems="baseline";
+      hdr.appendChild(el("div","h1", esc(state.postsSheet.title || "Posts")));
+      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Close</div>');
+      close.addEventListener("click", ()=>{ haptic(); closePosts(); });
+      hdr.appendChild(close);
+      content.appendChild(hdr);
+
+      content.appendChild(el("div","sub","Посты "+(state.postsSheet.tag ? "#"+esc(state.postsSheet.tag) : "")));
+
+      if(state.loadingPosts){
+        content.appendChild(el("div","sub",'Загрузка…'));
+        return;
+      }
+      if(!state.loadingPosts && state.posts.length===0){
+        content.appendChild(el("div","sub",'Постов с этим тегом пока нет.'));
+        return;
+      }
+      const list = el("div");
+      list.style.marginTop="12px";
+      list.style.display="grid";
+      list.style.gap="10px";
+      for(const p of state.posts){
+        list.appendChild(postCard(p,true));
+      }
+      content.appendChild(list);
+    }
+
+    function renderInventorySheet(){
+      const overlay = document.getElementById("invOverlay");
+      overlay.classList.toggle("open", !!state.inventoryOpen);
+      const content = document.getElementById("invContent");
+      content.innerHTML = "";
+      if(!state.inventoryOpen) return;
+
+      const hdr = el("div","row"); hdr.style.alignItems="baseline";
+      hdr.appendChild(el("div","h1","👜 My Bag"));
+      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Close</div>');
+      close.addEventListener("click", ()=>{ haptic(); closeInventory(); });
+      hdr.appendChild(close);
+      content.appendChild(hdr);
+      content.appendChild(el("div","sub","Tickets & prizes"));
+
+      const bal = el("div","card2");
+      const r1 = el("div","row");
+      const left = el("div");
+      left.appendChild(el("div",null,'<div style="font-size:13px;color:var(--muted)">Balance</div>'));
+      left.appendChild(el("div",null,'<div style="margin-top:6px;font-size:16px;font-weight:900">💎 '+esc(state.user ? state.user.points : 0)+' pts</div>'));
+      r1.appendChild(left);
+      r1.appendChild(el("div","pill", esc(tierLabel(state.user ? state.user.tier : "free"))));
+      bal.appendChild(r1);
+      bal.style.marginTop="12px";
+      content.appendChild(bal);
+
+      const inv = state.inventory || {};
+      const haveTickets = Number(inv.ticket_count || 0) || 0;
+      const rate = Number(inv.ticket_convert_rate || 0) || 0;
+      const diorValue = Number(inv.dior_convert_value || 0) || 0;
+
+      const tCard = el("div","card2");
+      tCard.style.marginTop="12px";
+      tCard.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎟 Tickets</div>'));
+      tCard.appendChild(el("div","sub",'You have: <b style="color:rgba(255,255,255,0.92)">'+haveTickets+'</b>'));
+      tCard.appendChild(el("div","sub",'Rate: 1 = '+rate+' pts'));
+
+      // Simple convert all button (no qty selector in vanilla to keep it stable)
+      const convBtn = el("div","btn");
+      convBtn.style.marginTop="10px";
+      convBtn.style.opacity = (!haveTickets || state.busy) ? 0.5 : 1;
+      convBtn.style.cursor = (!haveTickets || state.busy) ? "not-allowed" : "pointer";
+      convBtn.appendChild(el("div",null,'<div class="btnTitle">💎 Convert ALL tickets</div><div class="btnSub">'+(haveTickets ? ('Get ~'+(haveTickets*rate)+' pts') : 'No tickets')+'</div>'));
+      convBtn.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
+      convBtn.addEventListener("click", async ()=>{
+        if(!haveTickets || state.busy) return;
+        state.busy=true; state.invMsg=""; renderInventorySheet();
+        try{
+          const d = await apiPost("/api/inventory/convert_ticket", {telegram_id: tgUserId, qty: haveTickets});
+          state.invMsg = "✅ Обмен выполнен: +"+d.added_points+" баллов";
           await refreshUser();
-          await loadRaffleStatus();
+          state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
           haptic("light");
-        } catch (e) {
-          setMsg(`❌ ${e.message || "Ошибка"}`);
-        } finally {
-          setBusy(false);
+        }catch(e){
+          state.invMsg = "❌ "+(e.message||"Ошибка");
+        }finally{
+          state.busy=false;
+          renderInventorySheet();
         }
-      };
+      });
+      tCard.appendChild(convBtn);
+      content.appendChild(tCard);
 
-      const spinRoulette = async () => {
-        if (!tgUserId) return;
-        setBusy(true);
-        setMsg("");
-        try {
-          const r = await fetch(`/api/roulette/spin`, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ telegram_id: tgUserId })
-          });
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            throw new Error(err.detail || "Ошибка");
-          }
-          const data = await r.json();
-          setMsg(`🎡 Выпало: ${data.prize_label}`);
+      // Prizes list (convert only in vanilla, claim stays in bot)
+      const pCard = el("div","card2");
+      pCard.style.marginTop="12px";
+      pCard.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎁 Prizes</div>'));
 
-          try {
-            if (data.claimable && data.claim_code) {
-              const m = `Ваш приз: ${data.prize_label}
+      const prizes = Array.isArray(inv.prizes) ? inv.prizes : [];
+      if(prizes.length===0){
+        pCard.appendChild(el("div","sub","Пока нет призов."));
+      }else{
+        const list = el("div");
+        list.style.marginTop="10px";
+        list.style.display="grid";
+        list.style.gap="10px";
+        for(const p of prizes){
+          const pc = el("div","card2");
+          pc.style.border="1px solid rgba(230,193,128,0.22)";
+          pc.style.background="rgba(230,193,128,0.10)";
+          pc.appendChild(el("div",null,'<div style="font-size:14px;font-weight:950">'+esc(p.prize_label||"💎 Главный приз")+'</div>'));
+          pc.appendChild(el("div","sub",'Code: '+esc(p.claim_code)+' • Status: '+esc(p.status||"-")+'</div>'));
+          const row = el("div","row");
+          row.style.marginTop="10px";
+          row.style.gap="10px";
 
-Чтобы забрать: откройте чат с ботом и отправьте
-/claim ${data.claim_code}`;
-              setClaimModal({ open:true, message:m, claim_code:data.claim_code });
-            } else if (tg?.showPopup) {
-              tg.showPopup({
-                title: "🎡 Рулетка",
-                message: `Ваш приз: ${data.prize_label}`,
-                buttons: [{ type: "ok" }]
-              });
-            } else {
-              alert(`Ваш приз: ${data.prize_label}`);
+          const claim = el("div","btn");
+          claim.style.justifyContent="center";
+          claim.style.fontWeight="900";
+          claim.addEventListener("click", ()=>{
+            haptic();
+            const code = String(p.claim_code||"").trim();
+            if(!code) return;
+            if(state.botUsername && tg && tg.openTelegramLink){
+              tg.openTelegramLink("https://t.me/"+state.botUsername+"?start=claim_"+encodeURIComponent(code));
+            }else{
+              alert("/claim "+code);
             }
-          } catch (e) {}
-
-          await refreshUser();
-          await loadRaffleStatus();
-          await loadRouletteHistory();
-          haptic("light");
-        } catch (e) {
-          setMsg(`❌ ${e.message || "Ошибка"}`);
-        } finally {
-          setBusy(false);
-        }
-      };
-
-      const incTicketQty = () => {
-        const max = Math.max(1, Number(inventory?.ticket_count || 0));
-        setTicketQty((x) => Math.min(max, x + 1));
-      };
-      const decTicketQty = () => setTicketQty((x) => Math.max(1, x - 1));
-      const maxTicketQty = () => setTicketQty(Math.max(1, Number(inventory?.ticket_count || 0)));
-
-      const convertTickets = async () => {
-        if (!tgUserId) return;
-        const have = Number(inventory?.ticket_count || 0);
-        const qty = Math.max(1, Math.min(have, Number(ticketQty || 1)));
-        if (!have) return;
-
-        setBusy(true);
-        setInvMsg("");
-        try {
-          const r = await fetch(`/api/inventory/convert_ticket`, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ telegram_id: tgUserId, qty })
           });
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            throw new Error(err.detail || "Ошибка");
-          }
-          const data = await r.json();
-          setInvMsg(`✅ Обмен выполнен: +${data.added_points} баллов`);
-          await refreshUser();
-          await loadRaffleStatus();
-          await loadInventory();
-          haptic("light");
-        } catch (e) {
-          setInvMsg(`❌ ${e.message || "Ошибка"}`);
-        } finally {
-          setBusy(false);
-        }
-      };
-
-      const convertPrize = async (claimCode) => {
-        if (!tgUserId) return;
-        const code = String(claimCode || "").trim();
-        if (!code) return;
-
-        setBusy(true);
-        setInvMsg("");
-        try {
-          const r = await fetch(`/api/inventory/convert_prize`, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ telegram_id: tgUserId, claim_code: code })
+          claim.innerHTML = "🎁 Claim";
+          const conv = el("div","btn");
+          conv.style.justifyContent="center";
+          conv.style.fontWeight="950";
+          conv.style.border="1px solid rgba(230,193,128,0.35)";
+          conv.style.background="rgba(230,193,128,0.14)";
+          conv.innerHTML = "💎 Convert (+"+diorValue+")";
+          conv.addEventListener("click", async ()=>{
+            const code = String(p.claim_code||"").trim();
+            if(!code || state.busy) return;
+            state.busy=true; state.invMsg=""; renderInventorySheet();
+            try{
+              const d = await apiPost("/api/inventory/convert_prize", {telegram_id: tgUserId, claim_code: code});
+              state.invMsg = "✅ Приз превращён в бонусы: +"+d.added_points+" баллов";
+              await refreshUser();
+              state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
+              haptic("light");
+            }catch(e){
+              state.invMsg = "❌ "+(e.message||"Ошибка");
+            }finally{
+              state.busy=false;
+              renderInventorySheet();
+            }
           });
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            throw new Error(err.detail || "Ошибка");
-          }
-          const data = await r.json();
-          setInvMsg(`✅ Приз превращён в бонусы: +${data.added_points} баллов`);
-          await refreshUser();
-          await loadInventory();
+
+          row.appendChild(claim);
+          row.appendChild(conv);
+          pc.appendChild(row);
+          list.appendChild(pc);
+        }
+        pCard.appendChild(list);
+      }
+      content.appendChild(pCard);
+
+      if(state.invMsg){
+        const m = el("div","card2", esc(state.invMsg));
+        m.style.marginTop="12px";
+        content.appendChild(m);
+      }
+    }
+
+    function renderProfileSheet(){
+      const overlay = document.getElementById("profileOverlay");
+      overlay.classList.toggle("open", !!state.profileOpen);
+      const content = document.getElementById("profileContent");
+      content.innerHTML = "";
+      if(!state.profileOpen) return;
+
+      if(!state.user){
+        content.appendChild(el("div","sub","Профиль недоступен."));
+        return;
+      }
+
+      const hdr = el("div","row"); hdr.style.alignItems="baseline";
+      hdr.appendChild(el("div","h1","👤 Profile"));
+      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Close</div>');
+      close.addEventListener("click", ()=>{ haptic(); closeProfile(); });
+      hdr.appendChild(close);
+      content.appendChild(hdr);
+      content.appendChild(el("div","sub","Members area"));
+
+      const info = el("div","card2");
+      info.style.marginTop="12px";
+      info.innerHTML =
+        '<div style="position:relative">'+
+          '<div style="position:absolute;top:0;right:0;padding:6px 10px;border-radius:999px;border:1px solid rgba(230,193,128,0.25);background:rgba(230,193,128,0.10);font-size:13px;font-weight:850">💎 '+esc(state.user.points)+'</div>'+
+          '<div style="font-size:13px;color:var(--muted)">Hello, '+esc(state.user.first_name)+'!</div>'+
+          '<div style="margin-top:6px;font-size:13px;color:var(--muted)">'+esc(tierLabel(state.user.tier))+'</div>'+
+          '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🔥 Streak</div><div style="font-weight:800">'+esc(state.user.daily_streak||0)+' (best '+esc(state.user.best_streak||0)+')</div></div>'+
+          '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🎟 Referrals</div><div style="font-weight:800">'+esc(state.user.referral_count||0)+'</div></div>'+
+        '</div>';
+      content.appendChild(info);
+
+      content.appendChild(el("div","hr"));
+
+      // Invite link
+      content.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎟 Invite</div><div class="sub" style="margin-top:6px">+20 points for each new user (once).</div>'));
+      const ref = (tgUserId && state.botUsername) ? ("https://t.me/"+state.botUsername+"?start="+tgUserId) : "";
+      if(ref){
+        const box = el("div","card2");
+        box.style.marginTop="10px";
+        box.innerHTML = '<div style="font-size:12px;color:rgba(255,255,255,0.85);word-break:break-all">'+esc(ref)+'</div>';
+        content.appendChild(box);
+      }else{
+        content.appendChild(el("div","sub",'Если ссылка не показалась — задай переменную окружения <b>BOT_USERNAME</b>.'));
+      }
+      const copy = el("div","btn");
+      copy.style.marginTop="10px";
+      copy.style.opacity = ref ? 1 : 0.5;
+      copy.style.cursor = ref ? "pointer" : "not-allowed";
+      copy.innerHTML = '<div><div class="btnTitle">📎 Copy link</div><div class="btnSub">'+esc(state.msg || "Copy to clipboard")+'</div></div><div style="opacity:0.85">›</div>';
+      copy.addEventListener("click", async ()=>{
+        if(!ref) return;
+        try{
+          await navigator.clipboard.writeText(ref);
+          state.msg = "✅ Скопировано";
           haptic("light");
-        } catch (e) {
-          setInvMsg(`❌ ${e.message || "Ошибка"}`);
-        } finally {
-          setBusy(false);
+        }catch(e){
+          state.msg = "ℹ️ Не удалось скопировать";
         }
-      };
+        renderProfileSheet();
+      });
+      content.appendChild(copy);
 
-      // bootstrap
-      useEffect(() => {
-        if (tgUserId) refreshUser();
-      }, []);
+      content.appendChild(el("div","hr"));
 
-      useEffect(() => {
-        fetch(`/api/bot/username`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(d => {
-            const u = (d?.bot_username || "").trim().replace(/^@/, "");
-            if (u) setBotUsername(u);
-          })
-          .catch(() => {});
-      }, []);
+      // Menu / views
+      if(state.profileView==="menu"){
+        const list = el("div");
+        list.style.display="grid";
+        list.style.gap="10px";
 
-      useEffect(() => {
-        if (profileOpen) {
-          loadRaffleStatus();
-          loadRouletteHistory();
+        function menuBtn(title, sub, onClick){
+          const b = el("div","btn");
+          b.innerHTML = '<div><div class="btnTitle">'+title+'</div><div class="btnSub">'+sub+'</div></div><div style="opacity:0.85">›</div>';
+          b.addEventListener("click", ()=>{ haptic(); onClick(); });
+          return b;
         }
-      }, [profileOpen]);
+        list.appendChild(menuBtn("👜 My Bag","Tickets & prizes", ()=>{ state.profileOpen=false; render(); openInventory(); }));
+        list.appendChild(menuBtn("🎁 Raffle","Buy tickets (500)", ()=>{ state.profileView="raffle"; renderProfileSheet(); }));
+        list.appendChild(menuBtn("🎡 Roulette","Spin (2000)", ()=>{ state.profileView="roulette"; renderProfileSheet(); }));
+        list.appendChild(menuBtn("🧾 Roulette history","Last spins", ()=>{ state.profileView="history"; renderProfileSheet(); }));
+        content.appendChild(list);
+      }else{
+        const back = el("div","btn");
+        back.style.justifyContent="center";
+        back.style.fontWeight="900";
+        back.textContent = "← Back";
+        back.addEventListener("click", ()=>{ haptic(); state.profileView="menu"; state.msg=""; renderProfileSheet(); });
+        content.appendChild(back);
 
-      useEffect(() => {
-        if (inventoryOpen) {
-          setTicketQty(1);
-          setInvMsg("");
-          loadInventory();
+        if(state.profileView==="raffle"){
+          const box = el("div");
+          box.style.marginTop="12px";
+          box.innerHTML =
+            '<div style="font-size:14px;font-weight:900">🎁 Raffle</div>'+
+            '<div class="sub" style="margin-top:6px">Ticket = 500 points.</div>'+
+            '<div class="sub" style="margin-top:8px">Your tickets: <b style="color:rgba(255,255,255,0.92)">'+esc((state.raffle && state.raffle.ticket_count) ? state.raffle.ticket_count : 0)+'</b></div>';
+          content.appendChild(box);
+
+          const can = (state.user.points||0) >= 500 && !state.busy;
+          const b = el("div","btn");
+          b.style.marginTop="10px";
+          b.style.opacity = can ? 1 : 0.5;
+          b.style.cursor = can ? "pointer" : "not-allowed";
+          b.innerHTML = '<div><div class="btnTitle">🎟 Buy ticket</div><div class="btnSub">'+(state.busy?"Подожди…":"Spend 500 points")+'</div></div><div style="opacity:0.85">›</div>';
+          b.addEventListener("click", ()=>{ if(can){ buyTicket(); } });
+          content.appendChild(b);
+
+          if(state.msg){
+            const m = el("div","card2", esc(state.msg));
+            m.style.marginTop="12px";
+            content.appendChild(m);
+          }
         }
-      }, [inventoryOpen]);
 
-      // tab behavior
-      useEffect(() => {
-        if (tab === "profile") {
-          setProfileOpen(true);
-          setProfileView("menu");
-          setTab("journal");
+        if(state.profileView==="roulette"){
+          const box = el("div");
+          box.style.marginTop="12px";
+          box.innerHTML =
+            '<div style="font-size:14px;font-weight:900">🎡 Roulette</div>'+
+            '<div class="sub" style="margin-top:6px">Spin = 2000 points.</div>';
+          content.appendChild(box);
+
+          const can = (state.user.points||0) >= 2000 && !state.busy;
+          const b = el("div","btn");
+          b.style.marginTop="10px";
+          b.style.opacity = can ? 1 : 0.5;
+          b.style.cursor = can ? "pointer" : "not-allowed";
+          b.innerHTML = '<div><div class="btnTitle">🎡 Spin</div><div class="btnSub">'+(state.busy?"Подожди…":"Try your luck")+'</div></div><div style="opacity:0.85">›</div>';
+          b.addEventListener("click", ()=>{ if(can){ spinRoulette(); } });
+          content.appendChild(b);
+
+          // Prize table compact
+          const table = el("div");
+          table.style.marginTop="10px";
+          table.innerHTML = '<div class="sub">Шансы рулетки (честно):</div>';
+          const list = el("div");
+          list.style.marginTop="10px";
+          list.style.display="grid";
+          list.style.gap="8px";
+          const rows = [
+            ["50%","+500"],["35%","+1000"],["15%","+1500"],["10%","+2000"],["5%","🎟 +1 билет"],["3.5%","+3000"],["1.5%","💎 главный приз"]
+          ];
+          for(const [p,t] of rows){
+            const r = el("div");
+            r.style.padding="10px";
+            r.style.borderRadius="14px";
+            r.style.border="1px solid var(--stroke)";
+            r.style.background="rgba(255,255,255,0.08)";
+            r.style.display="flex";
+            r.style.justifyContent="space-between";
+            r.style.fontSize="14px";
+            r.innerHTML = '<div style="color:var(--muted)">'+esc(p)+'</div><div style="font-weight:700">'+esc(t)+'</div>';
+            list.appendChild(r);
+          }
+          table.appendChild(list);
+          const lim = el("div");
+          lim.style.marginTop="10px";
+          lim.style.fontSize="12px";
+          lim.style.color="var(--muted)";
+          lim.textContent = "Лимит: 1 спин / 5с (тест)";
+          table.appendChild(lim);
+          content.appendChild(table);
+
+          if(state.msg){
+            const m = el("div","card2", esc(state.msg));
+            m.style.marginTop="12px";
+            content.appendChild(m);
+          }
         }
-      }, [tab]);
 
-      // curated blocks for Journal
-      const JOURNAL_BLOCKS = [
-        { tag: "Новинка", title: "🆕 New arrivals" },
-        { tag: "Люкс", title: "💎 Luxury picks" },
-        { tag: "Тренд", title: "🔥 Trending" },
-        { tag: "Оценка", title: "⭐ Personal review" },
-        { tag: "Факты", title: "🧾 Facts" },
+        if(state.profileView==="history"){
+          const box = el("div");
+          box.style.marginTop="12px";
+          box.innerHTML = '<div style="font-size:14px;font-weight:900">🧾 History</div>';
+          content.appendChild(box);
+
+          const arr = Array.isArray(state.rouletteHistory) ? state.rouletteHistory : [];
+          if(arr.length===0){
+            content.appendChild(el("div","sub","Пока пусто."));
+          }else{
+            const list = el("div");
+            list.style.marginTop="10px";
+            list.style.display="grid";
+            list.style.gap="10px";
+            for(const x of arr){
+              const it = el("div","card2");
+              it.innerHTML = '<div class="sub">'+esc(x.created_at)+'</div><div style="margin-top:6px;font-size:14px;font-weight:850">'+esc(x.prize_label)+'</div>';
+              list.appendChild(it);
+            }
+            content.appendChild(list);
+          }
+        }
+      }
+    }
+
+    function renderBottomNav(root){
+      const nav = el("div","bottomNav");
+      const inner = el("div","bottomNavInner");
+      const items = [
+        {id:"journal", icon:"📰", label:"Journal"},
+        {id:"discover", icon:"🧭", label:"Discover"},
+        {id:"rewards", icon:"🎁", label:"Rewards"},
+        {id:"profile", icon:"👤", label:"Profile"}
       ];
-
-      const [blockPosts, setBlockPosts] = useState({}); // tag -> posts[]
-      const loadJournalBlocks = () => {
-        JOURNAL_BLOCKS.forEach(async (b) => {
-          try {
-            const r = await fetch(`/api/posts?tag=${encodeURIComponent(b.tag)}`);
-            const data = r.ok ? await r.json() : [];
-            setBlockPosts((prev) => ({ ...prev, [b.tag]: Array.isArray(data) ? data.slice(0, 8) : [] }));
-          } catch(e) {
-            setBlockPosts((prev) => ({ ...prev, [b.tag]: [] }));
-          }
+      for(const it of items){
+        const n = el("div","navItem"+(state.tab===it.id?" navItemActive":""));
+        n.addEventListener("click", ()=>{
+          haptic();
+          if(it.id==="profile") openProfile("menu");
+          else { state.tab = it.id; render(); }
         });
-      };
-
-      useEffect(() => {
-        loadJournalBlocks();
-      }, []);
-
-      // Discover datasets
-      const BRANDS = [
-        ["The Ordinary", "TheOrdinary", "Skincare essentials"],
-        ["Dior", "Dior", "Couture beauty"],
-        ["Chanel", "Chanel", "Iconic classics"],
-        ["Kylie Cosmetics", "KylieCosmetics", "Pop-glam"],
-        ["Gisou", "Gisou", "Honey haircare"],
-        ["Rare Beauty", "RareBeauty", "Soft-focus makeup"],
-        ["Yves Saint Laurent", "YSL", "Bold luxury"],
-        ["Givenchy", "Givenchy", "Haute beauty"],
-        ["Charlotte Tilbury", "CharlotteTilbury", "Red carpet glow"],
-        ["NARS", "NARS", "Editorial makeup"],
-        ["Sol de Janeiro", "SolDeJaneiro", "Body & scent"],
-        ["Huda Beauty", "HudaBeauty", "Full glam"],
-        ["Rhode", "Rhode", "Minimal skincare"],
-        ["Tower 28 Beauty", "Tower28Beauty", "Sensitive skin"],
-        ["Benefit Cosmetics", "BenefitCosmetics", "Brows & cheeks"],
-        ["Estée Lauder", "EsteeLauder", "Skincare icons"],
-        ["Sisley", "Sisley", "Ultra premium"],
-        ["Kérastase", "Kerastase", "Salon haircare"],
-        ["Armani Beauty", "ArmaniBeauty", "Soft luxury"],
-        ["Hourglass", "Hourglass", "Ambient glow"],
-        ["Shiseido", "Shiseido", "Japanese skincare"],
-        ["Tom Ford Beauty", "TomFordBeauty", "Private blend vibe"],
-        ["Tarte", "Tarte", "Everyday glam"],
-        ["Sephora Collection", "SephoraCollection", "Smart basics"],
-        ["Clinique", "Clinique", "Skin first"],
-        ["Dolce & Gabbana", "DolceGabbana", "Italian glamour"],
-        ["Kayali", "Kayali", "Fragrance focus"],
-        ["Guerlain", "Guerlain", "Heritage luxury"],
-        ["Fenty Beauty", "FentyBeauty", "Inclusive glam"],
-        ["Too Faced", "TooFaced", "Playful makeup"],
-        ["MAKE UP FOR EVER", "MakeUpForEver", "Pro artistry"],
-        ["Erborian", "Erborian", "K-beauty meets EU"],
-        ["Natasha Denona", "NatashaDenona", "Palette queen"],
-        ["Lancôme", "Lancome", "French classics"],
-        ["Kosas", "Kosas", "Clean makeup"],
-        ["ONE/SIZE", "OneSize", "Stage-ready"],
-        ["Laneige", "Laneige", "Hydration"],
-        ["Makeup by Mario", "MakeupByMario", "Artist essentials"],
-        ["Valentino Beauty", "ValentinoBeauty", "Couture color"],
-        ["Drunk Elephant", "DrunkElephant", "Active skincare"],
-        ["Olaplex", "Olaplex", "Bond repair"],
-        ["Anastasia Beverly Hills", "AnastasiaBeverlyHills", "Brows & glam"],
-        ["Amika", "Amika", "Hair styling"],
-        ["BYOMA", "BYOMA", "Barrier care"],
-        ["Glow Recipe", "GlowRecipe", "Fruity glow"],
-        ["Milk Makeup", "MilkMakeup", "Cool minimal"],
-        ["Summer Fridays", "SummerFridays", "Clean glow"],
-        ["K18", "K18", "Repair tech"],
-      ];
-
-      const CATEGORIES = [
-        ["Новинка", "Новинка", "New launches"],
-        ["Люкс", "Люкс", "Luxury picks"],
-        ["Тренд", "Тренд", "What’s trending"],
-        ["История", "История", "Brand stories"],
-        ["Оценка", "Оценка", "Personal reviews"],
-        ["Факты", "Факты", "Short facts"],
-        ["Состав", "Состав", "Ingredients / formulas"],
-        ["Challenge", "Challenge", "Beauty challenges"],
-        ["SephoraPromo", "SephoraPromo", "Sephora promos"],
-      ];
-
-      const PRODUCTS = [
-        ["Праймер", "Праймер"], ["Тональная основа", "ТональнаяОснова"], ["Консилер", "Консилер"],
-        ["Пудра", "Пудра"], ["Румяна", "Румяна"], ["Скульптор", "Скульптор"], ["Бронзер", "Бронзер"],
-        ["Продукт для бровей", "ПродуктДляБровей"], ["Хайлайтер", "Хайлайтер"], ["Тушь", "Тушь"],
-        ["Тени", "Тени"], ["Помада", "Помада"], ["Карандаш для губ", "КарандашДляГуб"], ["Палетка", "Палетка"], ["Фиксатор", "Фиксатор"],
-      ];
-
-      const filteredBrands = useMemo(() => {
-        const s = q.trim().toLowerCase();
-        if (!s) return BRANDS;
-        return BRANDS.filter(([name, tag, sub]) =>
-          name.toLowerCase().includes(s) || tag.toLowerCase().includes(s) || String(sub||"").toLowerCase().includes(s)
-        );
-      }, [q]);
-
-      const filteredCats = useMemo(() => {
-        const s = q.trim().toLowerCase();
-        if (!s) return CATEGORIES;
-        return CATEGORIES.filter(([name, tag, sub]) =>
-          name.toLowerCase().includes(s) || tag.toLowerCase().includes(s) || String(sub||"").toLowerCase().includes(s)
-        );
-      }, [q]);
-
-      const openInventory = () => { setInventoryOpen(true); setProfileOpen(false); };
-      const closeInventory = () => { setInventoryOpen(false); setInvMsg(""); };
-
-      const Journal = () => (
-        <div>
-          <div className="card" onClick={() => { if (user) { haptic(); setProfileOpen(true); setProfileView("menu"); } }}>
-            <div style={{
-              position:"absolute", inset:"-2px",
-              background:"radial-gradient(600px 300px at 10% 0%, rgba(230,193,128,0.26), transparent 60%)",
-              pointerEvents:"none"
-            }} />
-            <div style={{ position:"relative" }}>
-              <div className="row">
-                <div>
-                  <div className="h1">NS · Natural Sense</div>
-                  <div className="sub">Today’s Edit · luxury beauty magazine</div>
-                </div>
-                {user && <div className="pill">💎 {user.points} · {tierLabel(user.tier)}</div>}
-              </div>
-              <div style={{ marginTop:"12px", color:"var(--muted)", fontSize:"13px" }}>
-                Curated picks, short facts, luxury reviews — inside Telegram.
-              </div>
-
-              <div style={{ marginTop:"12px", display:"grid", gap:"10px" }}>
-                <div className="btn" onClick={(e) => { e.stopPropagation(); haptic(); openLink(`https://t.me/${CHANNEL}`); }}>
-                  <div>
-                    <div className="btnTitle">↩️ Open Channel</div>
-                    <div className="btnSub">Return to Natural Sense feed</div>
-                  </div>
-                  <div style={{ opacity:0.85 }}>›</div>
-                </div>
-
-                <div className="grid">
-                  <div className="tile" onClick={(e) => { e.stopPropagation(); haptic(); openPosts("Новинка","🆕 New arrivals"); }}>
-                    <div className="tileTitle">🆕 New</div>
-                    <div className="tileSub">Fresh launches & updates</div>
-                  </div>
-                  <div className="tile" onClick={(e) => { e.stopPropagation(); haptic(); openPosts("Люкс","💎 Luxury picks"); }}>
-                    <div className="tileTitle">💎 Luxury</div>
-                    <div className="tileSub">Short & premium</div>
-                  </div>
-                </div>
-
-                <div className="grid">
-                  <div className="tile" onClick={(e) => { e.stopPropagation(); haptic(); openPosts("Тренд","🔥 Trending"); }}>
-                    <div className="tileTitle">🔥 Trending</div>
-                    <div className="tileSub">What everyone wants</div>
-                  </div>
-                  <div className="tile" onClick={(e) => { e.stopPropagation(); haptic(); openInventory(); }}>
-                    <div className="tileTitle">👜 Bag</div>
-                    <div className="tileSub">Tickets & prizes</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {JOURNAL_BLOCKS.map((b) => (
-            <div key={b.tag} style={{ marginTop:"14px" }}>
-              <div className="row" style={{ alignItems:"baseline" }}>
-                <div style={{ fontSize:"15px", fontWeight:850 }}>{b.title}</div>
-                <div
-                  style={{ fontSize:"12px", color:"var(--muted)", cursor:"pointer", userSelect:"none" }}
-                  onClick={() => { haptic(); openPosts(b.tag, b.title); }}
-                >
-                  View all ›
-                </div>
-              </div>
-              <div style={{ marginTop:"10px" }} className="hScroll">
-                {(blockPosts[b.tag] || []).length === 0 ? (
-                  <div className="miniCard" style={{ minWidth:"100%", cursor:"default" }}>
-                    <div className="miniMeta">Пока пусто</div>
-                    <div className="miniText" style={{ color:"var(--muted)" }}>Добавь посты с тегом #{b.tag} в канал.</div>
-                  </div>
-                ) : (
-                  (blockPosts[b.tag] || []).map((p) => <PostMiniCard key={p.message_id} post={p} />)
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      );
-
-      const Discover = () => (
-        <div className="card2">
-          <div className="row">
-            <div>
-              <div className="h1">Discover</div>
-              <div className="sub">Brands · Categories · Products</div>
-            </div>
-            <div className="pill" onClick={() => { haptic(); setInventoryOpen(true); }} style={{ cursor:"pointer" }}>
-              👜 Bag
-            </div>
-          </div>
-
-          <div style={{ marginTop:"12px" }}>
-            <input
-              className="input"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search brands / tags…"
-            />
-          </div>
-
-          <div style={{ marginTop:"12px" }} className="seg">
-            <div className={"segBtn " + (discoverMode==="brands" ? "segBtnActive" : "")} onClick={() => { haptic(); setDiscoverMode("brands"); }}>
-              Brands
-            </div>
-            <div className={"segBtn " + (discoverMode==="categories" ? "segBtnActive" : "")} onClick={() => { haptic(); setDiscoverMode("categories"); }}>
-              Categories
-            </div>
-          </div>
-
-          <div style={{ marginTop:"12px" }} className="grid">
-            {(discoverMode === "brands" ? filteredBrands : filteredCats).map(([name, tag, sub]) => (
-              <div key={tag} className="tile" onClick={() => { haptic(); openPosts(tag, name); }}>
-                <div className="tileTitle">{name}</div>
-                <div className="tileSub">{sub || ("#" + tag)}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="hr" />
-
-          <div style={{ fontSize:"14px", fontWeight:850 }}>🧴 Product types</div>
-          <div className="sub" style={{ marginTop:"6px" }}>Quick access</div>
-          <div style={{ marginTop:"10px" }} className="grid">
-            {PRODUCTS.map(([name, tag]) => (
-              <div key={tag} className="tile" onClick={() => { haptic(); openPosts(tag, name); }}>
-                <div className="tileTitle">{name}</div>
-                <div className="tileSub">#{tag}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-
-      const Rewards = () => (
-        <div className="card2">
-          <div className="row">
-            <div>
-              <div className="h1">Rewards</div>
-              <div className="sub">Roulette · Raffle · Inventory</div>
-            </div>
-            {user && <div className="pill">💎 {user.points} pts</div>}
-          </div>
-
-          <div style={{ marginTop:"12px" }} className="grid">
-            <div className="tile" onClick={() => { haptic(); setProfileOpen(true); setProfileView("roulette"); }}>
-              <div className="tileTitle">🎡 Roulette</div>
-              <div className="tileSub">Try your luck (2000)</div>
-            </div>
-            <div className="tile" onClick={() => { haptic(); setProfileOpen(true); setProfileView("raffle"); }}>
-              <div className="tileTitle">🎁 Raffle</div>
-              <div className="tileSub">Ticket (500)</div>
-            </div>
-            <div className="tile" onClick={() => { haptic(); setInventoryOpen(true); }}>
-              <div className="tileTitle">👜 Bag</div>
-              <div className="tileSub">Tickets & prizes</div>
-            </div>
-            <div className="tile" onClick={() => { haptic(); openPosts("Challenge","💎 Beauty Challenges"); }}>
-              <div className="tileTitle">💎 Challenges</div>
-              <div className="tileSub">Daily motivation</div>
-            </div>
-          </div>
-
-          <div className="hr" />
-
-          <div className="btn" onClick={() => { haptic(); openLink(`https://t.me/${CHANNEL}`); }}>
-            <div>
-              <div className="btnTitle">↩️ Open Channel</div>
-              <div className="btnSub">Natural Sense feed</div>
-            </div>
-            <div style={{ opacity:0.85 }}>›</div>
-          </div>
-        </div>
-      );
-
-      const PostsSheetContent = () => (
-        <div>
-          <div className="row" style={{ alignItems:"baseline" }}>
-            <div className="h1">{postsSheet.title || "Posts"}</div>
-            <div style={{ fontSize:"13px", color:"var(--muted)", cursor:"pointer" }} onClick={() => { haptic(); closePosts(); }}>
-              Close
-            </div>
-          </div>
-          <div className="sub" style={{ marginTop:"6px" }}>
-            Посты {postsSheet.tag ? ("#" + postsSheet.tag) : ""}
-          </div>
-
-          {loadingPosts && (
-            <div className="sub" style={{ marginTop:"12px" }}>Загрузка…</div>
-          )}
-
-          {!loadingPosts && posts.length === 0 && (
-            <div className="sub" style={{ marginTop:"12px" }}>Постов с этим тегом пока нет.</div>
-          )}
-
-          <div style={{ marginTop:"12px", display:"grid", gap:"10px" }}>
-            {posts.map(p => <PostFullCard key={p.message_id} post={p} />)}
-          </div>
-        </div>
-      );
-
-      const InventorySheetContent = () => {
-        const rate = Number(inventory?.ticket_convert_rate || 0) || 0;
-        const diorValue = Number(inventory?.dior_convert_value || 0) || 0;
-        const haveTickets = Number(inventory?.ticket_count || 0) || 0;
-        const qty = Math.max(1, Math.min(haveTickets || 1, Number(ticketQty || 1)));
-        const calc = rate ? (qty * rate) : 0;
-
-        const statusLabel = (s) => {
-          const v = String(s || "");
-          if (v === "awaiting_contact") return "⏳ Доступен";
-          if (v === "submitted") return "⏳ Ожидает подтверждения";
-          if (v === "closed") return "✅ Закрыт";
-          return v || "-";
-        };
-
-        return (
-          <div>
-            <div className="row" style={{ alignItems:"baseline" }}>
-              <div className="h1">👜 My Bag</div>
-              <div style={{ fontSize:"13px", color:"var(--muted)", cursor:"pointer" }} onClick={() => { haptic(); closeInventory(); }}>
-                Close
-              </div>
-            </div>
-            <div className="sub" style={{ marginTop:"6px" }}>Tickets & prizes</div>
-
-            <div style={{ marginTop:"12px" }} className="card2">
-              <div className="row">
-                <div>
-                  <div style={{ fontSize:"13px", color:"var(--muted)" }}>Balance</div>
-                  <div style={{ marginTop:"6px", fontSize:"16px", fontWeight:900 }}>💎 {user?.points ?? 0} pts</div>
-                </div>
-                <div className="pill">{tierLabel(user?.tier)}</div>
-              </div>
-            </div>
-
-            <div style={{ marginTop:"12px" }} className="card2">
-              <div style={{ fontSize:"14px", fontWeight:900 }}>🎟 Tickets</div>
-              <div className="sub" style={{ marginTop:"6px" }}>You have: <b style={{ color:"rgba(255,255,255,0.92)" }}>{haveTickets}</b></div>
-              <div className="sub" style={{ marginTop:"6px" }}>Rate: 1 = {rate} pts</div>
-
-              <div style={{ marginTop:"10px", display:"flex", gap:"8px", alignItems:"center" }}>
-                <div className="tile" style={{ width:"62px", minHeight:"44px", alignItems:"center", justifyContent:"center" }}
-                     onClick={() => { if (haveTickets) { haptic(); decTicketQty(); } }}>
-                  <div style={{ fontWeight:950, fontSize:"18px" }}>–</div>
-                </div>
-
-                <div className="tile" style={{ flex:1, minHeight:"44px", alignItems:"center", justifyContent:"center" }}>
-                  <div style={{ fontWeight:950, fontSize:"15px" }}>{haveTickets ? qty : 0}</div>
-                </div>
-
-                <div className="tile" style={{ width:"62px", minHeight:"44px", alignItems:"center", justifyContent:"center" }}
-                     onClick={() => { if (haveTickets) { haptic(); incTicketQty(); } }}>
-                  <div style={{ fontWeight:950, fontSize:"18px" }}>+</div>
-                </div>
-
-                <div className="tile" style={{ width:"76px", minHeight:"44px" }}
-                     onClick={() => { if (haveTickets) { haptic(); maxTicketQty(); } }}>
-                  <div style={{ fontWeight:950, fontSize:"13px" }}>MAX</div>
-                  <div className="tileSub" style={{ marginTop:"4px" }}>{haveTickets || 0}</div>
-                </div>
-              </div>
-
-              <div className="sub" style={{ marginTop:"10px" }}>
-                You’ll get: <b style={{ color:"rgba(255,255,255,0.92)" }}>{calc}</b> pts
-              </div>
-
-              <div
-                className="btn"
-                onClick={() => { if (!busy && haveTickets) { haptic(); convertTickets(); } }}
-                style={{
-                  marginTop:"10px",
-                  opacity: (busy || !haveTickets) ? 0.5 : 1,
-                  cursor: (busy || !haveTickets) ? "not-allowed" : "pointer"
-                }}
-              >
-                <div>
-                  <div className="btnTitle">💎 Convert tickets</div>
-                  <div className="btnSub">{busy ? "Подожди…" : `Convert (${haveTickets ? qty : 0})`}</div>
-                </div>
-                <div style={{ opacity:0.85 }}>›</div>
-              </div>
-            </div>
-
-            <div style={{ marginTop:"12px" }} className="card2">
-              <div style={{ fontSize:"14px", fontWeight:900 }}>🎁 Prizes</div>
-
-              {(!inventory?.prizes || inventory.prizes.length === 0) ? (
-                <div className="sub" style={{ marginTop:"10px" }}>Пока нет призов.</div>
-              ) : (
-                <div style={{ marginTop:"10px", display:"grid", gap:"10px" }}>
-                  {inventory.prizes.map((p) => (
-                    <div key={p.claim_code} className="card2" style={{
-                      border:"1px solid rgba(230,193,128,0.22)",
-                      background:"rgba(230,193,128,0.10)"
-                    }}>
-                      <div style={{ fontSize:"14px", fontWeight:950 }}>{p.prize_label || "💎 Главный приз"}</div>
-                      <div className="sub" style={{ marginTop:"6px" }}>
-                        Status: {statusLabel(p.status)} • Code: {p.claim_code}
-                      </div>
-
-                      {(String(p.status||"") === "submitted" || String(p.status||"") === "closed") ? null : (
-                        <div style={{ display:"flex", gap:"10px", marginTop:"12px" }}>
-                          <div
-                            className="btn"
-                            style={{ justifyContent:"center", fontWeight:900 }}
-                            onClick={() => {
-                              const st = String(p.status || "");
-                              if (st === "submitted" || st === "closed") return;
-                              setConfirmClaim({ open:true, claim_code: p.claim_code, prize_label: p.prize_label || "Приз" });
-                              haptic();
-                            }}
-                          >
-                            🎁 Claim
-                          </div>
-                          <div
-                            className="btn"
-                            style={{
-                              justifyContent:"center",
-                              fontWeight:950,
-                              border:"1px solid rgba(230,193,128,0.35)",
-                              background:"rgba(230,193,128,0.14)"
-                            }}
-                            onClick={() => { haptic(); convertPrize(p.claim_code); }}
-                          >
-                            💎 Convert (+{diorValue})
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {invMsg && (
-              <div style={{ marginTop:"12px" }} className="card2">
-                <div style={{ fontSize:"13px" }}>{invMsg}</div>
-              </div>
-            )}
-          </div>
-        );
-      };
-
-      const ProfileSheetContent = () => {
-        if (!user) {
-          return <div className="sub">Профиль недоступен.</div>;
-        }
-
-        const StatRow = ({ left, right }) => (
-          <div className="row" style={{ marginTop:"10px", fontSize:"14px" }}>
-            <div style={{ color:"var(--muted)" }}>{left}</div>
-            <div style={{ fontWeight:800 }}>{right}</div>
-          </div>
-        );
-
-        return (
-          <div>
-            <div className="row" style={{ alignItems:"baseline" }}>
-              <div className="h1">👤 Profile</div>
-              <div style={{ fontSize:"13px", color:"var(--muted)", cursor:"pointer" }} onClick={() => { haptic(); setProfileOpen(false); }}>
-                Close
-              </div>
-            </div>
-            <div className="sub" style={{ marginTop:"6px" }}>Members area</div>
-
-            <div style={{ marginTop:"12px" }} className="card2">
-              <div style={{ position:"relative" }}>
-                <div style={{
-                  position:"absolute", top:"0", right:"0",
-                  padding:"6px 10px",
-                  borderRadius:"999px",
-                  border:"1px solid rgba(230,193,128,0.25)",
-                  background:"rgba(230,193,128,0.10)",
-                  fontSize:"13px",
-                  fontWeight:850
-                }}>
-                  💎 {user.points}
-                </div>
-
-                <div style={{ fontSize:"13px", color:"var(--muted)" }}>Hello, {user.first_name}!</div>
-                <div style={{ marginTop:"6px", fontSize:"13px", color:"var(--muted)" }}>{tierLabel(user.tier)}</div>
-
-                <StatRow left="🔥 Streak" right={`${user.daily_streak || 0} (best ${user.best_streak || 0})`} />
-                <StatRow left="🎟 Referrals" right={`${user.referral_count || 0}`} />
-              </div>
-            </div>
-
-            <div className="hr" />
-
-            <div style={{ fontSize:"14px", fontWeight:900 }}>🎟 Invite</div>
-            <div className="sub" style={{ marginTop:"6px" }}>+20 points for each new user (once).</div>
-            {botUsername ? (
-              <div style={{ marginTop:"10px" }} className="card2">
-                <div style={{ fontSize:"12px", color:"rgba(255,255,255,0.85)", wordBreak:"break-all" }}>{referralLink}</div>
-              </div>
-            ) : (
-              <div className="sub" style={{ marginTop:"10px" }}>
-                Если ссылка не показалась — задай переменную окружения <b>BOT_USERNAME</b>.
-              </div>
-            )}
-            <div
-              className="btn"
-              style={{ marginTop:"10px", opacity: (!botUsername || !referralLink) ? 0.5 : 1, cursor: (!botUsername || !referralLink) ? "not-allowed" : "pointer" }}
-              onClick={() => { if (botUsername && referralLink) { haptic(); copyText(referralLink); } }}
-            >
-              <div>
-                <div className="btnTitle">📎 Copy link</div>
-                <div className="btnSub">{msg || "Copy to clipboard"}</div>
-              </div>
-              <div style={{ opacity:0.85 }}>›</div>
-            </div>
-
-            <div className="hr" />
-
-            {profileView === "menu" ? (
-              <div style={{ display:"grid", gap:"10px" }}>
-                <div className="btn" onClick={() => { haptic(); setInventoryOpen(true); setProfileOpen(false); }}>
-                  <div>
-                    <div className="btnTitle">👜 My Bag</div>
-                    <div className="btnSub">Tickets & prizes</div>
-                  </div>
-                  <div style={{ opacity:0.85 }}>›</div>
-                </div>
-                <div className="btn" onClick={() => { haptic(); setProfileView("raffle"); }}>
-                  <div>
-                    <div className="btnTitle">🎁 Raffle</div>
-                    <div className="btnSub">Buy tickets (500)</div>
-                  </div>
-                  <div style={{ opacity:0.85 }}>›</div>
-                </div>
-                <div className="btn" onClick={() => { haptic(); setProfileView("roulette"); }}>
-                  <div>
-                    <div className="btnTitle">🎡 Roulette</div>
-                    <div className="btnSub">Spin (2000)</div>
-                  </div>
-                  <div style={{ opacity:0.85 }}>›</div>
-                </div>
-                <div className="btn" onClick={() => { haptic(); setProfileView("history"); }}>
-                  <div>
-                    <div className="btnTitle">🧾 Roulette history</div>
-                    <div className="btnSub">Last spins</div>
-                  </div>
-                  <div style={{ opacity:0.85 }}>›</div>
-                </div>
-              </div>
-            ) : (
-              <div>
-                <div
-                  className="btn"
-                  style={{ justifyContent:"center", fontWeight:900 }}
-                  onClick={() => { haptic(); setProfileView("menu"); setMsg(""); }}
-                >
-                  ← Back
-                </div>
-
-                {profileView === "raffle" && (
-                  <div style={{ marginTop:"12px" }}>
-                    <div style={{ fontSize:"14px", fontWeight:900 }}>🎁 Raffle</div>
-                    <div className="sub" style={{ marginTop:"6px" }}>Ticket = 500 points.</div>
-                    <div className="sub" style={{ marginTop:"8px" }}>
-                      Your tickets: <b style={{ color:"rgba(255,255,255,0.92)" }}>{raffle?.ticket_count ?? 0}</b>
-                    </div>
-
-                    <div
-                      className="btn"
-                      style={{
-                        marginTop:"10px",
-                        opacity: (busy || (user.points || 0) < 500) ? 0.5 : 1,
-                        cursor: (busy || (user.points || 0) < 500) ? "not-allowed" : "pointer"
-                      }}
-                      onClick={() => { if (!busy && (user.points || 0) >= 500) { haptic(); buyTicket(); } }}
-                    >
-                      <div>
-                        <div className="btnTitle">🎟 Buy ticket</div>
-                        <div className="btnSub">{busy ? "Подожди…" : "Spend 500 points"}</div>
-                      </div>
-                      <div style={{ opacity:0.85 }}>›</div>
-                    </div>
-
-                    {msg && <div style={{ marginTop:"12px" }} className="card2">{msg}</div>}
-                  </div>
-                )}
-
-                {profileView === "roulette" && (
-                  <div style={{ marginTop:"12px" }}>
-                    <div style={{ fontSize:"14px", fontWeight:900 }}>🎡 Roulette</div>
-                    <div className="sub" style={{ marginTop:"6px" }}>Spin = 2000 points.</div>
-
-                    <div
-                      className="btn"
-                      style={{
-                        marginTop:"10px",
-                        opacity: (busy || (user.points || 0) < 2000) ? 0.5 : 1,
-                        cursor: (busy || (user.points || 0) < 2000) ? "not-allowed" : "pointer"
-                      }}
-                      onClick={() => { if (!busy && (user.points || 0) >= 2000) { haptic(); spinRoulette(); } }}
-                    >
-                      <div>
-                        <div className="btnTitle">🎡 Spin</div>
-                        <div className="btnSub">{busy ? "Подожди…" : "Try your luck"}</div>
-                      </div>
-                      <div style={{ opacity:0.85 }}>›</div>
-                    </div>
-
-                    <PrizeTable />
-                    {msg && <div style={{ marginTop:"12px" }} className="card2">{msg}</div>}
-                  </div>
-                )}
-
-                {profileView === "history" && (
-                  <div style={{ marginTop:"12px" }}>
-                    <div style={{ fontSize:"14px", fontWeight:900 }}>🧾 History</div>
-                    {(rouletteHistory || []).length === 0 ? (
-                      <div className="sub" style={{ marginTop:"10px" }}>Пока пусто.</div>
-                    ) : (
-                      <div style={{ marginTop:"10px", display:"grid", gap:"10px" }}>
-                        {rouletteHistory.map((x) => (
-                          <div key={x.id} className="card2">
-                            <div className="sub">{x.created_at}</div>
-                            <div style={{ marginTop:"6px", fontSize:"14px", fontWeight:850 }}>{x.prize_label}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      };
-
-      const MainScreen = () => {
-        if (tab === "journal") return <Journal />;
-        if (tab === "discover") return <Discover />;
-        if (tab === "rewards") return <Rewards />;
-        return <Journal />;
-      };
-
-      return (
-        <div className="safePadBottom">
-          <div className="container">
-            <MainScreen />
-          </div>
-
-          <BottomNav tab={tab} onTab={setTab} />
-
-          <Sheet open={postsSheet.open} onClose={() => { haptic(); closePosts(); }}>
-            <PostsSheetContent />
-          </Sheet>
-
-          <Sheet open={inventoryOpen} onClose={() => { haptic(); closeInventory(); }}>
-            <InventorySheetContent />
-          </Sheet>
-
-          <Sheet open={profileOpen} onClose={() => { haptic(); setProfileOpen(false); }}>
-            <ProfileSheetContent />
-          </Sheet>
-
-          <LockedClaimModal
-            open={claimModal.open}
-            message={claimModal.message}
-            claimCode={claimModal.claim_code}
-            onOk={() => setClaimModal({ open:false, message:"", claim_code:"" })}
-            onClaim={() => {
-              if (botUsername && tg?.openTelegramLink && claimModal.claim_code) {
-                tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${claimModal.claim_code}`);
-              }
-              setClaimModal({ open:false, message:"", claim_code:"" });
-            }}
-          />
-
-          <ConfirmClaimModal
-            open={confirmClaim.open}
-            title="🎁 Забрать приз?"
-            message={`Вы уверены?
-
-После подтверждения вы НЕ сможете:
-• превратить приз в бонусы
-• отменить действие
-
-Приз: ${confirmClaim.prize_label}
-Код: ${confirmClaim.claim_code}`}
-            onCancel={() => setConfirmClaim({ open:false, claim_code:"", prize_label:"" })}
-            onConfirm={() => {
-              const code = String(confirmClaim.claim_code || "").trim();
-              if (botUsername && tg?.openTelegramLink && code) {
-                tg.openTelegramLink(`https://t.me/${botUsername}?start=claim_${code}`);
-              } else if (code) {
-                alert(`/claim ${code}`);
-              }
-              setConfirmClaim({ open:false, claim_code:"", prize_label:"" });
-            }}
-          />
-        </div>
-      );
-    };
-
-    ReactDOM.render(<App />, document.getElementById("root"));
+        n.appendChild(el("div","navIcon", it.icon));
+        n.appendChild(el("div","navLabel", it.label));
+        inner.appendChild(n);
+      }
+      nav.appendChild(inner);
+      root.appendChild(nav);
+    }
+
+    function ensureSheets(root){
+      // Posts
+      const pO = el("div","sheetOverlay"); pO.id="postsOverlay";
+      pO.addEventListener("click", (e)=>{ if(e.target===pO){ haptic(); closePosts(); }});
+      const pS = el("div","sheet");
+      pS.addEventListener("click",(e)=>e.stopPropagation());
+      pS.appendChild(el("div","sheetHandle"));
+      const pC = el("div"); pC.id="postsContent";
+      pS.appendChild(pC); pO.appendChild(pS); root.appendChild(pO);
+
+      // Inventory
+      const iO = el("div","sheetOverlay"); iO.id="invOverlay";
+      iO.addEventListener("click", (e)=>{ if(e.target===iO){ haptic(); closeInventory(); }});
+      const iS = el("div","sheet");
+      iS.addEventListener("click",(e)=>e.stopPropagation());
+      iS.appendChild(el("div","sheetHandle"));
+      const iC = el("div"); iC.id="invContent";
+      iS.appendChild(iC); iO.appendChild(iS); root.appendChild(iO);
+
+      // Profile
+      const prO = el("div","sheetOverlay"); prO.id="profileOverlay";
+      prO.addEventListener("click", (e)=>{ if(e.target===prO){ haptic(); closeProfile(); }});
+      const prS = el("div","sheet");
+      prS.addEventListener("click",(e)=>e.stopPropagation());
+      prS.appendChild(el("div","sheetHandle"));
+      const prC = el("div"); prC.id="profileContent";
+      prS.appendChild(prC); prO.appendChild(prS); root.appendChild(prO);
+    }
+
+    function render(){
+      const root = document.getElementById("root");
+      root.innerHTML = "";
+
+      const app = el("div","safePadBottom");
+      const cont = el("div","container");
+      if(state.tab==="journal") renderJournal(cont);
+      else if(state.tab==="discover") renderDiscover(cont);
+      else if(state.tab==="rewards") renderRewards(cont);
+      else renderJournal(cont);
+
+      app.appendChild(cont);
+
+      ensureSheets(app);
+      renderBottomNav(app);
+
+      root.appendChild(app);
+
+      renderPostsSheet();
+      renderInventorySheet();
+      renderProfileSheet();
+    }
+
+    async function boot(){
+      if(tg){
+        try{ tg.expand(); }catch(e){}
+        applyTelegramTheme();
+        try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
+      }
+      await Promise.all([refreshUser(), loadBotUsername()]);
+      await loadJournalBlocks();
+      render();
+    }
+
+    document.addEventListener("DOMContentLoaded", boot);
+  })();
   </script>
 </body>
 </html>
