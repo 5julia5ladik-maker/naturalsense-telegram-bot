@@ -11,7 +11,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import (
@@ -29,18 +29,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-
-# -----------------------------------------------------------------------------
-# PTB compatibility: filters.UpdateType may differ across versions
-# -----------------------------------------------------------------------------
-try:
-    CHANNEL_POST_FILTER = CHANNEL_POST_FILTER
-    EDITED_CHANNEL_POST_FILTER = EDITED_CHANNEL_POST_FILTER
-except Exception:
-    # Fallback: some PTB versions don't expose UpdateType filters
-    CHANNEL_POST_FILTER = filters.ChatType.CHANNEL
-    EDITED_CHANNEL_POST_FILTER = filters.ChatType.CHANNEL
-
 
 from sqlalchemy import (
     Column,
@@ -513,35 +501,6 @@ def preview_text(text_: str | None, limit: int = 180) -> str:
 
 
 
-
-
-# -----------------------------------------------------------------------------
-# TEXT THUMB (placeholder image for text-only posts)
-# -----------------------------------------------------------------------------
-TEXT_THUMB_SVG = """<svg xmlns='http://www.w3.org/2000/svg' width='1280' height='720' viewBox='0 0 1280 720'>
-  <defs>
-    <linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
-      <stop offset='0' stop-color='#111827'/>
-      <stop offset='1' stop-color='#0b1220'/>
-    </linearGradient>
-    <radialGradient id='r' cx='0.15' cy='0.1' r='0.9'>
-      <stop offset='0' stop-color='#e6c180' stop-opacity='0.35'/>
-      <stop offset='1' stop-color='#e6c180' stop-opacity='0'/>
-    </radialGradient>
-  </defs>
-  <rect width='1280' height='720' fill='url(#g)'/>
-  <rect width='1280' height='720' fill='url(#r)'/>
-  <rect x='80' y='80' width='1120' height='560' rx='44' fill='rgba(255,255,255,0.06)' stroke='rgba(255,255,255,0.12)'/>
-  <text x='140' y='210' fill='rgba(255,255,255,0.92)' font-family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial' font-size='64' font-weight='800'>NS</text>
-  <text x='250' y='210' fill='rgba(255,255,255,0.78)' font-family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial' font-size='36' font-weight='600'>Natural Sense</text>
-
-  <text x='140' y='330' fill='rgba(255,255,255,0.92)' font-family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial' font-size='54' font-weight='700'>Текстовый пост</text>
-  <text x='140' y='410' fill='rgba(255,255,255,0.68)' font-family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial' font-size='32' font-weight='500'>Открыть →</text>
-
-  <rect x='140' y='470' width='360' height='68' rx='34' fill='rgba(230,193,128,0.18)' stroke='rgba(230,193,128,0.35)'/>
-  <text x='180' y='517' fill='rgba(255,255,255,0.9)' font-family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial' font-size='30' font-weight='700'>#TEXT</text>
-</svg>"""
-
 # -----------------------------------------------------------------------------
 # MEDIA (thumbnails for Mini App)
 # -----------------------------------------------------------------------------
@@ -674,9 +633,6 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
 
     if tag:
         rows = [p for p in rows if tag in (p.tags or [])]
-
-    # ✅ ВАЖНО: перед выдачей проверяем, не удалены ли посты в канале
-    rows = await ensure_posts_fresh(rows, max_check=min(25, limit))
     return rows
 
 
@@ -684,60 +640,27 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
 # DELETE SWEEPER (AUTO CHECK)
 # -----------------------------------------------------------------------------
 async def message_exists_public(message_id: int) -> bool:
-    """Проверяем существование сообщения в публичном канале по t.me.
-    Telegram Bot API не даёт getMessage для каналов, поэтому используем публичную страницу.
-    Если канал приватный — возвращаем True (не можем проверить).
-    """
-    # 1) embed=1 (часто показывает явную ошибку)
-    url_embed = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
-    # 2) /s/ view (иногда надёжнее)
-    url_s = f"https://t.me/s/{CHANNEL_USERNAME}/{message_id}"
-
-    def _looks_deleted(html: str) -> bool:
-        h = (html or "").lower()
-        # типовые маркеры, когда сообщения нет
-        bad_markers = [
-            "message not found",
-            "post not found",
-            "tgme_widget_message_error",
-            "tgme_widget_message_empty",
-            "this message doesn't exist",
-            "this post doesn't exist",
-        ]
-        return any(x in h for x in bad_markers)
-
+    url = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
     try:
-        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
-            for url in (url_embed, url_s):
-                r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                if r.status_code == 404:
-                    return False
-                if r.status_code != 200:
-                    # если отдали не 200 — обычно это не про удаление (ограничение/редирект)
-                    continue
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code == 404:
+                return False
+            if r.status_code != 200:
+                return True
 
-                html = r.text or ""
-                low = html.lower()
-
-                # приватный/закрытый канал — проверить нельзя
-                if "this channel is private" in low or "join channel" in low:
-                    return True
-
-                if _looks_deleted(html):
-                    return False
-
-                # если есть виджет сообщения — считаем что существует
-                if "tgme_widget_message" in low or "tgme_channel_info_header" in low:
-                    return True
-
-            # если ни один вариант не дал явного ответа — не удаляем
+            html = (r.text or "").lower()
+            if "message not found" in html or "post not found" in html:
+                return False
+            if "join channel" in html or "this channel is private" in html:
+                return True
             return True
     except Exception as e:
         logger.warning("Sweeper check failed for %s: %s", message_id, e)
         return True
 
 
-async def sweep_deleted_posts(batch: int = 80):
+async def sweep_deleted_posts(batch: int = 30):
     async with async_session_maker() as session:
         posts = (
             await session.execute(
@@ -776,56 +699,10 @@ async def sweep_deleted_posts(batch: int = 80):
 async def sweeper_loop():
     while True:
         try:
-            await sweep_deleted_posts(batch=80)
+            await sweep_deleted_posts(batch=30)
         except Exception as e:
             logger.error("Sweeper error: %s", e)
-        await asyncio.sleep(300)  # 5 минут
-# -----------------------------------------------------------------------------
-# ON-DEMAND DELETE CHECK (при выдаче постов)
-# -----------------------------------------------------------------------------
-# Кэш, чтобы не долбить t.me на каждом запросе (проверяем пост максимум раз в 5 минут)
-_POST_EXISTS_CACHE: dict[int, tuple[bool, float]] = {}  # message_id -> (exists, ts_monotonic)
-
-
-async def ensure_posts_fresh(rows, max_check: int = 25):
-    """Перед отдачей в Mini App проверяем, что посты не удалены.
-    Если удалены — помечаем is_deleted=True и не возвращаем.
-    """
-    if not rows:
-        return rows
-
-    now_m = asyncio.get_running_loop().time()
-    to_check = []
-    for p in rows[:max_check]:
-        mid = int(p.message_id)
-        cached = _POST_EXISTS_CACHE.get(mid)
-        if cached and (now_m - cached[1]) < 300:
-            continue
-        to_check.append(mid)
-
-    if not to_check:
-        # уже всё проверено недавно
-        return [p for p in rows if not getattr(p, "is_deleted", False)]
-
-    # Проверяем последовательно (без параллели — чтобы не словить лимиты)
-    deleted_ids = []
-    for mid in to_check:
-        exists = await message_exists_public(mid)
-        _POST_EXISTS_CACHE[mid] = (exists, now_m)
-        if not exists:
-            deleted_ids.append(mid)
-
-    if deleted_ids:
-        async with async_session_maker() as session:
-            now = datetime.utcnow()
-            await session.execute(
-                update(Post)
-                .where(Post.message_id.in_(deleted_ids))
-                .values(is_deleted=True, deleted_at=now)
-            )
-            await session.commit()
-
-    return [p for p in rows if int(p.message_id) not in set(deleted_ids) and not getattr(p, "is_deleted", False)]
+        await asyncio.sleep(30)  # 30 секунд
 
 
 # -----------------------------------------------------------------------------
@@ -1353,7 +1230,7 @@ async def cmd_admin_sweep(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(uid):
         await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
         return
-    marked = await sweep_deleted_posts(batch=120)
+    marked = await sweep_deleted_posts(batch=30)
     if not marked:
         await update.message.reply_text("🧹 Sweep: ничего не найдено.", reply_markup=get_main_keyboard())
     else:
@@ -1464,7 +1341,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "admin_sweep":
-        marked = await sweep_deleted_posts(batch=120)
+        marked = await sweep_deleted_posts(batch=30)
         if not marked:
             await q.edit_message_text("🧹 Sweep: ничего не найдено.")
         else:
@@ -1616,7 +1493,7 @@ async def _telegram_runner():
     try:
         await tg_app.initialize()
         await tg_app.start()
-        await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
+        await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
         logger.info("✅ Telegram bot started (polling)")
         while True:
             await asyncio.sleep(3600)
@@ -1665,19 +1542,12 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
     tg_app.add_handler(CallbackQueryHandler(on_callback))
-
-    # ✅ Channel posts indexing (важно для тегов в Mini App)
-    # Бот должен быть админом канала, иначе channel_post обновления не приходят.
-    tg_app.add_handler(MessageHandler(CHANNEL_POST_FILTER, on_channel_post))
-    tg_app.add_handler(MessageHandler(EDITED_CHANNEL_POST_FILTER, on_edited_channel_post))
-
-    # обычные сообщения от пользователей
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
     # Media sync: accept forwarded posts with media from admin (private chat)
     tg_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.VIDEO | filters.Document.ALL), on_sync_forward))
 
-    tg_app.add_handler(MessageHandler(CHANNEL_POST_FILTER, on_channel_post))
-    tg_app.add_handler(MessageHandler(EDITED_CHANNEL_POST_FILTER, on_edited_channel_post))
+    tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
+    tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
 
     tg_task = asyncio.create_task(_telegram_runner())
 
@@ -2120,6 +1990,7 @@ def get_webapp_html() -> str:
       return ( {free:"🥉 Bronze", premium:"🥈 Silver", vip:"🥇 Gold VIP"}[t] ) || "🥉 Bronze";
     }
 
+    let postsRefreshTimer = null;
     const state = {
       tab: "journal",
       user: null,
@@ -2221,12 +2092,16 @@ def get_webapp_html() -> str:
     const journalCache = {}; // tag->posts preview list
 
     async function apiGet(url){
-      const r = await fetch(url);
+      const sep = url.includes("?") ? "&" : "?";
+      const bust = "t="+Date.now();
+      const r = await fetch(url + sep + bust, { cache: "no-store" });
       if(!r.ok) throw new Error("HTTP "+r.status);
       return r.json();
     }
     async function apiPost(url, body){
-      const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{})});
+      const sep = url.includes("?") ? "&" : "?";
+      const bust = "t="+Date.now();
+      const r = await fetch(url + sep + bust, {method:"POST", cache:"no-store", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{})});
       const data = await r.json().catch(()=> ({}));
       if(!r.ok) throw new Error(data.detail || ("HTTP "+r.status));
       return data;
@@ -2263,22 +2138,33 @@ def get_webapp_html() -> str:
       state.postsSheet.title = title || ("#"+tag);
       state.posts = [];
       state.loadingPosts = true;
+
+      // автообновление каждые 30 секунд (редактирование/удаление)
+      if(postsRefreshTimer) { try{ clearInterval(postsRefreshTimer); }catch(e){} postsRefreshTimer=null; }
+
       render();
-      try{
-        const arr = await apiGet("/api/posts?tag="+encodeURIComponent(tag));
-        state.posts = Array.isArray(arr) ? arr : [];
-      }catch(e){
-        state.posts = [];
-      }finally{
-        state.loadingPosts = false;
-        render();
+
+      async function loadOnce(){
+        try{
+          const arr = await apiGet("/api/posts?tag="+encodeURIComponent(tag));
+          state.posts = Array.isArray(arr) ? arr : [];
+        }catch(e){
+          state.posts = [];
+        }finally{
+          state.loadingPosts = false;
+          render();
+        }
       }
+
+      await loadOnce();
+      postsRefreshTimer = setInterval(()=>{ if(state.postsSheet.open && state.postsSheet.tag===tag){ loadOnce(); } }, 30000);
     }
 
     function closePosts(){
       state.postsSheet = {open:false, tag:null, title:""};
       state.posts = [];
       state.loadingPosts = false;
+      if(postsRefreshTimer) { try{ clearInterval(postsRefreshTimer); }catch(e){} postsRefreshTimer=null; }
       render();
     }
 
@@ -2527,7 +2413,7 @@ def get_webapp_html() -> str:
       const top = el("div","row");
       const tl = el("div");
       tl.appendChild(el("div","h1","Поиск"));
-      tl.appendChild(el("div","sub","Brands · Categories · Products"));
+      tl.appendChild(el("div","sub","Бренды · Категории · Товары"));
       top.appendChild(tl);
 
       const bag = el("div","pill","👜 Косметичка");
@@ -2593,9 +2479,9 @@ def get_webapp_html() -> str:
       const top = el("div","row");
       const tl = el("div");
       tl.appendChild(el("div","h1","Бонусы"));
-      tl.appendChild(el("div","sub","Roulette · Raffle · Inventory"));
+      tl.appendChild(el("div","sub","Рулетка · Билеты · Косметичка"));
       top.appendChild(tl);
-      if(state.user) top.appendChild(el("div","pill","💎 "+esc(state.user.points)+" pts"));
+      if(state.user) top.appendChild(el("div","pill","💎 "+esc(state.user.points)+" баллов"));
       wrap.appendChild(top);
 
       const grid = el("div","grid");
@@ -2603,7 +2489,7 @@ def get_webapp_html() -> str:
 
       const t1 = el("div","tile");
       t1.addEventListener("click", ()=>{ haptic(); openПрофиль("roulette"); });
-      t1.appendChild(el("div","tileTitle","🎡 Roulette"));
+      t1.appendChild(el("div","tileTitle","🎡 Рулетка"));
       t1.appendChild(el("div","tileSub","Try your luck (2000)"));
       const t2 = el("div","tile");
       t2.addEventListener("click", ()=>{ haptic(); openПрофиль("raffle"); });
@@ -2614,9 +2500,9 @@ def get_webapp_html() -> str:
       t3.appendChild(el("div","tileTitle","👜 Косметичка"));
       t3.appendChild(el("div","tileSub","Призы и билеты"));
       const t4 = el("div","tile");
-      t4.addEventListener("click", ()=>{ haptic(); openPosts("Challenge","💎 Beauty Challenges"); });
-      t4.appendChild(el("div","tileTitle","💎 Challenges"));
-      t4.appendChild(el("div","tileSub","Daily motivation"));
+      t4.addEventListener("click", ()=>{ haptic(); openPosts("Challenge","💎 Челленджи"); });
+      t4.appendChild(el("div","tileTitle","💎 Челленджи"));
+      t4.appendChild(el("div","tileSub","Ежедневная мотивация"));
 
       grid.appendChild(t1);grid.appendChild(t2);grid.appendChild(t3);grid.appendChild(t4);
       wrap.appendChild(grid);
@@ -2686,7 +2572,7 @@ def get_webapp_html() -> str:
       const r1 = el("div","row");
       const left = el("div");
       left.appendChild(el("div",null,'<div style="font-size:13px;color:var(--muted)">Balance</div>'));
-      left.appendChild(el("div",null,'<div style="margin-top:6px;font-size:16px;font-weight:900">💎 '+esc(state.user ? state.user.points : 0)+' pts</div>'));
+      left.appendChild(el("div",null,'<div style="margin-top:6px;font-size:16px;font-weight:900">💎 '+esc(state.user ? state.user.points : 0)+' баллов</div>'));
       r1.appendChild(left);
       r1.appendChild(el("div","pill", esc(tierLabel(state.user ? state.user.tier : "free"))));
       bal.appendChild(r1);
@@ -2700,16 +2586,16 @@ def get_webapp_html() -> str:
 
       const tCard = el("div","card2");
       tCard.style.marginTop="12px";
-      tCard.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎟 Tickets</div>'));
-      tCard.appendChild(el("div","sub",'You have: <b style="color:rgba(255,255,255,0.92)">'+haveTickets+'</b>'));
-      tCard.appendChild(el("div","sub",'Rate: 1 = '+rate+' pts'));
+      tCard.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎟 Билеты</div>'));
+      tCard.appendChild(el("div","sub",'У вас: <b style="color:rgba(255,255,255,0.92)">'+haveTickets+'</b>'));
+      tCard.appendChild(el("div","sub",'Курс: 1 = '+rate+' баллов'));
 
       // Simple convert all button (no qty selector in vanilla to keep it stable)
       const convBtn = el("div","btn");
       convBtn.style.marginTop="10px";
       convBtn.style.opacity = (!haveTickets || state.busy) ? 0.5 : 1;
       convBtn.style.cursor = (!haveTickets || state.busy) ? "not-allowed" : "pointer";
-      convBtn.appendChild(el("div",null,'<div class="btnTitle">💎 Convert ALL tickets</div><div class="btnSub">'+(haveTickets ? ('Get ~'+(haveTickets*rate)+' pts') : 'No tickets')+'</div>'));
+      convBtn.appendChild(el("div",null,'<div class="btnTitle">💎 Convert ALL tickets</div><div class="btnSub">'+(haveTickets ? ('Get ~'+(haveTickets*rate)+' баллов') : 'No tickets')+'</div>'));
       convBtn.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
       convBtn.addEventListener("click", async ()=>{
         if(!haveTickets || state.busy) return;
@@ -2834,8 +2720,8 @@ def get_webapp_html() -> str:
           '<div style="position:absolute;top:0;right:0;padding:6px 10px;border-radius:999px;border:1px solid rgba(230,193,128,0.25);background:rgba(230,193,128,0.10);font-size:13px;font-weight:850">💎 '+esc(state.user.points)+'</div>'+
           '<div style="font-size:13px;color:var(--muted)">Hello, '+esc(state.user.first_name)+'!</div>'+
           '<div style="margin-top:6px;font-size:13px;color:var(--muted)">'+esc(tierLabel(state.user.tier))+'</div>'+
-          '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🔥 Streak</div><div style="font-weight:800">'+esc(state.user.daily_streak||0)+' (best '+esc(state.user.best_streak||0)+')</div></div>'+
-          '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🎟 Referrals</div><div style="font-weight:800">'+esc(state.user.referral_count||0)+'</div></div>'+
+          '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🔥 Стрик</div><div style="font-weight:800">'+esc(state.user.daily_streak||0)+' (лучший '+esc(state.user.best_streak||0)+')</div></div>'+
+          '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🎟 Рефералы</div><div style="font-weight:800">'+esc(state.user.referral_count||0)+'</div></div>'+
         '</div>';
       content.appendChild(info);
 
@@ -2886,8 +2772,8 @@ def get_webapp_html() -> str:
         }
         list.appendChild(menuBtn("👜 Моя косметичка","Призы и билеты", ()=>{ state.profileOpen=false; render(); openInventory(); }));
         list.appendChild(menuBtn("🎁 Raffle","Buy tickets (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet(); }));
-        list.appendChild(menuBtn("🎡 Roulette","Spin (2000)", ()=>{ state.profileView="roulette"; renderПрофильSheet(); }));
-        list.appendChild(menuBtn("🧾 Roulette history","Last spins", ()=>{ state.profileView="history"; renderПрофильSheet(); }));
+        list.appendChild(menuBtn("🎡 Рулетка","Крутить (2000)", ()=>{ state.profileView="roulette"; renderПрофильSheet(); }));
+        list.appendChild(menuBtn("🧾 История рулетки","Последние спины", ()=>{ state.profileView="history"; renderПрофильSheet(); }));
         content.appendChild(list);
       }else{
         const back = el("div","btn");
@@ -2926,7 +2812,7 @@ def get_webapp_html() -> str:
           const box = el("div");
           box.style.marginTop="12px";
           box.innerHTML =
-            '<div style="font-size:14px;font-weight:900">🎡 Roulette</div>'+
+            '<div style="font-size:14px;font-weight:900">🎡 Рулетка</div>'+
             '<div class="sub" style="margin-top:6px">Spin = 2000 points.</div>';
           content.appendChild(box);
 
@@ -3197,7 +3083,7 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     out = []
     for p in rows:
         media_type = (p.media_type or "").strip().lower()
-        media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else "/api/text_thumb"
+        media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else None
 
         out.append({
             "message_id": int(p.message_id),
@@ -3234,17 +3120,6 @@ async def api_post_media(message_id: int):
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=31536000"},
     )
-
-
-@app.get("/api/text_thumb")
-async def api_text_thumb():
-    """Плейсхолдер-картинка для текстовых постов (чтобы в Mini App были превью у всех постов)."""
-    return Response(
-        content=TEXT_THUMB_SVG.encode("utf-8"),
-        media_type="image/svg+xml",
-        headers={"Cache-Control": "public, max-age=31536000"},
-    )
-
 
 
 
