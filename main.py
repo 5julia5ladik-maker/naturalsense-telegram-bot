@@ -1623,7 +1623,7 @@ const hideSplash = () => {
 };
 
 // Hide splash when app ready or after hard timeout
-window.addEventListener("app:ready", () => { try{ document.getElementById('root')?.classList.add('ready'); }catch(e){} hideSplash(); });
+window.addEventListener("app:ready", hideSplash);
 setTimeout(hideSplash, 6500);
 
 </script>
@@ -1778,10 +1778,14 @@ setTimeout(hideSplash, 6500);
 
     /* Bottom nav */
     .bottomNav{
-      position:fixed;left:0;right:0;bottom:0;
-      padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+      position:fixed;
+      left:50%;
+      transform:translateX(-50%);
+      bottom:calc(18px + env(safe-area-inset-bottom));
+      padding:0;
       display:flex;justify-content:center;
       z-index:9000;pointer-events:none;
+      width:100%;
     }
     .bottomNavInner{
       pointer-events:auto;
@@ -1910,104 +1914,6 @@ setTimeout(hideSplash, 6500);
 
   
 /* PREMIUM WHITE SPLASH */
-/* LUX+ ACCENTS */
-:root{
-  --champagne1: rgba(230,193,128,0.95);
-  --champagne2: rgba(212,170,92,0.85);
-  --ink: #111;
-}
-.splash-card{
-  position: relative;
-  overflow: hidden;
-}
-.splash-card:before{
-  content:"";
-  position:absolute;
-  inset:-2px;
-  border-radius:30px;
-  padding:1px;
-  background: linear-gradient(135deg, rgba(230,193,128,0.70), rgba(0,0,0,0.04), rgba(212,170,92,0.55));
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events:none;
-}
-.splash-card:after{
-  content:"";
-  position:absolute;
-  inset:0;
-  background:
-    radial-gradient(420px 220px at 30% 10%, rgba(230,193,128,0.22), transparent 60%),
-    radial-gradient(360px 200px at 80% 0%, rgba(0,0,0,0.04), transparent 55%);
-  pointer-events:none;
-}
-.splash-logo{
-  background: linear-gradient(180deg, #111 0%, #111 55%, rgba(230,193,128,0.75) 120%);
-  -webkit-background-clip:text;
-  background-clip:text;
-  color: transparent;
-}
-.loader-ring{
-  border: 2px solid rgba(17,17,17,0.10);
-  border-top-color: rgba(212,170,92,0.95);
-  border-right-color: rgba(17,17,17,0.22);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.06);
-}
-.loader-dotline{
-  margin-top: 16px;
-  font-size: 12px;
-  letter-spacing: 1.2px;
-  color: rgba(17,17,17,0.45);
-  text-transform: uppercase;
-  font-weight: 700;
-  position: relative;
-}
-.loader-dotline .dots{
-  display:inline-block;
-  width: 22px;
-  text-align:left;
-}
-@keyframes dotPulse {
-  0%{content:"";}
-  25%{content:".";}
-  50%{content:"..";}
-  75%{content:"...";}
-  100%{content:"";}
-}
-.loader-dotline .dots::after{
-  content:"";
-  animation: dotPulse 1.2s infinite;
-}
-.progressTrack{
-  margin-top: 14px;
-  height: 3px;
-  border-radius: 999px;
-  background: rgba(17,17,17,0.08);
-  overflow:hidden;
-}
-.progressBar{
-  height:100%;
-  width: 35%;
-  background: linear-gradient(90deg, rgba(230,193,128,0.0), rgba(230,193,128,0.95), rgba(230,193,128,0.0));
-  animation: progMove 1.3s ease-in-out infinite;
-}
-@keyframes progMove{
-  0%{transform: translateX(-120%);}
-  100%{transform: translateX(260%);}
-}
-
-/* App reveal */
-#root{opacity:0; transform: translateY(6px); transition: opacity .6s ease, transform .6s ease;}
-#root.ready{opacity:1; transform: translateY(0);}
-
-/* Slightly richer shimmer */
-.shimmer{
-  opacity: .55;
-  mix-blend-mode: soft-light;
-}
-
 #splash {
     position: fixed;
     inset: 0;
@@ -2334,7 +2240,6 @@ setTimeout(hideSplash, 6500);
       state.posts = [];
       state.loadingPosts = true;
       render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
       try{
         const arr = await apiGet("/api/posts?tag="+encodeURIComponent(tag));
         state.posts = Array.isArray(arr) ? arr : [];
@@ -2343,7 +2248,6 @@ setTimeout(hideSplash, 6500);
       }finally{
         state.loadingPosts = false;
         render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
       }
     }
 
@@ -2352,14 +2256,12 @@ setTimeout(hideSplash, 6500);
       state.posts = [];
       state.loadingPosts = false;
       render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
     }
 
     async function openInventory(){
       state.inventoryOpen = true;
       state.invMsg = "";
       render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
       if(!tgUserId) return;
       try{
         state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
@@ -2367,13 +2269,11 @@ setTimeout(hideSplash, 6500);
         state.inventory = null;
       }
       render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
     }
     function closeInventory(){
       state.inventoryOpen = false;
       state.invMsg = "";
       render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
     }
 
     async function loadRaffleStatus(){
@@ -2398,16 +2298,13 @@ setTimeout(hideSplash, 6500);
       state.profileOpen = true;
       state.profileView = view || "menu";
       render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
       await Promise.all([loadRaffleStatus(), loadRouletteHistory()]);
       render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
     }
     function closeProfile(){
       state.profileOpen = false;
       state.msg = "";
       render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
     }
 
     async function buyTicket(){
@@ -2424,7 +2321,6 @@ setTimeout(hideSplash, 6500);
       }finally{
         state.busy = false;
         render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
       }
     }
 
@@ -2448,7 +2344,6 @@ setTimeout(hideSplash, 6500);
       }finally{
         state.busy = false;
         render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
       }
     }
 
@@ -3172,7 +3067,6 @@ setTimeout(hideSplash, 6500);
       await Promise.all([refreshUser(), loadBotUsername()]);
       await loadJournalBlocks();
       render();
-      try{ window.dispatchEvent(new Event("app:ready")); }catch(e){}
       hideSplash();
     }
 
@@ -3188,7 +3082,7 @@ const hideSplash = () => {
 };
 
 // Hide splash when app ready or after hard timeout
-window.addEventListener("app:ready", () => { try{ document.getElementById('root')?.classList.add('ready'); }catch(e){} hideSplash(); });
+window.addEventListener("app:ready", hideSplash);
 setTimeout(hideSplash, 6500);
 
 </script>
