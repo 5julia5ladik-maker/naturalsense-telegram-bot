@@ -1964,7 +1964,7 @@ def get_webapp_html() -> str:
       try{
         if(tg){
           tg.setHeaderColor(bg);
-          tg.setBackgroundColor(bg);
+          tg.setНазадgroundColor(bg);
         }
       }catch(e){}
     }
@@ -1987,7 +1987,7 @@ def get_webapp_html() -> str:
       return n;
     }
     function tierLabel(t){
-      return ( {free:"🥉 Bronze", premium:"🥈 Silver", vip:"🥇 Gold VIP"}[t] ) || "🥉 Bronze";
+      return ( {free:"🥉 Бронза", premium:"🥈 Серебро", vip:"🥇 Золотой VIP"}[t] ) || "🥉 Бронза";
     }
 
     let postsRefreshTimer = null;
@@ -2079,7 +2079,7 @@ def get_webapp_html() -> str:
       ["Оценка","Оценка","Личные обзоры"],
       ["Факты","Факты","Короткие факты"],
       ["Состав","Состав","Состав / формулы"],
-      ["Challenge","Challenge","Бьюти челленджи"],
+      ["Challenge","Челленджи","Бьюти челленджи"],
       ["SephoraPromo","SephoraPromo","Промо Sephora"]
     ];
     const PRODUCTS = [
@@ -2324,7 +2324,7 @@ def get_webapp_html() -> str:
       const topRow = el("div","row");
       const left = el("div");
       left.appendChild(el("div","h1","NS · Natural Sense"));
-      left.appendChild(el("div","sub","Today’s Edit · luxury beauty magazine"));
+      left.appendChild(el("div","sub","Выпуск дня · люкс-журнал"));
       topRow.appendChild(left);
 
       if(state.user){
@@ -2332,7 +2332,7 @@ def get_webapp_html() -> str:
       }
       inner.appendChild(topRow);
 
-      inner.appendChild(el("div",null,'<div style="margin-top:12px;color:var(--muted);font-size:13px">Curated picks, short facts, luxury reviews — inside Telegram.</div>'));
+      inner.appendChild(el("div",null,'<div style="margin-top:12px;color:var(--muted);font-size:13px">Подборки, факты и люкс-обзоры — прямо в Telegram.</div>'));
 
       const actions = el("div");
       actions.style.marginTop="12px";
@@ -2349,18 +2349,18 @@ def get_webapp_html() -> str:
       const tNew = el("div","tile");
       tNew.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Новинка","🆕 Новинки"); });
       tNew.appendChild(el("div","tileTitle","🆕 Новинки"));
-      tNew.appendChild(el("div","tileSub","Fresh launches & updates"));
+      tNew.appendChild(el("div","tileSub","Новые релизы и обновления"));
       const tLux = el("div","tile");
       tLux.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Люкс","💎 Люкс"); });
       tLux.appendChild(el("div","tileTitle","💎 Люкс"));
-      tLux.appendChild(el("div","tileSub","Short & premium"));
+      tLux.appendChild(el("div","tileSub","Коротко и премиально"));
       grid1.appendChild(tNew); grid1.appendChild(tLux);
 
       const grid2 = el("div","grid");
       const tTrend = el("div","tile");
       tTrend.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Тренд","🔥 Тренд"); });
       tTrend.appendChild(el("div","tileTitle","🔥 Тренд"));
-      tTrend.appendChild(el("div","tileSub","What everyone wants"));
+      tTrend.appendChild(el("div","tileSub","То, что сейчас хотят все"));
       const tBag = el("div","tile");
       tBag.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openInventory(); });
       tBag.appendChild(el("div","tileTitle","👜 Косметичка"));
@@ -2382,7 +2382,7 @@ def get_webapp_html() -> str:
         hdr.style.alignItems="baseline";
         hdr.appendChild(el("div",null,'<div style="font-size:15px;font-weight:850">'+esc(b.title)+'</div>'));
 
-        const viewAll = el("div",null,'<div style="font-size:12px;color:var(--muted);cursor:pointer;user-select:none">View all ›</div>');
+        const viewAll = el("div",null,'<div style="font-size:12px;color:var(--muted);cursor:pointer;user-select:none">Смотреть всё ›</div>');
         viewAll.addEventListener("click", ()=>{ haptic(); openPosts(b.tag, b.title); });
         hdr.appendChild(viewAll);
         block.appendChild(hdr);
@@ -2435,8 +2435,8 @@ def get_webapp_html() -> str:
 
       const seg = el("div","seg");
       seg.style.marginTop="12px";
-      const b1 = el("div","segBtn "+(state.discoverMode==="brands"?"segBtnActive":""),"Brands");
-      const b2 = el("div","segBtn "+(state.discoverMode==="categories"?"segBtnActive":""),"Categories");
+      const b1 = el("div","segBtn "+(state.discoverMode==="brands"?"segBtnActive":""),"Бренды");
+      const b2 = el("div","segBtn "+(state.discoverMode==="categories"?"segBtnActive":""),"Категории");
       b1.addEventListener("click", ()=>{ haptic(); state.discoverMode="brands"; render(); });
       b2.addEventListener("click", ()=>{ haptic(); state.discoverMode="categories"; render(); });
       seg.appendChild(b1); seg.appendChild(b2);
@@ -2458,7 +2458,7 @@ def get_webapp_html() -> str:
 
       wrap.appendChild(el("div","hr"));
 
-      wrap.appendChild(el("div",null,'<div style="font-size:14px;font-weight:850">🧴 Product types</div><div class="sub" style="margin-top:6px">Quick access</div>'));
+      wrap.appendChild(el("div",null,'<div style="font-size:14px;font-weight:850">🧴 Типы продуктов</div><div class="sub" style="margin-top:6px">Быстрый доступ</div>'));
 
       const grid2 = el("div","grid");
       grid2.style.marginTop="10px";
@@ -2490,11 +2490,11 @@ def get_webapp_html() -> str:
       const t1 = el("div","tile");
       t1.addEventListener("click", ()=>{ haptic(); openПрофиль("roulette"); });
       t1.appendChild(el("div","tileTitle","🎡 Рулетка"));
-      t1.appendChild(el("div","tileSub","Try your luck (2000)"));
+      t1.appendChild(el("div","tileSub","Испытать удачу (2000)"));
       const t2 = el("div","tile");
       t2.addEventListener("click", ()=>{ haptic(); openПрофиль("raffle"); });
-      t2.appendChild(el("div","tileTitle","🎁 Raffle"));
-      t2.appendChild(el("div","tileSub","Ticket (500)"));
+      t2.appendChild(el("div","tileTitle","🎁 Розыгрыш"));
+      t2.appendChild(el("div","tileSub","Билет (500)"));
       const t3 = el("div","tile");
       t3.addEventListener("click", ()=>{ haptic(); openInventory(); });
       t3.appendChild(el("div","tileTitle","👜 Косметичка"));
@@ -2571,7 +2571,7 @@ def get_webapp_html() -> str:
       const bal = el("div","card2");
       const r1 = el("div","row");
       const left = el("div");
-      left.appendChild(el("div",null,'<div style="font-size:13px;color:var(--muted)">Balance</div>'));
+      left.appendChild(el("div",null,'<div style="font-size:13px;color:var(--muted)">Баланс</div>'));
       left.appendChild(el("div",null,'<div style="margin-top:6px;font-size:16px;font-weight:900">💎 '+esc(state.user ? state.user.points : 0)+' баллов</div>'));
       r1.appendChild(left);
       r1.appendChild(el("div","pill", esc(tierLabel(state.user ? state.user.tier : "free"))));
@@ -2595,7 +2595,7 @@ def get_webapp_html() -> str:
       convBtn.style.marginTop="10px";
       convBtn.style.opacity = (!haveTickets || state.busy) ? 0.5 : 1;
       convBtn.style.cursor = (!haveTickets || state.busy) ? "not-allowed" : "pointer";
-      convBtn.appendChild(el("div",null,'<div class="btnTitle">💎 Convert ALL tickets</div><div class="btnSub">'+(haveTickets ? ('Get ~'+(haveTickets*rate)+' баллов') : 'No tickets')+'</div>'));
+      convBtn.appendChild(el("div",null,'<div class="btnTitle">💎 Конвертировать все билеты</div><div class="btnSub">'+(haveTickets ? ('Будет ~'+(haveTickets*rate)+' баллов') : 'Нет билетов')+'</div>'));
       convBtn.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
       convBtn.addEventListener("click", async ()=>{
         if(!haveTickets || state.busy) return;
@@ -2619,7 +2619,7 @@ def get_webapp_html() -> str:
       // Prizes list (convert only in vanilla, claim stays in bot)
       const pCard = el("div","card2");
       pCard.style.marginTop="12px";
-      pCard.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎁 Prizes</div>'));
+      pCard.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎁 Призы</div>'));
 
       const prizes = Array.isArray(inv.prizes) ? inv.prizes : [];
       if(prizes.length===0){
@@ -2634,7 +2634,7 @@ def get_webapp_html() -> str:
           pc.style.border="1px solid rgba(230,193,128,0.22)";
           pc.style.background="rgba(230,193,128,0.10)";
           pc.appendChild(el("div",null,'<div style="font-size:14px;font-weight:950">'+esc(p.prize_label||"💎 Главный приз")+'</div>'));
-          pc.appendChild(el("div","sub",'Code: '+esc(p.claim_code)+' • Status: '+esc(p.status||"-")+'</div>'));
+          pc.appendChild(el("div","sub",'Код: '+esc(p.claim_code)+' • Status: '+esc(p.status||"-")+'</div>'));
           const row = el("div","row");
           row.style.marginTop="10px";
           row.style.gap="10px";
@@ -2652,13 +2652,13 @@ def get_webapp_html() -> str:
               alert("/claim "+code);
             }
           });
-          claim.innerHTML = "🎁 Claim";
+          claim.innerHTML = "🎁 Забрать";
           const conv = el("div","btn");
           conv.style.justifyContent="center";
           conv.style.fontWeight="950";
           conv.style.border="1px solid rgba(230,193,128,0.35)";
           conv.style.background="rgba(230,193,128,0.14)";
-          conv.innerHTML = "💎 Convert (+"+diorValue+")";
+          conv.innerHTML = "💎 Конвертировать (+"+diorValue+")";
           conv.addEventListener("click", async ()=>{
             const code = String(p.claim_code||"").trim();
             if(!code || state.busy) return;
@@ -2718,7 +2718,7 @@ def get_webapp_html() -> str:
       info.innerHTML =
         '<div style="position:relative">'+
           '<div style="position:absolute;top:0;right:0;padding:6px 10px;border-radius:999px;border:1px solid rgba(230,193,128,0.25);background:rgba(230,193,128,0.10);font-size:13px;font-weight:850">💎 '+esc(state.user.points)+'</div>'+
-          '<div style="font-size:13px;color:var(--muted)">Hello, '+esc(state.user.first_name)+'!</div>'+
+          '<div style="font-size:13px;color:var(--muted)">Привет, '+esc(state.user.first_name)+'!</div>'+
           '<div style="margin-top:6px;font-size:13px;color:var(--muted)">'+esc(tierLabel(state.user.tier))+'</div>'+
           '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🔥 Стрик</div><div style="font-weight:800">'+esc(state.user.daily_streak||0)+' (лучший '+esc(state.user.best_streak||0)+')</div></div>'+
           '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🎟 Рефералы</div><div style="font-weight:800">'+esc(state.user.referral_count||0)+'</div></div>'+
@@ -2728,7 +2728,7 @@ def get_webapp_html() -> str:
       content.appendChild(el("div","hr"));
 
       // Invite link
-      content.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎟 Invite</div><div class="sub" style="margin-top:6px">+20 points for each new user (once).</div>'));
+      content.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">👥 Рефералы</div><div class="sub" style="margin-top:6px">+20 баллов за каждого нового пользователя (1 раз).</div>'));
       const ref = (tgUserId && state.botUsername) ? ("https://t.me/"+state.botUsername+"?start="+tgUserId) : "";
       if(ref){
         const box = el("div","card2");
@@ -2771,7 +2771,7 @@ def get_webapp_html() -> str:
           return b;
         }
         list.appendChild(menuBtn("👜 Моя косметичка","Призы и билеты", ()=>{ state.profileOpen=false; render(); openInventory(); }));
-        list.appendChild(menuBtn("🎁 Raffle","Buy tickets (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet(); }));
+        list.appendChild(menuBtn("🎁 Розыгрыш","Купить билеты (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet(); }));
         list.appendChild(menuBtn("🎡 Рулетка","Крутить (2000)", ()=>{ state.profileView="roulette"; renderПрофильSheet(); }));
         list.appendChild(menuBtn("🧾 История рулетки","Последние спины", ()=>{ state.profileView="history"; renderПрофильSheet(); }));
         content.appendChild(list);
@@ -2779,7 +2779,7 @@ def get_webapp_html() -> str:
         const back = el("div","btn");
         back.style.justifyContent="center";
         back.style.fontWeight="900";
-        back.textContent = "← Back";
+        back.textContent = "← Назад";
         back.addEventListener("click", ()=>{ haptic(); state.profileView="menu"; state.msg=""; renderПрофильSheet(); });
         content.appendChild(back);
 
@@ -2787,9 +2787,9 @@ def get_webapp_html() -> str:
           const box = el("div");
           box.style.marginTop="12px";
           box.innerHTML =
-            '<div style="font-size:14px;font-weight:900">🎁 Raffle</div>'+
-            '<div class="sub" style="margin-top:6px">Ticket = 500 points.</div>'+
-            '<div class="sub" style="margin-top:8px">Your tickets: <b style="color:rgba(255,255,255,0.92)">'+esc((state.raffle && state.raffle.ticket_count) ? state.raffle.ticket_count : 0)+'</b></div>';
+            '<div style="font-size:14px;font-weight:900">🎁 Розыгрыш</div>'+
+            '<div class="sub" style="margin-top:6px">Билет = 500 баллов.</div>'+
+            '<div class="sub" style="margin-top:8px">Ваши билеты: <b style="color:rgba(255,255,255,0.92)">'+esc((state.raffle && state.raffle.ticket_count) ? state.raffle.ticket_count : 0)+'</b></div>';
           content.appendChild(box);
 
           const can = (state.user.points||0) >= 500 && !state.busy;
@@ -2797,7 +2797,7 @@ def get_webapp_html() -> str:
           b.style.marginTop="10px";
           b.style.opacity = can ? 1 : 0.5;
           b.style.cursor = can ? "pointer" : "not-allowed";
-          b.innerHTML = '<div><div class="btnTitle">🎟 Buy ticket</div><div class="btnSub">'+(state.busy?"Подожди…":"Spend 500 points")+'</div></div><div style="opacity:0.85">›</div>';
+          b.innerHTML = '<div><div class="btnTitle">🎟 Buy ticket</div><div class="btnSub">'+(state.busy?"Подожди…":"Потратить 500 баллов")+'</div></div><div style="opacity:0.85">›</div>';
           b.addEventListener("click", ()=>{ if(can){ buyTicket(); } });
           content.appendChild(b);
 
@@ -2813,7 +2813,7 @@ def get_webapp_html() -> str:
           box.style.marginTop="12px";
           box.innerHTML =
             '<div style="font-size:14px;font-weight:900">🎡 Рулетка</div>'+
-            '<div class="sub" style="margin-top:6px">Spin = 2000 points.</div>';
+            '<div class="sub" style="margin-top:6px">Крутить = 2000 баллов.</div>';
           content.appendChild(box);
 
           const can = (state.user.points||0) >= 2000 && !state.busy;
@@ -2821,7 +2821,7 @@ def get_webapp_html() -> str:
           b.style.marginTop="10px";
           b.style.opacity = can ? 1 : 0.5;
           b.style.cursor = can ? "pointer" : "not-allowed";
-          b.innerHTML = '<div><div class="btnTitle">🎡 Spin</div><div class="btnSub">'+(state.busy?"Подожди…":"Try your luck")+'</div></div><div style="opacity:0.85">›</div>';
+          b.innerHTML = '<div><div class="btnTitle">🎡 Крутить</div><div class="btnSub">'+(state.busy?"Подожди…":"Испытать удачу")+'</div></div><div style="opacity:0.85">›</div>';
           b.addEventListener("click", ()=>{ if(can){ spinRoulette(); } });
           content.appendChild(b);
 
