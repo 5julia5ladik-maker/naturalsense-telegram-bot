@@ -1494,12 +1494,7 @@ async def _telegram_runner():
         await tg_app.initialize()
         await tg_app.start()
         await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        try:
-        await application.bot.delete_webhook(drop_pending_updates=True)
-    except Exception as e:
-        logger.warning(f"Webhook delete skipped: {e}")
-
-    logger.info("✅ Telegram bot started (polling)")
+        logger.info("✅ Telegram bot started (polling)")
         while True:
             await asyncio.sleep(3600)
     except asyncio.CancelledError:
@@ -1630,71 +1625,11 @@ const hideSplash = () => {
 // Hide splash when app ready or after hard timeout
 window.addEventListener("app:ready", () => { try{ document.getElementById('root')?.classList.add('ready'); }catch(e){} hideSplash(); });
 setTimeout(hideSplash, 6500);
-    window.onerror = function(){ try{ window.dispatchEvent(new Event('app:error')); }catch(e){} return false; };
 
-
-// Splash actions
-try{
-  document.getElementById("btnReload")?.addEventListener("click", () => location.reload());
-  document.getElementById("btnClose")?.addEventListener("click", () => { try{ tg.close(); }catch(e){} });
-}catch(e){}
-
-// If boot fails, show a hint and allow user to proceed
-window.addEventListener("app:error", () => {
-  try{
-    const help = document.querySelector(".splash-help");
-    if(help) help.textContent = "Проблема загрузки. Нажми «Обновить» или попробуй позже.";
-  }catch(e){}
-});
 </script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    /* THEME PALETTES (LUX) */
-:root{
-  --gold: #E6C180;
-  --gold-soft: rgba(230,193,128,0.35);
-
-  /* Light (Ivory Editorial) default */
-  --app-bg: radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.12), transparent 60%),
-            radial-gradient(900px 600px at 80% 0%, rgba(0,0,0,0.04), transparent 55%),
-            #F8F6F2;
-  --text: #1C1C1C;
-  --muted: #7A7772;
-  --stroke: rgba(0,0,0,0.08);
-  --card: rgba(255,255,255,0.72);
-  --card2: rgba(255,255,255,0.66);
-  --sheetOverlay: rgba(12,15,20,0.35);
-  --sheetCardBg: rgba(255,255,255,0.80);
-  --glassStroke: rgba(0,0,0,0.08);
-  --glassShadow: rgba(0,0,0,0.18);
-  --nav-bg: rgba(255,255,255,0.72);
-
-  --splash-bg: radial-gradient(1200px 600px at 50% -10%, #FFFDF8 0%, #F8F6F2 40%, #EFEDE8 100%);
-  --splash-card-bg: rgba(255,255,255,0.74);
-  --splash-sub: rgba(28,28,28,0.45);
-}
-:root[data-theme="dark"]{
-  /* Dark (Midnight Ink) */
-  --app-bg: radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.16), transparent 62%),
-            radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), transparent 55%),
-            #0E1116;
-  --text: #F3F2EF;
-  --muted: rgba(154,157,166,0.92);
-  --stroke: rgba(255,255,255,0.12);
-  --card: rgba(18,22,30,0.72);
-  --card2: rgba(18,22,30,0.62);
-  --sheetOverlay: rgba(7,9,12,0.62);
-  --sheetCardBg: rgba(18,22,30,0.74);
-  --glassStroke: rgba(255,255,255,0.16);
-  --glassShadow: rgba(0,0,0,0.48);
-  --nav-bg: rgba(18,22,30,0.62);
-
-  --splash-bg: radial-gradient(1200px 700px at 50% -15%, rgba(230,193,128,0.18) 0%, rgba(14,17,22,1) 55%, #0A0D12 100%);
-  --splash-card-bg: rgba(18,22,30,0.74);
-  --splash-sub: rgba(243,242,239,0.55);
-}
-
-:root{
+    :root{
       --bg:#0c0f14;
       --card:rgba(255,255,255,0.08);
       --card2:rgba(255,255,255,0.06);
@@ -1711,11 +1646,14 @@ window.addEventListener("app:error", () => {
       --r-sm:14px;
     }
     body{
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
-  background: var(--app-bg);
-  color: var(--text);
-  overflow-x:hidden;
-}
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
+      background:
+        radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%),
+        radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), transparent 55%),
+        var(--bg);
+      color:var(--text);
+      overflow-x:hidden;
+    }
     #root{min-height:100vh}
     .safePadBottom{padding-bottom:92px}
     .container{max-width:560px;margin:0 auto;padding:16px 16px 24px}
@@ -1817,7 +1755,7 @@ window.addEventListener("app:error", () => {
       position:absolute;left:10px;bottom:10px;
       padding:6px 10px;border-radius:999px;
       border:1px solid rgba(255,255,255,0.20);
-      background: var(--nav-bg);
+      background:rgba(18,22,30,0.55);
       backdrop-filter:blur(14px) saturate(160%);
       -webkit-backdrop-filter:blur(14px) saturate(160%);
       font-size:12px;font-weight:850;color:rgba(255,255,255,0.92);
@@ -1850,7 +1788,7 @@ window.addEventListener("app:error", () => {
       width:min(560px, calc(100% - 24px));
       display:flex;gap:10px;padding:10px;
       border-radius:22px;border:1px solid var(--glassStroke);
-      background: var(--nav-bg);
+      background:rgba(18,22,30,0.55);
       backdrop-filter:blur(22px) saturate(180%);
       -webkit-backdrop-filter:blur(22px) saturate(180%);
       box-shadow:0 12px 40px var(--glassShadow);
@@ -2071,9 +2009,9 @@ window.addEventListener("app:error", () => {
 }
 
 #splash {
-        position: fixed;
-        inset: 0;
-        background: var(--splash-bg);
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, #f4f4f4 35%, #ececec 100%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2086,7 +2024,7 @@ window.addEventListener("app:error", () => {
     pointer-events: none;
 }
 .splash-card {
-        background: var(--splash-card-bg);
+    background: rgba(255,255,255,0.7);
     backdrop-filter: blur(18px) saturate(140%);
     -webkit-backdrop-filter: blur(18px) saturate(140%);
     border-radius: 28px;
@@ -2108,7 +2046,7 @@ window.addEventListener("app:error", () => {
 .splash-sub {
     font-size: 13px;
     letter-spacing: 1.6px;
-    color: var(--splash-sub);
+    color: #777;
     text-transform: uppercase;
     margin-bottom: 22px;
     animation: fadePulse 2.4s ease-in-out infinite;
@@ -2144,45 +2082,6 @@ window.addEventListener("app:error", () => {
     100% { transform: translateX(60%); }
 }
 
-/* SPLASH CONTRAST TWEAKS */
-.splash-card{
-  box-shadow:
-    0 40px 110px rgba(0,0,0,0.14),
-    0 10px 30px rgba(0,0,0,0.08),
-    inset 0 1px 0 rgba(255,255,255,0.9);
-}
-:root .splash-sub{ letter-spacing: 1.8px; }
-.splash-sub{ font-weight: 700; }
-.loader-dotline{ color: rgba(17,17,17,0.56); }
-:root[data-theme="dark"] .loader-dotline{ color: rgba(243,242,239,0.62); }
-.splash-help{
-  margin-top: 14px;
-  font-size: 12px;
-  color: rgba(17,17,17,0.42);
-}
-:root[data-theme="dark"] .splash-help{ color: rgba(243,242,239,0.46); }
-.splash-actions{
-  margin-top: 14px;
-  display:flex;
-  gap:10px;
-  justify-content:center;
-}
-.splash-btn{
-  border: 1px solid var(--stroke);
-  background: rgba(255,255,255,0.62);
-  color: var(--text);
-  padding: 10px 12px;
-  border-radius: 14px;
-  font-weight: 800;
-  letter-spacing: .3px;
-  box-shadow: 0 14px 30px rgba(0,0,0,0.08);
-}
-:root[data-theme="dark"] .splash-btn{
-  background: rgba(18,22,30,0.62);
-  border: 1px solid rgba(255,255,255,0.14);
-  box-shadow: 0 14px 30px rgba(0,0,0,0.35);
-}
-.splash-btn:active{ transform: translateY(1px); }
 </style>
 </head>
 <body>
@@ -2244,22 +2143,29 @@ window.addEventListener("app:error", () => {
     function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
 
     function applyTelegramTheme(){
-  const scheme = (tg && tg.colorScheme) ? tg.colorScheme : "dark";
-  try{ document.documentElement.setAttribute("data-theme", scheme); }catch(e){}
+      const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
+      const p = tg && tg.themeParams ? tg.themeParams : {};
+      const bg = p.bg_color || DEFAULT_BG;
+      const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
+      const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
 
-  // Optionally hint Telegram container colors (safe defaults)
-  try{
-    if(tg){
-      if(scheme==="dark"){
-        tg.setHeaderColor("#0E1116");
-        tg.setBackgroundColor("#0E1116");
-      }else{
-        tg.setHeaderColor("#F8F6F2");
-        tg.setBackgroundColor("#F8F6F2");
-      }
-    }
-  }catch(e){}
-}
+      setVar("--bg", bg);
+      setVar("--text", text);
+      setVar("--muted", muted);
+      setVar("--stroke", scheme==="dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
+      setVar("--card", scheme==="dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
+      setVar("--card2", scheme==="dark" ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)");
+
+      setVar("--sheetOverlay", scheme==="dark" ? hexToRgba(bg,0.55) : hexToRgba(bg,0.45));
+      setVar("--sheetCardBg", scheme==="dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.86)");
+      setVar("--glassStroke", scheme==="dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
+      setVar("--glassShadow", scheme==="dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
+
+      try{
+        if(tg){
+          tg.setHeaderColor(bg);
+          tg.setBackgroundColor(bg);
+        }
       }catch(e){}
     }
 
@@ -3284,22 +3190,7 @@ const hideSplash = () => {
 // Hide splash when app ready or after hard timeout
 window.addEventListener("app:ready", () => { try{ document.getElementById('root')?.classList.add('ready'); }catch(e){} hideSplash(); });
 setTimeout(hideSplash, 6500);
-    window.onerror = function(){ try{ window.dispatchEvent(new Event('app:error')); }catch(e){} return false; };
 
-
-// Splash actions
-try{
-  document.getElementById("btnReload")?.addEventListener("click", () => location.reload());
-  document.getElementById("btnClose")?.addEventListener("click", () => { try{ tg.close(); }catch(e){} });
-}catch(e){}
-
-// If boot fails, show a hint and allow user to proceed
-window.addEventListener("app:error", () => {
-  try{
-    const help = document.querySelector(".splash-help");
-    if(help) help.textContent = "Проблема загрузки. Нажми «Обновить» или попробуй позже.";
-  }catch(e){}
-});
 </script>
 </body>
 </html>
