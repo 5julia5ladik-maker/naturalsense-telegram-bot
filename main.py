@@ -11,7 +11,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import (
@@ -662,6 +662,9 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
 
     if tag:
         rows = [p for p in rows if tag in (p.tags or [])]
+
+    # ✅ ВАЖНО: перед выдачей проверяем, не удалены ли посты в канале
+    rows = await ensure_posts_fresh(rows, max_check=min(25, limit))
     return rows
 
 
@@ -669,20 +672,53 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
 # DELETE SWEEPER (AUTO CHECK)
 # -----------------------------------------------------------------------------
 async def message_exists_public(message_id: int) -> bool:
-    url = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
-    try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            if r.status_code == 404:
-                return False
-            if r.status_code != 200:
-                return True
+    """Проверяем существование сообщения в публичном канале по t.me.
+    Telegram Bot API не даёт getMessage для каналов, поэтому используем публичную страницу.
+    Если канал приватный — возвращаем True (не можем проверить).
+    """
+    # 1) embed=1 (часто показывает явную ошибку)
+    url_embed = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
+    # 2) /s/ view (иногда надёжнее)
+    url_s = f"https://t.me/s/{CHANNEL_USERNAME}/{message_id}"
 
-            html = (r.text or "").lower()
-            if "message not found" in html or "post not found" in html:
-                return False
-            if "join channel" in html or "this channel is private" in html:
-                return True
+    def _looks_deleted(html: str) -> bool:
+        h = (html or "").lower()
+        # типовые маркеры, когда сообщения нет
+        bad_markers = [
+            "message not found",
+            "post not found",
+            "tgme_widget_message_error",
+            "tgme_widget_message_empty",
+            "this message doesn't exist",
+            "this post doesn't exist",
+        ]
+        return any(x in h for x in bad_markers)
+
+    try:
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            for url in (url_embed, url_s):
+                r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                if r.status_code == 404:
+                    return False
+                if r.status_code != 200:
+                    # если отдали не 200 — обычно это не про удаление (ограничение/редирект)
+                    continue
+
+                html = r.text or ""
+                low = html.lower()
+
+                # приватный/закрытый канал — проверить нельзя
+                if "this channel is private" in low or "join channel" in low:
+                    return True
+
+                if _looks_deleted(html):
+                    return False
+
+                # если есть виджет сообщения — считаем что существует
+                if "tgme_widget_message" in low or "tgme_channel_info_header" in low:
+                    return True
+
+            # если ни один вариант не дал явного ответа — не удаляем
             return True
     except Exception as e:
         logger.warning("Sweeper check failed for %s: %s", message_id, e)
@@ -732,6 +768,52 @@ async def sweeper_loop():
         except Exception as e:
             logger.error("Sweeper error: %s", e)
         await asyncio.sleep(300)  # 5 минут
+# -----------------------------------------------------------------------------
+# ON-DEMAND DELETE CHECK (при выдаче постов)
+# -----------------------------------------------------------------------------
+# Кэш, чтобы не долбить t.me на каждом запросе (проверяем пост максимум раз в 5 минут)
+_POST_EXISTS_CACHE: dict[int, tuple[bool, float]] = {}  # message_id -> (exists, ts_monotonic)
+
+
+async def ensure_posts_fresh(rows, max_check: int = 25):
+    """Перед отдачей в Mini App проверяем, что посты не удалены.
+    Если удалены — помечаем is_deleted=True и не возвращаем.
+    """
+    if not rows:
+        return rows
+
+    now_m = asyncio.get_running_loop().time()
+    to_check = []
+    for p in rows[:max_check]:
+        mid = int(p.message_id)
+        cached = _POST_EXISTS_CACHE.get(mid)
+        if cached and (now_m - cached[1]) < 300:
+            continue
+        to_check.append(mid)
+
+    if not to_check:
+        # уже всё проверено недавно
+        return [p for p in rows if not getattr(p, "is_deleted", False)]
+
+    # Проверяем последовательно (без параллели — чтобы не словить лимиты)
+    deleted_ids = []
+    for mid in to_check:
+        exists = await message_exists_public(mid)
+        _POST_EXISTS_CACHE[mid] = (exists, now_m)
+        if not exists:
+            deleted_ids.append(mid)
+
+    if deleted_ids:
+        async with async_session_maker() as session:
+            now = datetime.utcnow()
+            await session.execute(
+                update(Post)
+                .where(Post.message_id.in_(deleted_ids))
+                .values(is_deleted=True, deleted_at=now)
+            )
+            await session.commit()
+
+    return [p for p in rows if int(p.message_id) not in set(deleted_ids) and not getattr(p, "is_deleted", False)]
 
 
 # -----------------------------------------------------------------------------
