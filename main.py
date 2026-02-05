@@ -2007,6 +2007,9 @@ def get_webapp_html() -> str:
       inventory:null,
       invMsg:"",
       q:"",
+      searchResults: [],
+      searchLoading: false,
+      searchLastQ: "",
       // discoverJump: куда прокрутить на экране "Поиск" (brands/categories/products)
       discoverJump:null,
       msg:"",
@@ -2353,9 +2356,7 @@ def get_webapp_html() -> str:
       tNew.addEventListener("click",(e)=>{
         e.stopPropagation();
         haptic();
-        state.tab = "discover";
-        state.q = "";
-        state.discoverJump = "categories";
+        state.tab = "categories";
         render();
       });
       tNew.appendChild(el("div","tileTitle","📚 Категории"));
@@ -2365,9 +2366,7 @@ def get_webapp_html() -> str:
       tLux.addEventListener("click",(e)=>{
         e.stopPropagation();
         haptic();
-        state.tab = "discover";
-        state.q = "";
-        state.discoverJump = "brands";
+        state.tab = "brands";
         render();
       });
       tLux.appendChild(el("div","tileTitle","🏷️ Бренды"));
@@ -2380,9 +2379,7 @@ def get_webapp_html() -> str:
       tTrend.addEventListener("click",(e)=>{
         e.stopPropagation();
         haptic();
-        state.tab = "discover";
-        state.q = "";
-        state.discoverJump = "products";
+        state.tab = "products";
         render();
       });
       tTrend.appendChild(el("div","tileTitle","🧴 Продукты"));
@@ -2433,13 +2430,14 @@ def get_webapp_html() -> str:
       }
     }
 
-    function renderПоиск(main){
+    
+function renderПоиск(main){
       const wrap = el("div","card2");
 
       const top = el("div","row");
       const tl = el("div");
       tl.appendChild(el("div","h1","Поиск"));
-      tl.appendChild(el("div","sub","Бренды · Теги"));
+      tl.appendChild(el("div","sub","Поиск по тексту постов в канале"));
       top.appendChild(tl);
 
       const bag = el("div","pill","👜 Косметичка");
@@ -2451,81 +2449,183 @@ def get_webapp_html() -> str:
 
       const inp = document.createElement("input");
       inp.className="input";
-      inp.placeholder="Поиск брендов / тегов…";
+      inp.placeholder="Введите слово или фразу…";
       inp.value = state.q || "";
-      inp.addEventListener("input", (e)=>{ state.q = e.target.value; render(); });
+      inp.addEventListener("input", (e)=>{
+        state.q = e.target.value;
+        scheduleSearch();
+        render();
+      });
+
       const inpWrap = el("div");
       inpWrap.style.marginTop="12px";
       inpWrap.appendChild(inp);
       wrap.appendChild(inpWrap);
 
-      // Поиск: оставляем один экран (без переключателей), но показываем бренды + категории + продукты.
-      const s = (state.q||"").trim().toLowerCase();
+      const q = (state.q||"").trim();
 
-      function addSection(titleHtml, id, data, mapper){
-        const hdr = el("div");
-        hdr.id = id;
-        hdr.style.marginTop = "14px";
-        hdr.innerHTML = titleHtml;
-        wrap.appendChild(hdr);
-
-        const grid = el("div","grid");
-        grid.style.marginTop = "10px";
-        const filtered = !s ? data : data.filter(x => {
-          const a = (x[0]||"").toLowerCase();
-          const b = (x[1]||"").toLowerCase();
-          const c = (x[2]||"").toLowerCase();
-          return a.includes(s) || b.includes(s) || c.includes(s);
-        });
-        for(const item of filtered){
-          const {name, tag, sub} = mapper(item);
-          const t = el("div","tile");
-          t.addEventListener("click", ()=>{ haptic(); openPosts(tag, name); });
-          t.appendChild(el("div","tileTitle", esc(name)));
-          t.appendChild(el("div","tileSub", esc(sub || ("#"+tag))));
-          grid.appendChild(t);
+      // Стартуем поиск (асинхронно) только когда есть запрос
+      if(!q){
+        const hint = el("div","sub","Например: &laquo;консилер&raquo;, &laquo;SPF&raquo;, &laquo;Drunk Elephant&raquo; …");
+        hint.style.marginTop="12px";
+        wrap.appendChild(hint);
+      }else{
+        if(state.searchLoading){
+          const l = el("div","sub","Ищу посты…");
+          l.style.marginTop="12px";
+          wrap.appendChild(l);
+        }else if(!state.searchResults || state.searchResults.length===0){
+          const empty = el("div","sub","Ничего не найдено.");
+          empty.style.marginTop="12px";
+          wrap.appendChild(empty);
+        }else{
+          const list = el("div");
+          list.style.marginTop="12px";
+          for(const p of state.searchResults){
+            list.appendChild(PostCard({post:p, tagTitle:"Результат"}));
+          }
+          wrap.appendChild(list);
         }
-        wrap.appendChild(grid);
       }
 
-      addSection(
-        '<div style="font-size:14px;font-weight:850">🏷️ Бренды</div><div class="sub" style="margin-top:6px">Поиск по брендам и тегам</div>',
-        'sec_brands',
-        BRANDS,
-        (x)=>({name:x[0], tag:x[1], sub:x[2]})
-      );
-
-      addSection(
-        '<div style="font-size:14px;font-weight:850">📚 Категории</div><div class="sub" style="margin-top:6px">Разделы журнала</div>',
-        'sec_categories',
-        CATEGORIES,
-        (x)=>({name:x[0], tag:x[1], sub:x[2]})
-      );
-
-      addSection(
-        '<div style="font-size:14px;font-weight:850">🧴 Продукты</div><div class="sub" style="margin-top:6px">Типы продуктов</div>',
-        'sec_products',
-        PRODUCTS.map(p=>[p[0], p[1], "#"+p[1]]),
-        (x)=>({name:x[0], tag:x[1], sub:x[2]})
-      );
-
       main.appendChild(wrap);
+    }
 
-      // Плавная прокрутка к нужному разделу (кнопки на главном экране)
-      if(state.discoverJump){
-        const map = {brands:"sec_brands", categories:"sec_categories", products:"sec_products"};
-        const id = map[state.discoverJump] || null;
-        state.discoverJump = null;
-        if(id){
-          setTimeout(()=>{
-            const elx = document.getElementById(id);
-            if(elx && elx.scrollIntoView) elx.scrollIntoView({behavior:"smooth", block:"start"});
-          }, 0);
-        }
+    let searchDebounce = null;
+    function scheduleSearch(){
+      const q = (state.q||"").trim();
+      if(searchDebounce){ try{ clearTimeout(searchDebounce);}catch(e){} searchDebounce=null; }
+      if(!q){
+        state.searchResults = [];
+        state.searchLoading = false;
+        state.searchLastQ = "";
+        return;
+      }
+      searchDebounce = setTimeout(()=>{ runSearch(q); }, 250);
+    }
+
+    async function runSearch(q){
+      q = (q||"").trim();
+      if(!q) return;
+      // не делаем повторно тот же запрос
+      if(state.searchLastQ === q && Array.isArray(state.searchResults)) return;
+
+      state.searchLoading = true;
+      state.searchLastQ = q;
+      render();
+      try{
+        const arr = await apiGet("/api/search?q="+encodeURIComponent(q));
+        state.searchResults = Array.isArray(arr) ? arr : [];
+      }catch(e){
+        state.searchResults = [];
+      }finally{
+        state.searchLoading = false;
+        render();
       }
     }
 
-    function renderБонусы(main){
+
+    
+    function renderКатегории(main){
+      const wrap = el("div","card2");
+
+      const top = el("div","row");
+      const tl = el("div");
+      tl.appendChild(el("div","h1","Категории"));
+      tl.appendChild(el("div","sub","Разделы журнала"));
+      top.appendChild(tl);
+
+      const back = el("div","pill","← Назад");
+      back.style.cursor="pointer";
+      back.addEventListener("click", ()=>{ haptic(); state.tab="journal"; render(); });
+      top.appendChild(back);
+
+      wrap.appendChild(top);
+
+      const grid = el("div","grid");
+      grid.style.marginTop="12px";
+
+      const data = CATEGORIES;
+      for(const item of data){
+        const obj = ((x)=>({name:x[0], tag:x[1], sub:x[2]}))(item);
+        const t = el("div","tile");
+        t.addEventListener("click", ()=>{ haptic(); openPosts(obj.tag, obj.name); });
+        t.appendChild(el("div","tileTitle", esc(obj.name)));
+        t.appendChild(el("div","tileSub", esc(obj.sub || ("#"+obj.tag))));
+        grid.appendChild(t);
+      }
+
+      wrap.appendChild(grid);
+      main.appendChild(wrap);
+    }
+
+    function renderБренды(main){
+      const wrap = el("div","card2");
+
+      const top = el("div","row");
+      const tl = el("div");
+      tl.appendChild(el("div","h1","Бренды"));
+      tl.appendChild(el("div","sub","Все бренды и теги"));
+      top.appendChild(tl);
+
+      const back = el("div","pill","← Назад");
+      back.style.cursor="pointer";
+      back.addEventListener("click", ()=>{ haptic(); state.tab="journal"; render(); });
+      top.appendChild(back);
+
+      wrap.appendChild(top);
+
+      const grid = el("div","grid");
+      grid.style.marginTop="12px";
+
+      const data = BRANDS;
+      for(const item of data){
+        const obj = ((x)=>({name:x[0], tag:x[1], sub:x[2]}))(item);
+        const t = el("div","tile");
+        t.addEventListener("click", ()=>{ haptic(); openPosts(obj.tag, obj.name); });
+        t.appendChild(el("div","tileTitle", esc(obj.name)));
+        t.appendChild(el("div","tileSub", esc(obj.sub || ("#"+obj.tag))));
+        grid.appendChild(t);
+      }
+
+      wrap.appendChild(grid);
+      main.appendChild(wrap);
+    }
+
+    function renderПродукты(main){
+      const wrap = el("div","card2");
+
+      const top = el("div","row");
+      const tl = el("div");
+      tl.appendChild(el("div","h1","Продукты"));
+      tl.appendChild(el("div","sub","Типы продуктов"));
+      top.appendChild(tl);
+
+      const back = el("div","pill","← Назад");
+      back.style.cursor="pointer";
+      back.addEventListener("click", ()=>{ haptic(); state.tab="journal"; render(); });
+      top.appendChild(back);
+
+      wrap.appendChild(top);
+
+      const grid = el("div","grid");
+      grid.style.marginTop="12px";
+
+      const data = PRODUCTS.map(p=>[p[0], p[1], "#"+p[1]]);
+      for(const item of data){
+        const obj = ((x)=>({name:x[0], tag:x[1], sub:x[2]}))(item);
+        const t = el("div","tile");
+        t.addEventListener("click", ()=>{ haptic(); openPosts(obj.tag, obj.name); });
+        t.appendChild(el("div","tileTitle", esc(obj.name)));
+        t.appendChild(el("div","tileSub", esc(obj.sub || ("#"+obj.tag))));
+        grid.appendChild(t);
+      }
+
+      wrap.appendChild(grid);
+      main.appendChild(wrap);
+    }
+
+function renderБонусы(main){
       const wrap = el("div","card2");
       const top = el("div","row");
       const tl = el("div");
@@ -3015,6 +3115,9 @@ def get_webapp_html() -> str:
       const cont = el("div","container");
       if(state.tab==="journal") renderЖурнал(cont);
       else if(state.tab==="discover") renderПоиск(cont);
+      else if(state.tab==="categories") renderКатегории(cont);
+      else if(state.tab==="brands") renderБренды(cont);
+      else if(state.tab==="products") renderПродукты(cont);
       else if(state.tab==="rewards") renderБонусы(cont);
       else renderЖурнал(cont);
 
@@ -3159,6 +3262,50 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
             "media_url": media_url,
         })
     return out
+
+@app.get("/api/search")
+async def api_search(q: str, limit: int = 50, offset: int = 0):
+    """
+    Глобальный поиск по тексту постов (по всему каналу).
+    Возвращает те же поля, что и /api/posts.
+    """
+    q = (q or "").strip()
+    if not q:
+        return []
+
+    limit = max(1, min(int(limit), 100))
+    offset = max(0, int(offset))
+
+    # Поиск по тексту. SQLite: LIKE, Postgres: ILIKE (через func.lower для универсальности).
+    q_like = f"%{q.lower()}%"
+
+    async with async_session() as session:
+        stmt = (
+            select(Post)
+            .where(func.lower(func.coalesce(Post.text, "")).like(q_like))
+            .order_by(Post.date.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        res = await session.execute(stmt)
+        rows = res.scalars().all()
+
+    out = []
+    for p in rows:
+        media_type = (p.media_type or "").strip().lower()
+        media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else None
+
+        out.append({
+            "message_id": int(p.message_id),
+            "url": p.permalink or make_permalink(int(p.message_id)),
+            "tags": p.tags or [],
+            "preview": preview_text(p.text),
+            "media_type": media_type or None,
+            "media_url": media_url,
+        })
+    return out
+
+
 
 
 @app.get("/api/post_media/{message_id}")
