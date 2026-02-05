@@ -1494,7 +1494,12 @@ async def _telegram_runner():
         await tg_app.initialize()
         await tg_app.start()
         await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        logger.info("✅ Telegram bot started (polling)")
+        try:
+        await application.bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logger.warning(f"Webhook delete skipped: {e}")
+
+    logger.info("✅ Telegram bot started (polling)")
         while True:
             await asyncio.sleep(3600)
     except asyncio.CancelledError:
@@ -1625,7 +1630,22 @@ const hideSplash = () => {
 // Hide splash when app ready or after hard timeout
 window.addEventListener("app:ready", () => { try{ document.getElementById('root')?.classList.add('ready'); }catch(e){} hideSplash(); });
 setTimeout(hideSplash, 6500);
+    window.onerror = function(){ try{ window.dispatchEvent(new Event('app:error')); }catch(e){} return false; };
 
+
+// Splash actions
+try{
+  document.getElementById("btnReload")?.addEventListener("click", () => location.reload());
+  document.getElementById("btnClose")?.addEventListener("click", () => { try{ tg.close(); }catch(e){} });
+}catch(e){}
+
+// If boot fails, show a hint and allow user to proceed
+window.addEventListener("app:error", () => {
+  try{
+    const help = document.querySelector(".splash-help");
+    if(help) help.textContent = "Проблема загрузки. Нажми «Обновить» или попробуй позже.";
+  }catch(e){}
+});
 </script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
@@ -2124,6 +2144,45 @@ setTimeout(hideSplash, 6500);
     100% { transform: translateX(60%); }
 }
 
+/* SPLASH CONTRAST TWEAKS */
+.splash-card{
+  box-shadow:
+    0 40px 110px rgba(0,0,0,0.14),
+    0 10px 30px rgba(0,0,0,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.9);
+}
+:root .splash-sub{ letter-spacing: 1.8px; }
+.splash-sub{ font-weight: 700; }
+.loader-dotline{ color: rgba(17,17,17,0.56); }
+:root[data-theme="dark"] .loader-dotline{ color: rgba(243,242,239,0.62); }
+.splash-help{
+  margin-top: 14px;
+  font-size: 12px;
+  color: rgba(17,17,17,0.42);
+}
+:root[data-theme="dark"] .splash-help{ color: rgba(243,242,239,0.46); }
+.splash-actions{
+  margin-top: 14px;
+  display:flex;
+  gap:10px;
+  justify-content:center;
+}
+.splash-btn{
+  border: 1px solid var(--stroke);
+  background: rgba(255,255,255,0.62);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-weight: 800;
+  letter-spacing: .3px;
+  box-shadow: 0 14px 30px rgba(0,0,0,0.08);
+}
+:root[data-theme="dark"] .splash-btn{
+  background: rgba(18,22,30,0.62);
+  border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.35);
+}
+.splash-btn:active{ transform: translateY(1px); }
 </style>
 </head>
 <body>
@@ -3225,7 +3284,22 @@ const hideSplash = () => {
 // Hide splash when app ready or after hard timeout
 window.addEventListener("app:ready", () => { try{ document.getElementById('root')?.classList.add('ready'); }catch(e){} hideSplash(); });
 setTimeout(hideSplash, 6500);
+    window.onerror = function(){ try{ window.dispatchEvent(new Event('app:error')); }catch(e){} return false; };
 
+
+// Splash actions
+try{
+  document.getElementById("btnReload")?.addEventListener("click", () => location.reload());
+  document.getElementById("btnClose")?.addEventListener("click", () => { try{ tg.close(); }catch(e){} });
+}catch(e){}
+
+// If boot fails, show a hint and allow user to proceed
+window.addEventListener("app:error", () => {
+  try{
+    const help = document.querySelector(".splash-help");
+    if(help) help.textContent = "Проблема загрузки. Нажми «Обновить» или попробуй позже.";
+  }catch(e){}
+});
 </script>
 </body>
 </html>
