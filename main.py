@@ -1987,7 +1987,8 @@ def get_webapp_html() -> str:
       return n;
     }
     function tierLabel(t){
-      return ( {free:"🥉 Бронза", premium:"🥈 Серебро", vip:"🥇 Золотой VIP"}[t] ) || "🥉 Бронза";
+      // Статусы по просьбе: оставляем на английском
+      return ( {free:"🥉 Bronze", premium:"🥈 Silver", vip:"💎 Gold VIP"}[t] ) || "🥉 Bronze";
     }
 
     let postsRefreshTimer = null;
@@ -2006,7 +2007,8 @@ def get_webapp_html() -> str:
       inventory:null,
       invMsg:"",
       q:"",
-      discoverMode:"brands",
+      // discoverJump: куда прокрутить на экране "Поиск" (brands/categories/products)
+      discoverJump:null,
       msg:"",
       busy:false
     };
@@ -2347,20 +2349,44 @@ def get_webapp_html() -> str:
 
       const grid1 = el("div","grid");
       const tNew = el("div","tile");
-      tNew.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Новинка","🆕 Новинки"); });
-      tNew.appendChild(el("div","tileTitle","🆕 Новинки"));
-      tNew.appendChild(el("div","tileSub","Новые релизы и обновления"));
+      // Главный экран: Новинки -> Категории
+      tNew.addEventListener("click",(e)=>{
+        e.stopPropagation();
+        haptic();
+        state.tab = "discover";
+        state.q = "";
+        state.discoverJump = "categories";
+        render();
+      });
+      tNew.appendChild(el("div","tileTitle","📚 Категории"));
+      tNew.appendChild(el("div","tileSub","Темы и разделы журнала"));
       const tLux = el("div","tile");
-      tLux.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Люкс","💎 Люкс"); });
-      tLux.appendChild(el("div","tileTitle","💎 Люкс"));
-      tLux.appendChild(el("div","tileSub","Коротко и премиально"));
+      // Главный экран: Люкс -> Бренды
+      tLux.addEventListener("click",(e)=>{
+        e.stopPropagation();
+        haptic();
+        state.tab = "discover";
+        state.q = "";
+        state.discoverJump = "brands";
+        render();
+      });
+      tLux.appendChild(el("div","tileTitle","🏷️ Бренды"));
+      tLux.appendChild(el("div","tileSub","Все бренды и теги"));
       grid1.appendChild(tNew); grid1.appendChild(tLux);
 
       const grid2 = el("div","grid");
       const tTrend = el("div","tile");
-      tTrend.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openPosts("Тренд","🔥 Тренд"); });
-      tTrend.appendChild(el("div","tileTitle","🔥 Тренд"));
-      tTrend.appendChild(el("div","tileSub","То, что сейчас хотят все"));
+      // Главный экран: Тренд -> Типы продуктов
+      tTrend.addEventListener("click",(e)=>{
+        e.stopPropagation();
+        haptic();
+        state.tab = "discover";
+        state.q = "";
+        state.discoverJump = "products";
+        render();
+      });
+      tTrend.appendChild(el("div","tileTitle","🧴 Продукты"));
+      tTrend.appendChild(el("div","tileSub","Типы продуктов"));
       const tBag = el("div","tile");
       tBag.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openInventory(); });
       tBag.appendChild(el("div","tileTitle","👜 Косметичка"));
@@ -2413,7 +2439,7 @@ def get_webapp_html() -> str:
       const top = el("div","row");
       const tl = el("div");
       tl.appendChild(el("div","h1","Поиск"));
-      tl.appendChild(el("div","sub","Бренды · Категории · Товары"));
+      tl.appendChild(el("div","sub","Бренды · Теги"));
       top.appendChild(tl);
 
       const bag = el("div","pill","👜 Косметичка");
@@ -2433,45 +2459,70 @@ def get_webapp_html() -> str:
       inpWrap.appendChild(inp);
       wrap.appendChild(inpWrap);
 
-      const seg = el("div","seg");
-      seg.style.marginTop="12px";
-      const b1 = el("div","segBtn "+(state.discoverMode==="brands"?"segBtnActive":""),"Бренды");
-      const b2 = el("div","segBtn "+(state.discoverMode==="categories"?"segBtnActive":""),"Категории");
-      b1.addEventListener("click", ()=>{ haptic(); state.discoverMode="brands"; render(); });
-      b2.addEventListener("click", ()=>{ haptic(); state.discoverMode="categories"; render(); });
-      seg.appendChild(b1); seg.appendChild(b2);
-      wrap.appendChild(seg);
-
-      const grid = el("div","grid");
-      grid.style.marginTop="12px";
+      // Поиск: оставляем один экран (без переключателей), но показываем бренды + категории + продукты.
       const s = (state.q||"").trim().toLowerCase();
-      const data = state.discoverMode==="brands" ? BRANDS : CATEGORIES;
-      const filtered = !s ? data : data.filter(x => (x[0]||"").toLowerCase().includes(s) || (x[1]||"").toLowerCase().includes(s) || (x[2]||"").toLowerCase().includes(s));
-      for(const [name, tag, sub] of filtered){
-        const t = el("div","tile");
-        t.addEventListener("click", ()=>{ haptic(); openPosts(tag, name); });
-        t.appendChild(el("div","tileTitle", esc(name)));
-        t.appendChild(el("div","tileSub", esc(sub || ("#"+tag))));
-        grid.appendChild(t);
+
+      function addSection(titleHtml, id, data, mapper){
+        const hdr = el("div");
+        hdr.id = id;
+        hdr.style.marginTop = "14px";
+        hdr.innerHTML = titleHtml;
+        wrap.appendChild(hdr);
+
+        const grid = el("div","grid");
+        grid.style.marginTop = "10px";
+        const filtered = !s ? data : data.filter(x => {
+          const a = (x[0]||"").toLowerCase();
+          const b = (x[1]||"").toLowerCase();
+          const c = (x[2]||"").toLowerCase();
+          return a.includes(s) || b.includes(s) || c.includes(s);
+        });
+        for(const item of filtered){
+          const {name, tag, sub} = mapper(item);
+          const t = el("div","tile");
+          t.addEventListener("click", ()=>{ haptic(); openPosts(tag, name); });
+          t.appendChild(el("div","tileTitle", esc(name)));
+          t.appendChild(el("div","tileSub", esc(sub || ("#"+tag))));
+          grid.appendChild(t);
+        }
+        wrap.appendChild(grid);
       }
-      wrap.appendChild(grid);
 
-      wrap.appendChild(el("div","hr"));
+      addSection(
+        '<div style="font-size:14px;font-weight:850">🏷️ Бренды</div><div class="sub" style="margin-top:6px">Поиск по брендам и тегам</div>',
+        'sec_brands',
+        BRANDS,
+        (x)=>({name:x[0], tag:x[1], sub:x[2]})
+      );
 
-      wrap.appendChild(el("div",null,'<div style="font-size:14px;font-weight:850">🧴 Типы продуктов</div><div class="sub" style="margin-top:6px">Быстрый доступ</div>'));
+      addSection(
+        '<div style="font-size:14px;font-weight:850">📚 Категории</div><div class="sub" style="margin-top:6px">Разделы журнала</div>',
+        'sec_categories',
+        CATEGORIES,
+        (x)=>({name:x[0], tag:x[1], sub:x[2]})
+      );
 
-      const grid2 = el("div","grid");
-      grid2.style.marginTop="10px";
-      for(const [name, tag] of PRODUCTS){
-        const t = el("div","tile");
-        t.addEventListener("click", ()=>{ haptic(); openPosts(tag, name); });
-        t.appendChild(el("div","tileTitle", esc(name)));
-        t.appendChild(el("div","tileSub", "#"+esc(tag)));
-        grid2.appendChild(t);
-      }
-      wrap.appendChild(grid2);
+      addSection(
+        '<div style="font-size:14px;font-weight:850">🧴 Продукты</div><div class="sub" style="margin-top:6px">Типы продуктов</div>',
+        'sec_products',
+        PRODUCTS.map(p=>[p[0], p[1], "#"+p[1]]),
+        (x)=>({name:x[0], tag:x[1], sub:x[2]})
+      );
 
       main.appendChild(wrap);
+
+      // Плавная прокрутка к нужному разделу (кнопки на главном экране)
+      if(state.discoverJump){
+        const map = {brands:"sec_brands", categories:"sec_categories", products:"sec_products"};
+        const id = map[state.discoverJump] || null;
+        state.discoverJump = null;
+        if(id){
+          setTimeout(()=>{
+            const elx = document.getElementById(id);
+            if(elx && elx.scrollIntoView) elx.scrollIntoView({behavior:"smooth", block:"start"});
+          }, 0);
+        }
+      }
     }
 
     function renderБонусы(main){
@@ -2493,7 +2544,7 @@ def get_webapp_html() -> str:
       t1.appendChild(el("div","tileSub","Испытать удачу (2000)"));
       const t2 = el("div","tile");
       t2.addEventListener("click", ()=>{ haptic(); openПрофиль("raffle"); });
-      t2.appendChild(el("div","tileTitle","🎁 Розыгрыш"));
+      t2.appendChild(el("div","tileTitle","🎁 Розыгрыши"));
       t2.appendChild(el("div","tileSub","Билет (500)"));
       const t3 = el("div","tile");
       t3.addEventListener("click", ()=>{ haptic(); openInventory(); });
@@ -2711,7 +2762,7 @@ def get_webapp_html() -> str:
       close.addEventListener("click", ()=>{ haptic(); closeПрофиль(); });
       hdr.appendChild(close);
       content.appendChild(hdr);
-      content.appendChild(el("div","sub","Members area"));
+      content.appendChild(el("div","sub","Личный кабинет"));
 
       const info = el("div","card2");
       info.style.marginTop="12px";
@@ -2720,7 +2771,21 @@ def get_webapp_html() -> str:
           '<div style="position:absolute;top:0;right:0;padding:6px 10px;border-radius:999px;border:1px solid rgba(230,193,128,0.25);background:rgba(230,193,128,0.10);font-size:13px;font-weight:850">💎 '+esc(state.user.points)+'</div>'+
           '<div style="font-size:13px;color:var(--muted)">Привет, '+esc(state.user.first_name)+'!</div>'+
           '<div style="margin-top:6px;font-size:13px;color:var(--muted)">'+esc(tierLabel(state.user.tier))+'</div>'+
-          '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🔥 Стрик</div><div style="font-weight:800">'+esc(state.user.daily_streak||0)+' (лучший '+esc(state.user.best_streak||0)+')</div></div>'+
+          '<div style="margin-top:12px;padding:12px;border-radius:16px;border:1px solid rgba(230,193,128,0.26);background:rgba(230,193,128,0.10)">'+
+            '<div class="row" style="align-items:center">'+
+              '<div style="display:flex;gap:10px;align-items:center">'+
+                '<div style="width:34px;height:34px;border-radius:12px;display:grid;place-items:center;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.12)">🔥</div>'+
+                '<div>'+
+                  '<div style="font-size:12px;color:var(--muted)">Streak</div>'+
+                  '<div style="margin-top:2px;font-size:16px;font-weight:950">'+esc(state.user.daily_streak||0)+' дней</div>'+
+                '</div>'+
+              '</div>'+
+              '<div style="text-align:right">'+
+                '<div style="font-size:12px;color:var(--muted)">Best</div>'+
+                '<div style="margin-top:2px;font-size:14px;font-weight:900">'+esc(state.user.best_streak||0)+'</div>'+
+              '</div>'+
+            '</div>'+
+          '</div>'+
           '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🎟 Рефералы</div><div style="font-weight:800">'+esc(state.user.referral_count||0)+'</div></div>'+
         '</div>';
       content.appendChild(info);
@@ -2771,7 +2836,7 @@ def get_webapp_html() -> str:
           return b;
         }
         list.appendChild(menuBtn("👜 Моя косметичка","Призы и билеты", ()=>{ state.profileOpen=false; render(); openInventory(); }));
-        list.appendChild(menuBtn("🎁 Розыгрыш","Купить билеты (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet(); }));
+        list.appendChild(menuBtn("🎁 Розыгрыши","Купить билеты (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet(); }));
         list.appendChild(menuBtn("🎡 Рулетка","Крутить (2000)", ()=>{ state.profileView="roulette"; renderПрофильSheet(); }));
         list.appendChild(menuBtn("🧾 История рулетки","Последние спины", ()=>{ state.profileView="history"; renderПрофильSheet(); }));
         content.appendChild(list);
@@ -2787,7 +2852,7 @@ def get_webapp_html() -> str:
           const box = el("div");
           box.style.marginTop="12px";
           box.innerHTML =
-            '<div style="font-size:14px;font-weight:900">🎁 Розыгрыш</div>'+
+            '<div style="font-size:14px;font-weight:900">🎁 Розыгрыши</div>'+
             '<div class="sub" style="margin-top:6px">Билет = 500 баллов.</div>'+
             '<div class="sub" style="margin-top:8px">Ваши билеты: <b style="color:rgba(255,255,255,0.92)">'+esc((state.raffle && state.raffle.ticket_count) ? state.raffle.ticket_count : 0)+'</b></div>';
           content.appendChild(box);
