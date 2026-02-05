@@ -1493,7 +1493,7 @@ async def _telegram_runner():
     try:
         await tg_app.initialize()
         await tg_app.start()
-        await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
         logger.info("✅ Telegram bot started (polling)")
         while True:
             await asyncio.sleep(3600)
