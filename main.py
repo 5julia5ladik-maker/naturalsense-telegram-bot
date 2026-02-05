@@ -1988,7 +1988,7 @@ def get_webapp_html() -> str:
     }
     function tierLabel(t){
       // Статусы по просьбе: оставляем на английском
-      return ( {free:"🥉 Bronze", premium:"🥈 Silver", vip:"💎 Gold VIP"}[t] ) || "🥉 Bronze";
+      return ( {free:"🥉 Bronze", premium:"🥈 Silver", vip:"🥇 Gold VIP"}[t] ) || "🥉 Bronze";
     }
 
     let postsRefreshTimer = null;
@@ -2482,7 +2482,7 @@ function renderПоиск(main){
           const list = el("div");
           list.style.marginTop="12px";
           for(const p of state.searchResults){
-            list.appendChild(PostCard({post:p, tagTitle:"Результат"}));
+            list.appendChild(postCard(p, true));
           }
           wrap.appendChild(list);
         }
@@ -2871,18 +2871,18 @@ function renderБонусы(main){
           '<div style="position:absolute;top:0;right:0;padding:6px 10px;border-radius:999px;border:1px solid rgba(230,193,128,0.25);background:rgba(230,193,128,0.10);font-size:13px;font-weight:850">💎 '+esc(state.user.points)+'</div>'+
           '<div style="font-size:13px;color:var(--muted)">Привет, '+esc(state.user.first_name)+'!</div>'+
           '<div style="margin-top:6px;font-size:13px;color:var(--muted)">'+esc(tierLabel(state.user.tier))+'</div>'+
-          '<div style="margin-top:12px;padding:12px;border-radius:16px;border:1px solid rgba(230,193,128,0.26);background:rgba(230,193,128,0.10)">'+
+          '<div style="margin-top:10px;padding:10px;border-radius:14px;border:1px solid rgba(230,193,128,0.22);background:rgba(230,193,128,0.08)">'+
             '<div class="row" style="align-items:center">'+
               '<div style="display:flex;gap:10px;align-items:center">'+
-                '<div style="width:34px;height:34px;border-radius:12px;display:grid;place-items:center;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.12)">🔥</div>'+
+                '<div style="width:30px;height:30px;border-radius:10px;display:grid;place-items:center;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.12)">🔥</div>'+
                 '<div>'+
-                  '<div style="font-size:12px;color:var(--muted)">Streak</div>'+
-                  '<div style="margin-top:2px;font-size:16px;font-weight:950">'+esc(state.user.daily_streak||0)+' дней</div>'+
+                  '<div style="font-size:11px;color:var(--muted);letter-spacing:0.2px">Streak</div>'+
+                  '<div style="margin-top:2px;font-size:14px;font-weight:950">'+esc(state.user.daily_streak||0)+' дней</div>'+
                 '</div>'+
               '</div>'+
               '<div style="text-align:right">'+
-                '<div style="font-size:12px;color:var(--muted)">Best</div>'+
-                '<div style="margin-top:2px;font-size:14px;font-weight:900">'+esc(state.user.best_streak||0)+'</div>'+
+                '<div style="font-size:11px;color:var(--muted);letter-spacing:0.2px">Best</div>'+
+                '<div style="margin-top:2px;font-size:13px;font-weight:900">'+esc(state.user.best_streak||0)+'</div>'+
               '</div>'+
             '</div>'+
           '</div>'+
