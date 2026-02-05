@@ -501,6 +501,35 @@ def preview_text(text_: str | None, limit: int = 180) -> str:
 
 
 
+
+
+# -----------------------------------------------------------------------------
+# TEXT THUMB (placeholder image for text-only posts)
+# -----------------------------------------------------------------------------
+TEXT_THUMB_SVG = """<svg xmlns='http://www.w3.org/2000/svg' width='1280' height='720' viewBox='0 0 1280 720'>
+  <defs>
+    <linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
+      <stop offset='0' stop-color='#111827'/>
+      <stop offset='1' stop-color='#0b1220'/>
+    </linearGradient>
+    <radialGradient id='r' cx='0.15' cy='0.1' r='0.9'>
+      <stop offset='0' stop-color='#e6c180' stop-opacity='0.35'/>
+      <stop offset='1' stop-color='#e6c180' stop-opacity='0'/>
+    </radialGradient>
+  </defs>
+  <rect width='1280' height='720' fill='url(#g)'/>
+  <rect width='1280' height='720' fill='url(#r)'/>
+  <rect x='80' y='80' width='1120' height='560' rx='44' fill='rgba(255,255,255,0.06)' stroke='rgba(255,255,255,0.12)'/>
+  <text x='140' y='210' fill='rgba(255,255,255,0.92)' font-family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial' font-size='64' font-weight='800'>NS</text>
+  <text x='250' y='210' fill='rgba(255,255,255,0.78)' font-family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial' font-size='36' font-weight='600'>Natural Sense</text>
+
+  <text x='140' y='330' fill='rgba(255,255,255,0.92)' font-family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial' font-size='54' font-weight='700'>Текстовый пост</text>
+  <text x='140' y='410' fill='rgba(255,255,255,0.68)' font-family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial' font-size='32' font-weight='500'>Открыть →</text>
+
+  <rect x='140' y='470' width='360' height='68' rx='34' fill='rgba(230,193,128,0.18)' stroke='rgba(230,193,128,0.35)'/>
+  <text x='180' y='517' fill='rgba(255,255,255,0.9)' font-family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial' font-size='30' font-weight='700'>#TEXT</text>
+</svg>"""
+
 # -----------------------------------------------------------------------------
 # MEDIA (thumbnails for Mini App)
 # -----------------------------------------------------------------------------
@@ -3067,7 +3096,7 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     out = []
     for p in rows:
         media_type = (p.media_type or "").strip().lower()
-        media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else None
+        media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else "/api/text_thumb"
 
         out.append({
             "message_id": int(p.message_id),
@@ -3104,6 +3133,17 @@ async def api_post_media(message_id: int):
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=31536000"},
     )
+
+
+@app.get("/api/text_thumb")
+async def api_text_thumb():
+    """Плейсхолдер-картинка для текстовых постов (чтобы в Mini App были превью у всех постов)."""
+    return Response(
+        content=TEXT_THUMB_SVG.encode("utf-8"),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=31536000"},
+    )
+
 
 
 
