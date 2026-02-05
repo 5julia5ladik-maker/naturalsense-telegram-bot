@@ -2988,6 +2988,32 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     return out
 
 
+@app.get("/api/post_media/{message_id}")
+async def api_post_media(message_id: int):
+    """Возвращает картинку поста (если сохранён media_file_id)."""
+    message_id = int(message_id)
+
+    async with async_session() as session:
+        res = await session.execute(select(Post).where(Post.message_id == message_id))
+        post = res.scalar_one_or_none()
+
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    media_type = (post.media_type or "").strip().lower()
+    if media_type != "photo" or not post.media_file_id:
+        raise HTTPException(status_code=404, detail="No photo for this post")
+
+    local_path = await get_cached_media_file(post.media_file_id)
+
+    # Telegram фото может быть jpeg/webp; большинство клиентов понимают image/jpeg.
+    return FileResponse(
+        local_path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=31536000"},
+    )
+
+
 
 @app.get("/api/bot/username")
 async def api_bot_username():
