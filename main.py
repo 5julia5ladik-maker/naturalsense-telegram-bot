@@ -266,6 +266,8 @@ Index("ix_roulette_claims_tid_created", RouletteClaim.telegram_id, RouletteClaim
 # -----------------------------------------------------------------------------
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+# Backward-compatible alias (some handlers use async_session)
+async_session = async_session_maker
 
 
 async def _safe_exec(conn, sql: str):
@@ -711,38 +713,6 @@ tg_task: asyncio.Task | None = None
 sweeper_task: asyncio.Task | None = None
 
 
-
-# -----------------------------------------------------------------------------
-# ADMIN MEDIA SYNC MODE (backfill media for old posts)
-# -----------------------------------------------------------------------------
-_admin_media_sync_until: dict[int, datetime] = {}
-
-def admin_media_sync_active(user_id: int) -> bool:
-    exp = _admin_media_sync_until.get(int(user_id))
-    return bool(exp and exp > datetime.utcnow())
-
-def admin_media_sync_enable(user_id: int, minutes: int = 30) -> None:
-    _admin_media_sync_until[int(user_id)] = datetime.utcnow() + timedelta(minutes=minutes)
-
-def admin_media_sync_disable(user_id: int) -> None:
-    _admin_media_sync_until.pop(int(user_id), None)
-
-async def update_post_media_by_message_id(message_id: int, media_type: str | None, media_file_id: str | None) -> bool:
-    """Update media fields for an existing post row by its channel message_id.
-    Returns True if a row was updated.
-    """
-    if not message_id:
-        return False
-    async with async_session() as session:
-        q = (
-            update(Post)
-            .where(Post.message_id == int(message_id))
-            .values(media_type=media_type, media_file_id=media_file_id)
-        )
-        res = await session.execute(q)
-        await session.commit()
-        return (res.rowcount or 0) > 0
-
 def is_admin(user_id: int) -> bool:
     return int(user_id) == int(ADMIN_CHAT_ID)
 
@@ -1073,6 +1043,137 @@ async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # --- admin ---
+
+# -----------------------------------------------------------------------------
+# MEDIA SYNC (admin forwards posts from channel to bot)
+# -----------------------------------------------------------------------------
+SYNC_KEY = "sync_media_until"
+
+
+def _is_admin(update: Update) -> bool:
+    try:
+        return int(update.effective_user.id) == int(ADMIN_CHAT_ID)
+    except Exception:
+        return False
+
+
+def _sync_enabled(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    until = context.application.bot_data.get(SYNC_KEY)
+    if not until:
+        return False
+    try:
+        return datetime.now(timezone.utc) < until
+    except Exception:
+        return False
+
+
+async def cmd_sync_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    if not _is_admin(update):
+        await update.message.reply_text("⛔️ Только админ.")
+        return
+    context.application.bot_data[SYNC_KEY] = datetime.now(timezone.utc) + timedelta(minutes=60)
+    await update.message.reply_text(
+        "✅ Режим синхронизации медиа ВКЛ на 60 минут.\n"
+        "Теперь пересылай посты из канала обычным форвардом (со ссылкой на источник)."
+    )
+
+
+async def cmd_sync_media_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    if not _is_admin(update):
+        await update.message.reply_text("⛔️ Только админ.")
+        return
+    context.application.bot_data.pop(SYNC_KEY, None)
+    await update.message.reply_text("🛑 Режим синхронизации медиа ВЫКЛ.")
+
+
+def _extract_forward_origin_message_id(msg) -> tuple[Optional[int], Optional[str]]:
+    """Returns (origin_message_id, error_text)."""
+    # New API: forward_origin
+    try:
+        fo = getattr(msg, "forward_origin", None)
+        if fo and getattr(fo, "type", None) == "channel":
+            # PTB: MessageOriginChannel has .message_id and .chat
+            mid = getattr(fo, "message_id", None)
+            if mid:
+                return int(mid), None
+    except Exception:
+        pass
+
+    # Legacy fields
+    try:
+        fmid = getattr(msg, "forward_from_message_id", None)
+        fchat = getattr(msg, "forward_from_chat", None)
+        if fmid and fchat:
+            return int(fmid), None
+    except Exception:
+        pass
+
+    return None, (
+        "Перешли именно пост из канала обычным форвардом.\n"
+        "Важно: при пересылке НЕ выбирай 'как копию' / 'скрыть источник'."
+    )
+
+
+def _extract_media(msg) -> tuple[Optional[str], Optional[str]]:
+    """Returns (media_type, media_file_id)."""
+    if getattr(msg, "photo", None):
+        try:
+            ph = msg.photo[-1]
+            return "photo", ph.file_id
+        except Exception:
+            pass
+    if getattr(msg, "video", None):
+        try:
+            return "video", msg.video.file_id
+        except Exception:
+            pass
+    if getattr(msg, "document", None):
+        try:
+            return "document", msg.document.file_id
+        except Exception:
+            pass
+    return None, None
+
+
+async def on_sync_forward(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Accept forwarded channel posts from admin and update media_file_id in DB."""
+    msg = update.message
+    if not msg:
+        return
+    if not _is_admin(update):
+        return
+    if not _sync_enabled(context):
+        return
+
+    origin_mid, err = _extract_forward_origin_message_id(msg)
+    if not origin_mid:
+        await msg.reply_text(err)
+        return
+
+    media_type, media_file_id = _extract_media(msg)
+    if not media_file_id:
+        await msg.reply_text("⚠️ В этом форварде нет фото/видео/файла. Нужен пост с медиа.")
+        return
+
+    async with async_session() as session:
+        res = await session.execute(select(Post).where(Post.message_id == origin_mid))
+        post = res.scalar_one_or_none()
+        if not post:
+            await msg.reply_text("⚠️ Этот пост ещё не найден в базе.\nСделай edit поста в канале и повтори.")
+            return
+
+        post.media_type = media_type
+        post.media_file_id = media_file_id
+        post.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+
+    await msg.reply_text(f"✅ Обновил пост {origin_mid}: {media_type}")
+
+
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
@@ -1221,113 +1322,6 @@ async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"tier: {u.tier}",
         reply_markup=get_main_keyboard()
     )
-
-
-async def cmd_sync_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Enable media sync mode: admin forwards channel posts to bot, bot backfills media_file_id."""
-    if not update.message:
-        return
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
-        return
-
-    admin_media_sync_enable(uid, minutes=45)
-    await update.message.reply_text(
-        """🛠️ Режим синхронизации картинок ВКЛ.
-
-Что делать:
-1) Открой канал и выбери посты (лучше те, где есть фото).
-2) Перешли их СЮДА (в этот чат с ботом).
-3) Бот автоматически обновит записи в базе и добавит media_file_id.
-
-Подсказка: можно переслать 30–100 постов подряд.
-
-Выключить: /sync_media_off
-
-Автовыключение через ~45 минут."""
-        ,
-        reply_markup=get_main_keyboard(),
-    )
-
-
-async def cmd_sync_media_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔️ Нет доступа.", reply_markup=get_main_keyboard())
-        return
-    admin_media_sync_disable(uid)
-    await update.message.reply_text("✅ Режим синхронизации картинок ВЫКЛ.", reply_markup=get_main_keyboard())
-
-
-async def on_admin_forward_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle forwarded messages from admin to backfill media for old channel posts."""
-    if not update.message:
-        return
-    uid = update.effective_user.id
-    if not is_admin(uid) or not admin_media_sync_active(uid):
-        return
-
-    msg = update.message
-
-    # Telegram clients differ:
-    # - "normal forward" provides forward_from_chat + forward_from_message_id
-    # - on newer clients (often iOS) Bot API may provide forward_origin instead
-    fchat = getattr(msg, "forward_from_chat", None)
-    fmid = getattr(msg, "forward_from_message_id", None)
-
-    if (not fchat or not fmid) and getattr(msg, "forward_origin", None):
-        try:
-            fo = msg.forward_origin
-            # MessageOriginChannel: has chat + message_id
-            fchat = getattr(fo, "chat", None) or fchat
-            fmid = getattr(fo, "message_id", None) or fmid
-        except Exception:
-            pass
-
-    if not fchat or not fmid:
-        await msg.reply_text("ℹ️ Перешли именно пост из канала обычным форвардом (НЕ 'как копию' / НЕ со скрытым источником).")
-        return
-
-    # Optional: verify it's our channel by username (if available)
-    try:
-        ch_u = (getattr(fchat, "username", "") or "").lstrip("@")
-        if CHANNEL_USERNAME and ch_u and ch_u.lower() != CHANNEL_USERNAME.lower():
-            await msg.reply_text("ℹ️ Это не мой канал. Перешли пост из нужного канала.")
-            return
-    except Exception:
-        pass
-
-    media_type = None
-    media_file_id = None
-
-    if msg.photo:
-        media_type = "photo"
-        media_file_id = msg.photo[-1].file_id  # biggest size
-    elif msg.video:
-        media_type = "video"
-        media_file_id = msg.video.file_id
-    elif msg.document:
-        media_type = "document"
-        media_file_id = msg.document.file_id
-    elif msg.animation:
-        media_type = "animation"
-        media_file_id = msg.animation.file_id
-
-    if not media_file_id:
-        await msg.reply_text(f"ℹ️ В этом форварде нет медиа. message_id={fmid}")
-        return
-
-    ok = await update_post_media_by_message_id(int(fmid), media_type, media_file_id)
-    if ok:
-        await msg.reply_text(f"✅ Обновил пост {fmid}: {media_type}")
-    else:
-        await msg.reply_text(
-            f"""⚠️ Пост {fmid} не найден в базе.
-Он появится, если бот уже сохранял этот пост ранее."""
-        )
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1537,6 +1531,8 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("profile", cmd_profile))
     tg_app.add_handler(CommandHandler("myid", cmd_myid))
     tg_app.add_handler(CommandHandler("id", cmd_id))
+    tg_app.add_handler(CommandHandler("sync_media", cmd_sync_media))
+    tg_app.add_handler(CommandHandler("sync_media_off", cmd_sync_media_off))
 
     tg_app.add_handler(CommandHandler("admin", cmd_admin))
     tg_app.add_handler(CommandHandler("admin_stats", cmd_admin_stats))
@@ -1545,12 +1541,10 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
-    tg_app.add_handler(CommandHandler("sync_media", cmd_sync_media))
-    tg_app.add_handler(CommandHandler("sync_media_off", cmd_sync_media_off))
-    tg_app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, on_admin_forward_media))
-
     tg_app.add_handler(CallbackQueryHandler(on_callback))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
+    # Media sync: accept forwarded posts with media from admin (private chat)
+    tg_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.VIDEO | filters.Document.ALL), on_sync_forward))
 
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
