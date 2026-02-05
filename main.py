@@ -30,6 +30,18 @@ from telegram.ext import (
     filters,
 )
 
+# -----------------------------------------------------------------------------
+# PTB compatibility: filters.UpdateType may differ across versions
+# -----------------------------------------------------------------------------
+try:
+    CHANNEL_POST_FILTER = CHANNEL_POST_FILTER
+    EDITED_CHANNEL_POST_FILTER = EDITED_CHANNEL_POST_FILTER
+except Exception:
+    # Fallback: some PTB versions don't expose UpdateType filters
+    CHANNEL_POST_FILTER = filters.ChatType.CHANNEL
+    EDITED_CHANNEL_POST_FILTER = filters.ChatType.CHANNEL
+
+
 from sqlalchemy import (
     Column,
     Integer,
@@ -1653,12 +1665,19 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
     tg_app.add_handler(CallbackQueryHandler(on_callback))
+
+    # ✅ Channel posts indexing (важно для тегов в Mini App)
+    # Бот должен быть админом канала, иначе channel_post обновления не приходят.
+    tg_app.add_handler(MessageHandler(CHANNEL_POST_FILTER, on_channel_post))
+    tg_app.add_handler(MessageHandler(EDITED_CHANNEL_POST_FILTER, on_edited_channel_post))
+
+    # обычные сообщения от пользователей
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
     # Media sync: accept forwarded posts with media from admin (private chat)
     tg_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.VIDEO | filters.Document.ALL), on_sync_forward))
 
-    tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
-    tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
+    tg_app.add_handler(MessageHandler(CHANNEL_POST_FILTER, on_channel_post))
+    tg_app.add_handler(MessageHandler(EDITED_CHANNEL_POST_FILTER, on_edited_channel_post))
 
     tg_task = asyncio.create_task(_telegram_runner())
 
