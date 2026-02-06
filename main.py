@@ -1933,147 +1933,156 @@ def get_webapp_html() -> str:
     }
 
     /* --- Premium "Личный кабинет" card (Gold frame) --- */
-    .cabinetFrame{
-      position:relative;
-      border-radius:24px;
-      padding:14px;
-      background:
-        radial-gradient(900px 340px at 50% -10%, rgba(255,195,125,0.25), transparent 60%),
-        radial-gradient(520px 260px at 10% 18%, rgba(255,255,255,0.10), transparent 60%),
-        radial-gradient(520px 260px at 90% 22%, rgba(255,255,255,0.08), transparent 60%),
-        linear-gradient(180deg, rgba(20,20,24,0.72), rgba(10,10,12,0.72));
-      border:1px solid rgba(255,210,160,0.18);
-      box-shadow:
-        0 14px 36px rgba(0,0,0,0.48),
-        inset 0 1px 0 rgba(255,255,255,0.10),
-        inset 0 0 0 1px rgba(0,0,0,0.35);
-      overflow:hidden;
-    }
-    .cabinetFrame:before{
-      content:"";
-      position:absolute;
-      inset:0;
-      padding:2px;
-      border-radius:24px;
-      background:conic-gradient(from 180deg,
-        rgba(255,229,187,0.95),
-        rgba(202,147,78,0.55),
-        rgba(255,229,187,0.90),
-        rgba(156,104,46,0.50),
-        rgba(255,229,187,0.95)
-      );
-      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      -webkit-mask-composite: xor;
-      mask-composite: exclude;
-      opacity:0.92;
-      pointer-events:none;
-    }
-    .cabinetFrame:after{
-      content:"";
-      position:absolute;
-      inset:-40px;
-      background:
-        radial-gradient(260px 220px at 18% 28%, rgba(255,200,130,0.08), transparent 60%),
-        radial-gradient(260px 220px at 82% 32%, rgba(255,200,130,0.07), transparent 62%),
-        radial-gradient(900px 320px at 50% 100%, rgba(0,0,0,0.55), transparent 60%);
-      filter: blur(0.2px);
-      pointer-events:none;
-    }
-    .cabinetHeader{
-      position:relative;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      margin-bottom:8px;
-      color:rgba(255,235,205,0.92);
-      font-weight:950;
-      letter-spacing:0.3px;
-      font-size:14px;
-      text-shadow:0 1px 0 rgba(0,0,0,0.6);
-    }
-    .cabinetMain{
-      position:relative;
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:10px;
-    }
-    .cabinetGreet{
-      font-size:18px;
-      font-weight:950;
-      color:rgba(255,255,255,0.95);
-      text-shadow:0 1px 0 rgba(0,0,0,0.65);
-    }
-    .cabinetTier{
-      margin-top:6px;
-      font-size:13px;
-      color:rgba(255,255,255,0.72);
-      display:flex;
-      align-items:center;
-      gap:6px;
-      font-weight:800;
-    }
-    .cabinetBalanceRow{
-      position:relative;
-      margin-top:12px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-    }
-    .cabinetBalanceLabel{
-      font-size:12px;
-      color:rgba(255,255,255,0.70);
-      font-weight:800;
-      letter-spacing:0.2px;
-    }
-    .cabinetBalancePill{
-      display:flex;
-      align-items:center;
-      gap:8px;
-      padding:7px 10px;
-      border-radius:999px;
-      border:1px solid rgba(255,210,160,0.22);
-      background:linear-gradient(180deg, rgba(255,210,160,0.14), rgba(255,210,160,0.06));
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 18px rgba(0,0,0,0.35);
-      font-size:13px;
-      font-weight:950;
-      color:rgba(255,255,255,0.92);
-      white-space:nowrap;
-    }
-    .cabinetBalanceGem{
-      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.45));
-    }
-    .cabinetStats{
-      position:relative;
-      margin-top:12px;
-      display:grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap:10px;
-    }
-    .cabinetStat{
-      padding:10px 10px 9px;
-      border-radius:16px;
-      border:1px solid rgba(255,255,255,0.12);
-      background:rgba(255,255,255,0.05);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
-      min-height:54px;
-    }
-    .cabinetStatLabel{
-      font-size:11px;
-      color:rgba(255,255,255,0.62);
-      display:flex;
-      align-items:center;
-      gap:6px;
-      letter-spacing:0.2px;
-      font-weight:800;
-    }
-    .cabinetStatVal{
-      margin-top:4px;
-      font-size:14px;
-      font-weight:950;
-      color:rgba(255,255,255,0.94);
-    }
+.cabinetFrame{
+  position:relative;
+  border-radius:24px;
+  padding:14px;
+  background:
+    radial-gradient(900px 340px at 50% -18%, rgba(230,193,128,0.18), transparent 62%),
+    radial-gradient(520px 260px at 12% 18%, rgba(125,170,255,0.12), transparent 60%),
+    radial-gradient(520px 260px at 92% 22%, rgba(170,120,255,0.10), transparent 62%),
+    linear-gradient(180deg, rgba(28,34,48,0.82), rgba(12,15,22,0.82));
+  border:1px solid rgba(255,255,255,0.12);
+  box-shadow:
+    0 14px 34px rgba(0,0,0,0.40),
+    inset 0 1px 0 rgba(255,255,255,0.10),
+    inset 0 0 0 1px rgba(0,0,0,0.32);
+  overflow:hidden;
+}
+/* gold hairline frame */
+.cabinetFrame:before{
+  content:"";
+  position:absolute;
+  inset:0;
+  padding:2px;
+  border-radius:24px;
+  background:conic-gradient(from 190deg,
+    rgba(255,236,205,0.92),
+    rgba(206,160,96,0.55),
+    rgba(255,236,205,0.88),
+    rgba(170,120,64,0.52),
+    rgba(255,236,205,0.92)
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity:0.85;
+  pointer-events:none;
+}
+/* soft gloss + micro texture */
+.cabinetFrame:after{
+  content:"";
+  position:absolute;
+  inset:-60px;
+  background:
+    radial-gradient(280px 220px at 18% 28%, rgba(230,193,128,0.08), transparent 62%),
+    radial-gradient(280px 220px at 82% 30%, rgba(230,193,128,0.06), transparent 64%),
+    linear-gradient(135deg, rgba(255,255,255,0.08), transparent 38%, rgba(0,0,0,0.28)),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 7px);
+  opacity:0.75;
+  pointer-events:none;
+}
+
+.cabinetHeader{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  margin-bottom:8px;
+  color:rgba(255,255,255,0.78);
+  font-weight:900;
+  letter-spacing:0.35px;
+  font-size:13px;
+  text-shadow:0 1px 0 rgba(0,0,0,0.55);
+}
+.cabinetMain{
+  position:relative;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+}
+.cabinetGreet{
+  font-size:18px;
+  font-weight:950;
+  color:rgba(255,255,255,0.96);
+  text-shadow:0 1px 0 rgba(0,0,0,0.65);
+}
+.cabinetTier{
+  margin-top:6px;
+  font-size:13px;
+  color:rgba(255,255,255,0.72);
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-weight:850;
+}
+.cabinetBalanceRow{
+  position:relative;
+  margin-top:12px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+.cabinetBalanceLabel{
+  font-size:12px;
+  color:rgba(255,255,255,0.62);
+  font-weight:850;
+  letter-spacing:0.2px;
+}
+.cabinetBalancePill{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 10px;
+  border-radius:999px;
+  border:1px solid rgba(230,193,128,0.22);
+  background:
+    radial-gradient(220px 120px at 30% 0%, rgba(230,193,128,0.18), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 16px rgba(0,0,0,0.34);
+  font-size:13px;
+  font-weight:950;
+  color:rgba(255,255,255,0.92);
+  white-space:nowrap;
+}
+.cabinetBalanceGem{
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.45));
+}
+
+.cabinetStats{
+  position:relative;
+  margin-top:12px;
+  display:grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap:10px;
+}
+.cabinetStat{
+  padding:10px 10px 9px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,0.14);
+  background:
+    radial-gradient(260px 140px at 50% 0%, rgba(255,255,255,0.07), transparent 62%),
+    rgba(255,255,255,0.04);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+  min-height:54px;
+}
+.cabinetStatLabel{
+  font-size:11px;
+  color:rgba(255,255,255,0.60);
+  display:flex;
+  align-items:center;
+  gap:6px;
+  letter-spacing:0.2px;
+  font-weight:850;
+}
+.cabinetStatVal{
+  margin-top:4px;
+  font-size:14px;
+  font-weight:950;
+  color:rgba(255,255,255,0.95);
+}
 
 </style>
 </head>
