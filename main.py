@@ -2132,12 +2132,13 @@ def get_webapp_html() -> str:
       font-weight: 900;
       letter-spacing: 0.6px;
     }
-    .wheelPointer{position:absolute; top:-8px; left:50%; transform:translateX(-50%);
+    
+    .wheelPointer{position:absolute; top:-18px; left:50%; transform:translateX(-50%);
       width:0; height:0;
-      border-left:10px solid transparent;
-      border-right:10px solid transparent;
-      border-bottom:18px solid rgba(235,245,255,0.70);
-      filter: drop-shadow(0 8px 14px rgba(0,0,0,0.55));
+      border-left:14px solid transparent;
+      border-right:14px solid transparent;
+      border-bottom:30px solid rgba(235,245,255,0.78);
+      filter: drop-shadow(0 10px 18px rgba(0,0,0,0.60));
     }
     /* wheelPointerDot removed: pointer should be arrow only */
     .microHud{margin-top:10px; font-size:12px; color: rgba(255,255,255,0.62); text-align:center}
@@ -2505,21 +2506,32 @@ def get_webapp_html() -> str:
 
     const journalCache = {}; // tag->posts preview list
 
+    async function fetchJson(url, opts){
+      const controller = new AbortController();
+      const timeoutMs = 12000;
+      const t = setTimeout(()=>controller.abort(), timeoutMs);
+      try{
+        const r = await fetch(url, Object.assign({}, opts||{}, {signal: controller.signal, cache:"no-store"}));
+        const data = await r.json().catch(()=> ({}));
+        if(!r.ok) throw new Error(data.detail || ("HTTP "+r.status));
+        return data;
+      }catch(e){
+        if(String(e && e.name) === "AbortError") throw new Error("Таймаут сети");
+        throw e;
+      }finally{
+        clearTimeout(t);
+      }
+    }
+
     async function apiGet(url, init){
       const sep = url.includes("?") ? "&" : "?";
       const bust = "t="+Date.now();
-      const opts = Object.assign({ cache: "no-store" }, (init||{}));
-      const r = await fetch(url + sep + bust, opts);
-      if(!r.ok) throw new Error("HTTP "+r.status);
-      return r.json();
+      return fetchJson(url + sep + bust, Object.assign({method:"GET"}, (init||{})));
     }
     async function apiPost(url, body){
       const sep = url.includes("?") ? "&" : "?";
       const bust = "t="+Date.now();
-      const r = await fetch(url + sep + bust, {method:"POST", cache:"no-store", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{})});
-      const data = await r.json().catch(()=> ({}));
-      if(!r.ok) throw new Error(data.detail || ("HTTP "+r.status));
-      return data;
+      return fetchJson(url + sep + bust, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{})});
     }
 
     async function refreshUser(){
@@ -2750,7 +2762,6 @@ def get_webapp_html() -> str:
         const innerR = r*0.46; // matches .wheelCenter inset ~28%
         const labelR = (innerR + r) / 2;
         ctx.translate(0, -labelR);
-        ctx.rotate(-mid);
 
         const seg = ROULETTE_SEGMENTS[i];
         ctx.textAlign = "center";
@@ -4379,6 +4390,7 @@ class SpinResp(BaseModel):
     prize_label: str
     roll: int
     claimable: bool = False
+    claim_id: Optional[int] = None
     claim_code: Optional[str] = None
 
 
@@ -4796,7 +4808,12 @@ async def roulette_spin(req: SpinReq):
             prize_value = int(prize["value"])
             prize_label = str(prize["label"])
 
-            # выдача приза (физический приз НЕ создаёт заявку автоматически — выбор в UI)
+            # выдача приза
+            # ВАЖНО: для Dior (физический приз) создаём запись в "косметичке" сразу (claim со статусом awaiting_contact),
+            # чтобы приз появился в инвентаре сразу после выигрыша. Конвертация всё равно доступна до отправки анкеты.
+            claim_id_for_resp = None
+            claim_code_for_resp = None
+
             if prize_type == "points":
                 user.points = (user.points or 0) + prize_value
                 session.add(
@@ -4828,6 +4845,7 @@ async def roulette_spin(req: SpinReq):
                         meta={"roll": roll, "prize": "physical_dior_palette", "key": prize_key},
                     )
                 )
+                )
 
             _recalc_tier(user)
 
@@ -4848,6 +4866,32 @@ async def roulette_spin(req: SpinReq):
 
             spin_id = int(spin_row.id)
 
+            # Auto-create inventory item for Dior (physical prize) so it appears in Cosmetics Bag immediately.
+            if prize_type == "physical_dior_palette":
+                existing_claim = (
+                    await session.execute(
+                        select(RouletteClaim).where(RouletteClaim.spin_id == spin_id)
+                    )
+                ).scalar_one_or_none()
+                if existing_claim:
+                    claim_id_for_resp = int(existing_claim.id)
+                    claim_code_for_resp = str(existing_claim.claim_code)
+                else:
+                    claim_code_for_resp = generate_claim_code()
+                    claim = RouletteClaim(
+                        claim_code=claim_code_for_resp,
+                        telegram_id=tid,
+                        spin_id=spin_id,
+                        prize_type="physical_dior_palette",
+                        prize_label=prize_label,
+                        status="awaiting_contact",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    session.add(claim)
+                    await session.flush()
+                    claim_id_for_resp = int(claim.id)
+
         await session.refresh(user)
 
     return {
@@ -4860,7 +4904,8 @@ async def roulette_spin(req: SpinReq):
         "prize_label": prize_label,
         "roll": int(roll),
         "claimable": bool(prize_type == "physical_dior_palette"),
-        "claim_code": None,
+        "claim_id": claim_id_for_resp,
+        "claim_code": claim_code_for_resp,
     }
 
 
@@ -4898,11 +4943,15 @@ async def roulette_convert(req: ConvertReq):
 
             existing_claim = (
                 await session.execute(
-                    select(RouletteClaim.id).where(RouletteClaim.spin_id == spin_id)
+                    select(RouletteClaim).where(RouletteClaim.spin_id == spin_id)
                 )
             ).scalar_one_or_none()
             if existing_claim is not None:
-                raise HTTPException(status_code=400, detail="Заявка уже создана — конвертация недоступна")
+                # Разрешаем конвертацию, если заявка ещё не отправлена (draft/awaiting_contact).
+                if str(existing_claim.status) not in {"draft", "awaiting_contact"}:
+                    raise HTTPException(status_code=400, detail="Заявка уже в обработке — конвертация недоступна")
+                # удаляем "резерв" из косметички
+                await session.delete(existing_claim)
 
             # конвертация Dior -> points (фиксированная стоимость)
             user.points = int(user.points or 0) + int(DIOR_PALETTE_CONVERT_VALUE)
