@@ -1931,6 +1931,150 @@ def get_webapp_html() -> str:
       color:rgba(255,255,255,0.95);
       border:1px solid rgba(230,193,128,0.25);
     }
+
+    /* --- Premium "Личный кабинет" card (Gold frame) --- */
+    .cabinetFrame{
+      position:relative;
+      border-radius:24px;
+      padding:14px;
+      background:
+        radial-gradient(900px 340px at 50% -10%, rgba(255,195,125,0.25), transparent 60%),
+        radial-gradient(520px 260px at 10% 18%, rgba(255,255,255,0.10), transparent 60%),
+        radial-gradient(520px 260px at 90% 22%, rgba(255,255,255,0.08), transparent 60%),
+        linear-gradient(180deg, rgba(20,20,24,0.72), rgba(10,10,12,0.72));
+      border:1px solid rgba(255,210,160,0.18);
+      box-shadow:
+        0 14px 36px rgba(0,0,0,0.48),
+        inset 0 1px 0 rgba(255,255,255,0.10),
+        inset 0 0 0 1px rgba(0,0,0,0.35);
+      overflow:hidden;
+    }
+    .cabinetFrame:before{
+      content:"";
+      position:absolute;
+      inset:0;
+      padding:2px;
+      border-radius:24px;
+      background:conic-gradient(from 180deg,
+        rgba(255,229,187,0.95),
+        rgba(202,147,78,0.55),
+        rgba(255,229,187,0.90),
+        rgba(156,104,46,0.50),
+        rgba(255,229,187,0.95)
+      );
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      opacity:0.92;
+      pointer-events:none;
+    }
+    .cabinetFrame:after{
+      content:"";
+      position:absolute;
+      inset:-40px;
+      background:
+        radial-gradient(260px 220px at 18% 28%, rgba(255,200,130,0.08), transparent 60%),
+        radial-gradient(260px 220px at 82% 32%, rgba(255,200,130,0.07), transparent 62%),
+        radial-gradient(900px 320px at 50% 100%, rgba(0,0,0,0.55), transparent 60%);
+      filter: blur(0.2px);
+      pointer-events:none;
+    }
+    .cabinetHeader{
+      position:relative;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      margin-bottom:8px;
+      color:rgba(255,235,205,0.92);
+      font-weight:950;
+      letter-spacing:0.3px;
+      font-size:14px;
+      text-shadow:0 1px 0 rgba(0,0,0,0.6);
+    }
+    .cabinetMain{
+      position:relative;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .cabinetGreet{
+      font-size:18px;
+      font-weight:950;
+      color:rgba(255,255,255,0.95);
+      text-shadow:0 1px 0 rgba(0,0,0,0.65);
+    }
+    .cabinetTier{
+      margin-top:6px;
+      font-size:13px;
+      color:rgba(255,255,255,0.72);
+      display:flex;
+      align-items:center;
+      gap:6px;
+      font-weight:800;
+    }
+    .cabinetBalanceRow{
+      position:relative;
+      margin-top:12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .cabinetBalanceLabel{
+      font-size:12px;
+      color:rgba(255,255,255,0.70);
+      font-weight:800;
+      letter-spacing:0.2px;
+    }
+    .cabinetBalancePill{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:7px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,210,160,0.22);
+      background:linear-gradient(180deg, rgba(255,210,160,0.14), rgba(255,210,160,0.06));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 18px rgba(0,0,0,0.35);
+      font-size:13px;
+      font-weight:950;
+      color:rgba(255,255,255,0.92);
+      white-space:nowrap;
+    }
+    .cabinetBalanceGem{
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.45));
+    }
+    .cabinetStats{
+      position:relative;
+      margin-top:12px;
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap:10px;
+    }
+    .cabinetStat{
+      padding:10px 10px 9px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,0.12);
+      background:rgba(255,255,255,0.05);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+      min-height:54px;
+    }
+    .cabinetStatLabel{
+      font-size:11px;
+      color:rgba(255,255,255,0.62);
+      display:flex;
+      align-items:center;
+      gap:6px;
+      letter-spacing:0.2px;
+      font-weight:800;
+    }
+    .cabinetStatVal{
+      margin-top:4px;
+      font-size:14px;
+      font-weight:950;
+      color:rgba(255,255,255,0.94);
+    }
+
 </style>
 </head>
 <body>
@@ -3017,42 +3161,44 @@ function renderБонусы(main){
         return;
       }
 
-      const hdr = el("div","row"); hdr.style.alignItems="baseline";
-      hdr.appendChild(el("div","h1","👤 Профиль"));
-      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
-      close.addEventListener("click", ()=>{ haptic(); closeПрофиль(); });
-      hdr.appendChild(close);
-      content.appendChild(hdr);
-      content.appendChild(el("div","sub","Личный кабинет"));
+const hdr = el("div","row"); hdr.style.alignItems="baseline";
+hdr.appendChild(el("div","h1","👤 Профиль"));
+const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
+close.addEventListener("click", ()=>{ haptic(); closeПрофиль(); });
+hdr.appendChild(close);
+content.appendChild(hdr);
 
-      const info = el("div","card2");
-      info.style.marginTop="12px";
-      info.innerHTML =
-        '<div style="position:relative;overflow:hidden">'+
-          '<div style="position:absolute;inset:-2px;background:radial-gradient(700px 260px at 12% 0%, rgba(230,193,128,0.22), transparent 55%), radial-gradient(520px 240px at 88% 10%, rgba(255,255,255,0.12), transparent 60%);pointer-events:none"></div>'+
-          '<div style="position:relative">'+
-            '<div style="position:absolute;top:0;right:0;padding:6px 10px;border-radius:999px;border:1px solid rgba(230,193,128,0.25);background:rgba(230,193,128,0.10);font-size:13px;font-weight:900">💎 '+esc(state.user.points)+'</div>'+
-            '<div style="font-size:12px;color:rgba(255,255,255,0.72);letter-spacing:0.2px">Личный кабинет</div>'+
-            '<div style="margin-top:6px;font-size:16px;font-weight:950">Привет, '+esc(state.user.first_name)+'!</div>'+
-            '<div style="margin-top:4px;font-size:13px;color:rgba(255,255,255,0.70)">'+esc(tierLabel(state.user.tier))+'</div>'+
-
-            '<div style="margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px">'+
-              '<div style="padding:10px;border-radius:16px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06)">'+
-                '<div style="font-size:11px;color:rgba(255,255,255,0.62)">🔥 Streak</div>'+
-                '<div style="margin-top:4px;font-size:14px;font-weight:950">'+esc(state.user.daily_streak||0)+'</div>'+
-              '</div>'+
-              '<div style="padding:10px;border-radius:16px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06)">'+
-                '<div style="font-size:11px;color:rgba(255,255,255,0.62)">🏁 Best</div>'+
-                '<div style="margin-top:4px;font-size:14px;font-weight:950">'+esc(state.user.best_streak||0)+'</div>'+
-              '</div>'+
-              '<div style="padding:10px;border-radius:16px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06)">'+
-                '<div style="font-size:11px;color:rgba(255,255,255,0.62)">👥 Реф</div>'+
-                '<div style="margin-top:4px;font-size:14px;font-weight:950">'+esc(state.user.referral_count||0)+'</div>'+
-              '</div>'+
-            '</div>'+
-          '</div>'+
-        '</div>';
-      content.appendChild(info);
+const info = el("div","card2");
+info.style.marginTop="12px";
+info.innerHTML =
+  '<div class="cabinetFrame">'+
+    '<div class="cabinetHeader">Личный кабинет</div>'+
+    '<div class="cabinetMain">'+
+      '<div>'+
+        '<div class="cabinetGreet">Привет, '+esc(state.user.first_name)+'!</div>'+
+        '<div class="cabinetTier">👑 '+esc(tierLabel(state.user.tier))+'</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="cabinetBalanceRow">'+
+      '<div class="cabinetBalanceLabel">Balance</div>'+
+      '<div class="cabinetBalancePill"><span class="cabinetBalanceGem">💎</span>'+esc(state.user.points)+'</div>'+
+    '</div>'+
+    '<div class="cabinetStats">'+
+      '<div class="cabinetStat">'+
+        '<div class="cabinetStatLabel">🔥 Streak</div>'+
+        '<div class="cabinetStatVal">'+esc(state.user.daily_streak||0)+'</div>'+
+      '</div>'+
+      '<div class="cabinetStat">'+
+        '<div class="cabinetStatLabel">🏁 Best</div>'+
+        '<div class="cabinetStatVal">'+esc(state.user.best_streak||0)+'</div>'+
+      '</div>'+
+      '<div class="cabinetStat">'+
+        '<div class="cabinetStatLabel">👥 Реф</div>'+
+        '<div class="cabinetStatVal">'+esc(state.user.referral_count||0)+'</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+content.appendChild(info);
 
       content.appendChild(el("div","hr"));
 
