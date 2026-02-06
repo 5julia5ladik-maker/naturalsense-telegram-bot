@@ -2287,6 +2287,30 @@ def get_webapp_html() -> str:
       if(tg && tg.openTelegramLink) tg.openTelegramLink(url);
       else window.open(url,"_blank");
     }
+
+    async function askConfirm(title, message, okText){
+      okText = okText || "Да";
+      // Prefer native Telegram popup if available
+      if(tg && tg.showPopup){
+        return await new Promise((resolve)=>{
+          try{
+            tg.showPopup({
+              title: title || "Подтверждение",
+              message: message || "",
+              buttons: [
+                {id:"ok", type:"destructive", text: okText},
+                {id:"cancel", type:"cancel", text:"Отмена"}
+              ]
+            }, (btnId)=>{
+              resolve(btnId==="ok");
+            });
+          }catch(e){
+            resolve(window.confirm((title?title+"\\n\\n":"") + (message||"")));
+          }
+        });
+      }
+      return window.confirm((title?title+"\\n\\n":"") + (message||""));
+    }
     function esc(s){
       return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
     }
@@ -2316,7 +2340,7 @@ def get_webapp_html() -> str:
 
       rouletteRecent: [],
       rouletteWheel: {angle:0, spinning:false, mode:"idle", lastTick:-1, startedAt:0, targetKey:null, spinId:null, prize:null, overlay:false},
-      claim: {open:false, claim_id:null, claim_code:null, status:null, prize_label:null, data:null},
+      claim: {open:false, claim_id:null, claim_code:null, status:null, prize_label:null, data:null, step:1, form:{full_name:"", phone:"", country:"", city:"", address_line:"", postal_code:"", comment:""}},
       inventoryOpen:false,
       inventory:null,
       invMsg:"",
@@ -2930,6 +2954,8 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
       state.claim.claim_code = claim_code;
       state.claim.prize_label = prize_label;
       state.claim.status = "draft";
+            state.claim.step = 1;
+      state.claim.form = {full_name:"", phone:"", country:"", city:"", address_line:"", postal_code:"", comment:""};
       renderПрофильSheet();
       // load claim data
       (async ()=>{
@@ -2937,6 +2963,17 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
           const d = await apiGet("/api/roulette/claim/"+encodeURIComponent(claim_id)+"?telegram_id="+encodeURIComponent(tgUserId));
           state.claim.data = d;
           state.claim.status = d.status || "draft";
+          // hydrate form from server draft
+          state.claim.form = {
+            full_name: d.full_name || "",
+            phone: d.phone || "",
+            country: d.country || "",
+            city: d.city || "",
+            address_line: d.address_line || "",
+            postal_code: d.postal_code || "",
+            comment: d.comment || ""
+          };
+          state.claim.step = 1;
         }catch(e){}
         renderПрофильSheet();
       })();
@@ -3011,6 +3048,14 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
     async function claimFromResult(){
       const resp = state.rouletteWheel.prize;
       if(!resp || !resp.spin_id) return;
+
+      const ok = await askConfirm(
+        "Конвертировать приз?",
+        "Вы получите +50 000 баллов. После конвертации забрать приз будет нельзя.",
+        "Да, конвертировать"
+      );
+      if(!ok) return;
+
       state.busy = true; renderПрофильSheet();
       try{
         const d = await apiPost("/api/roulette/claim/create", {telegram_id: tgUserId, spin_id: resp.spin_id});
@@ -3599,54 +3644,95 @@ function renderБонусы(main){
         for(const p of prizes){
           const pc = el("div","card2");
           pc.style.border="1px solid rgba(230,193,128,0.22)";
-          pc.style.background="rgba(230,193,128,0.10)";
-          pc.appendChild(el("div",null,'<div style="font-size:14px;font-weight:950">'+esc(p.prize_label||"💎 Главный приз")+'</div>'));
-          pc.appendChild(el("div","sub",'Код: '+esc(p.claim_code)+' • Status: '+esc(p.status||"-")+'</div>'));
-          const row = el("div","row");
-          row.style.marginTop="10px";
-          row.style.gap="10px";
+          pc.style.background="rgba(230,193,128,0.08)";
+          pc.style.padding="14px";
 
-          const claim = el("div","btn");
-          claim.style.justifyContent="center";
-          claim.style.fontWeight="900";
-          claim.addEventListener("click", ()=>{
-            haptic();
-            const code = String(p.claim_code||"").trim();
-            if(!code) return;
-            if(state.botUsername && tg && tg.openTelegramLink){
-              tg.openTelegramLink("https://t.me/"+state.botUsername+"?start=claim_"+encodeURIComponent(code));
-            }else{
-              alert("/claim "+code);
-            }
-          });
-          claim.innerHTML = "🎁 Забрать";
-          const conv = el("div","btn");
-          conv.style.justifyContent="center";
-          conv.style.fontWeight="950";
-          conv.style.border="1px solid rgba(230,193,128,0.35)";
-          conv.style.background="rgba(230,193,128,0.14)";
-          conv.innerHTML = "💎 Конвертировать (+"+diorValue+")";
-          conv.addEventListener("click", async ()=>{
-            const code = String(p.claim_code||"").trim();
-            if(!code || state.busy) return;
-            state.busy=true; state.invMsg=""; renderInventorySheet();
-            try{
-              const d = await apiPost("/api/inventory/convert_prize", {telegram_id: tgUserId, claim_code: code});
-              state.invMsg = "✅ Приз превращён в бонусы: +"+d.added_points+" баллов";
-              await refreshUser();
-              state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
-              haptic("light");
-            }catch(e){
-              state.invMsg = "❌ "+(e.message||"Ошибка");
-            }finally{
-              state.busy=false;
-              renderInventorySheet();
-            }
-          });
+          const title = el("div",null,'<div style="font-size:14px;font-weight:950">'+esc(p.prize_label||"✨ Dior Palette")+'</div>');
+          pc.appendChild(title);
 
-          row.appendChild(claim);
-          row.appendChild(conv);
-          pc.appendChild(row);
+          // meta + status
+          const st = String(p.status||"draft").trim() || "draft";
+          const stMap = {
+            "draft":"Доступно",
+            "awaiting_contact":"Нужны данные",
+            "submitted":"Заявка отправлена",
+            "approved":"Подтверждено",
+            "fulfilled":"Отправлено",
+            "rejected":"Отклонено",
+            "closed":"Закрыто"
+          };
+          const stLabel = stMap[st] || st;
+
+          const meta = el("div","sub", 'Код: '+esc(p.claim_code||"-")+' • '+esc(stLabel));
+          meta.style.marginTop="6px";
+          pc.appendChild(meta);
+
+          const canAct = (st==="draft" || st==="awaiting_contact");
+
+          if(!canAct){
+            const statusPill = el("div",null,'<div style="margin-top:12px;display:inline-flex;gap:8px;align-items:center;padding:10px 12px;border-radius:999px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.10);color:rgba(255,255,255,0.88);font-weight:900;font-size:12px">🟡 '+esc(stLabel)+'</div>');
+            pc.appendChild(statusPill);
+          }else{
+            // Action zone (Variant A): primary + secondary
+            const actions = el("div");
+            actions.style.marginTop="12px";
+            actions.style.display="grid";
+            actions.style.gap="10px";
+
+            const claimBtn = el("div","btn");
+            claimBtn.style.justifyContent="center";
+            claimBtn.style.fontWeight="950";
+            claimBtn.style.border="1px solid rgba(235,245,255,0.22)";
+            claimBtn.style.background="rgba(235,245,255,0.10)";
+            claimBtn.innerHTML = '🎁 Забрать приз';
+            claimBtn.addEventListener("click", ()=>{
+              haptic();
+              const cid = p.claim_id;
+              const code = String(p.claim_code||"").trim();
+              const label = String(p.prize_label||"Приз");
+              if(cid){
+                openClaimForm(cid, code, label);
+              }else if(state.botUsername && tg && tg.openTelegramLink && code){
+                tg.openTelegramLink("https://t.me/"+state.botUsername+"?start=claim_"+encodeURIComponent(code));
+              }else{
+                alert("/claim "+code);
+              }
+            });
+
+            const convLink = el("div",null,'<div style="text-align:center;font-weight:900;font-size:12.5px;color:rgba(255,255,255,0.78);padding:10px 12px;border-radius:16px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);cursor:pointer">💎 Конвертировать • +'+esc(diorValue)+'</div>');
+            convLink.style.opacity = state.busy ? 0.6 : 1;
+            convLink.style.cursor = state.busy ? "not-allowed" : "pointer";
+            convLink.addEventListener("click", async ()=>{
+              const code = String(p.claim_code||"").trim();
+              if(!code || state.busy) return;
+
+              const ok = await askConfirm(
+                "Конвертировать приз?",
+                "Вы получите +"+diorValue+" баллов. После конвертации забрать приз будет нельзя.",
+                "Да, конвертировать"
+              );
+              if(!ok) return;
+
+              state.busy=true; state.invMsg=""; renderInventorySheet();
+              try{
+                const d = await apiPost("/api/inventory/convert_prize", {telegram_id: tgUserId, claim_code: code});
+                state.invMsg = "✅ Приз превращён в бонусы: +"+d.added_points+" баллов";
+                await refreshUser();
+                state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
+                haptic("light");
+              }catch(e){
+                state.invMsg = "❌ "+(e.message||"Ошибка");
+              }finally{
+                state.busy=false;
+                renderInventorySheet();
+              }
+            });
+
+            actions.appendChild(claimBtn);
+            actions.appendChild(convLink);
+            pc.appendChild(actions);
+          }
+
           list.appendChild(pc);
         }
         pCard.appendChild(list);
@@ -3972,7 +4058,21 @@ if(state.profileView==="roulette"){
             const form = el("div");
             form.style.marginTop="10px";
 
-            function inputRow(ph, id, val){
+            // Stepper (quiet-lux)
+            const step = Math.max(1, Math.min(3, Number(state.claim.step||1)||1));
+            const stepHdr = el("div",null,
+              '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">'+
+                '<div style="font-size:12px;color:rgba(255,255,255,0.68)">Шаг '+step+' из 3</div>'+
+                '<div style="display:flex;gap:6px">'+
+                  '<span style="width:8px;height:8px;border-radius:99px;background:'+(step>=1?'rgba(235,245,255,0.86)':'rgba(255,255,255,0.20)')+'"></span>'+
+                  '<span style="width:8px;height:8px;border-radius:99px;background:'+(step>=2?'rgba(235,245,255,0.86)':'rgba(255,255,255,0.20)')+'"></span>'+
+                  '<span style="width:8px;height:8px;border-radius:99px;background:'+(step>=3?'rgba(235,245,255,0.86)':'rgba(255,255,255,0.20)')+'"></span>'+
+                '</div>'+
+              '</div>'
+            );
+            form.appendChild(stepHdr);
+
+            function inputRow(ph, id, val, onChange){
               const inp = document.createElement("input");
               inp.id=id; inp.placeholder=ph;
               inp.value = val || "";
@@ -3984,44 +4084,109 @@ if(state.profileView==="roulette"){
               inp.style.background="rgba(255,255,255,0.04)";
               inp.style.color="rgba(255,255,255,0.92)";
               inp.style.outline="none";
+              inp.autocomplete = "off";
+              inp.addEventListener("input", ()=>{ try{ onChange && onChange(inp.value); }catch(e){} });
               return inp;
             }
 
-            const d = state.claim.data || {};
-            const in1 = inputRow("Имя и фамилия", "c_full_name", d.full_name);
-            const in2 = inputRow("Телефон", "c_phone", d.phone);
-            const in3 = inputRow("Страна", "c_country", d.country);
-            const in4 = inputRow("Город", "c_city", d.city);
-            const in5 = inputRow("Адрес", "c_address", d.address_line);
-            const in6 = inputRow("Индекс", "c_postal", d.postal_code);
-            const in7 = inputRow("Комментарий (необязательно)", "c_comment", d.comment);
+            const f = state.claim.form || (state.claim.form = {full_name:"", phone:"", country:"", city:"", address_line:"", postal_code:"", comment:""});
 
-            form.appendChild(in1); form.appendChild(in2); form.appendChild(in3); form.appendChild(in4);
-            form.appendChild(in5); form.appendChild(in6); form.appendChild(in7);
+            if(step===1){
+              form.appendChild(inputRow("Имя и фамилия", "c_full_name", f.full_name, (v)=>{ f.full_name=v; }));
+              form.appendChild(inputRow("Телефон", "c_phone", f.phone, (v)=>{ f.phone=v; }));
+            }else if(step===2){
+              form.appendChild(inputRow("Страна", "c_country", f.country, (v)=>{ f.country=v; }));
+              form.appendChild(inputRow("Город", "c_city", f.city, (v)=>{ f.city=v; }));
+            }else{
+              form.appendChild(inputRow("Адрес", "c_address", f.address_line, (v)=>{ f.address_line=v; }));
+              form.appendChild(inputRow("Индекс", "c_postal", f.postal_code, (v)=>{ f.postal_code=v; }));
+              form.appendChild(inputRow("Комментарий (необязательно)", "c_comment", f.comment, (v)=>{ f.comment=v; }));
+              const agree = document.createElement("label");
+              agree.style.display="flex";
+              agree.style.gap="10px";
+              agree.style.alignItems="flex-start";
+              agree.style.marginTop="12px";
+              agree.style.padding="12px 12px";
+              agree.style.borderRadius="14px";
+              agree.style.border="1px solid rgba(255,255,255,0.10)";
+              agree.style.background="rgba(255,255,255,0.03)";
+              agree.style.cursor="pointer";
+              agree.innerHTML = '<input id="c_agree" type="checkbox" style="margin-top:2px"> <div style="font-size:12px;color:rgba(255,255,255,0.78)"><b style="color:rgba(255,255,255,0.90)">Подтверждаю</b>, что данные указаны верно.</div>';
+              form.appendChild(agree);
+            }
 
-            const send = el("div","btn");
-            send.style.marginTop="12px";
-            send.style.opacity = state.busy ? 0.6 : 1;
-            send.style.cursor = state.busy ? "not-allowed" : "pointer";
-            send.innerHTML = '<div><div class="btnTitle">'+(state.busy?"Отправляем…":"Отправить заявку")+'</div><div class="btnSub">Подтверждение в чате</div></div><div style="opacity:0.85">›</div>';
-            send.addEventListener("click", async ()=>{
+            // Nav buttons
+            const nav = el("div","row");
+            nav.style.marginTop="12px";
+            nav.style.gap="10px";
+
+            const backStep = el("div","btn");
+            backStep.style.flex="1";
+            backStep.style.justifyContent="center";
+            backStep.style.fontWeight="900";
+            backStep.style.opacity = (step===1 || state.busy) ? 0.6 : 1;
+            backStep.style.cursor = (step===1 || state.busy) ? "not-allowed" : "pointer";
+            backStep.innerHTML = "Назад";
+            backStep.addEventListener("click", ()=>{
+              if(state.busy || step===1) return;
+              haptic();
+              state.claim.step = step-1;
+              renderПрофильSheet();
+            });
+
+            const nextStep = el("div","btn");
+            nextStep.style.flex="1";
+            nextStep.style.justifyContent="center";
+            nextStep.style.fontWeight="950";
+            nextStep.style.border="1px solid rgba(235,245,255,0.22)";
+            nextStep.style.background="rgba(235,245,255,0.10)";
+            nextStep.style.opacity = state.busy ? 0.6 : 1;
+            nextStep.style.cursor = state.busy ? "not-allowed" : "pointer";
+            nextStep.innerHTML = (step===3 ? "Отправить заявку" : "Продолжить");
+
+            nextStep.addEventListener("click", async ()=>{
               if(state.busy) return;
+
+              // simple validation per step
+              if(step===1){
+                if((f.full_name||"").trim().length < 2){ state.msg="❌ Укажи имя и фамилию."; renderПрофильSheet(); return; }
+                if((f.phone||"").trim().length < 3){ state.msg="❌ Укажи телефон."; renderПрофильSheet(); return; }
+                state.claim.step = 2; haptic("light"); renderПрофильSheet(); return;
+              }
+              if(step===2){
+                if((f.country||"").trim().length < 2){ state.msg="❌ Укажи страну."; renderПрофильSheet(); return; }
+                if((f.city||"").trim().length < 1){ state.msg="❌ Укажи город."; renderПрофильSheet(); return; }
+                state.claim.step = 3; haptic("light"); renderПрофильSheet(); return;
+              }
+
+              // step 3 submit
+              const agreeEl = document.getElementById("c_agree");
+              if(!agreeEl || !agreeEl.checked){
+                state.msg="❌ Подтверди корректность данных.";
+                renderПрофильSheet();
+                return;
+              }
+              if((f.address_line||"").trim().length < 5){ state.msg="❌ Укажи адрес."; renderПрофильSheet(); return; }
+              if((f.postal_code||"").trim().length < 2){ state.msg="❌ Укажи индекс."; renderПрофильSheet(); return; }
+
               state.busy=true; state.msg=""; renderПрофильSheet();
               try{
                 await apiPost("/api/roulette/claim/submit", {
                   telegram_id: tgUserId,
                   claim_id: state.claim.claim_id,
-                  full_name: in1.value,
-                  phone: in2.value,
-                  country: in3.value,
-                  city: in4.value,
-                  address_line: in5.value,
-                  postal_code: in6.value,
-                  comment: in7.value
+                  full_name: (f.full_name||"").trim(),
+                  phone: (f.phone||"").trim(),
+                  country: (f.country||"").trim(),
+                  city: (f.city||"").trim(),
+                  address_line: (f.address_line||"").trim(),
+                  postal_code: (f.postal_code||"").trim(),
+                  comment: (f.comment||"").trim()
                 });
                 state.claim.status = "submitted";
                 state.msg = "✅ Заявка отправлена.";
                 haptic("light");
+                // refresh inventory so buttons -> status
+                try{ state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId)); }catch(e){}
               }catch(e){
                 state.msg = "❌ "+(e.message||"Ошибка");
               }finally{
@@ -4030,13 +4195,11 @@ if(state.profileView==="roulette"){
               }
             });
 
-            const back = el("div","btn");
-            back.style.marginTop="10px";
-            back.innerHTML = '<div><div class="btnTitle">Назад</div><div class="btnSub">Вернуться</div></div><div style="opacity:0.85">›</div>';
-            back.addEventListener("click", ()=>{ state.profileView="roulette"; renderПрофильSheet(); });
+            nav.appendChild(backStep);
+            nav.appendChild(nextStep);
 
+            form.appendChild(nav);
             card.appendChild(form);
-            card.appendChild(send);
             card.appendChild(back);
             content.appendChild(card);
           }
@@ -4614,6 +4777,7 @@ async def inventory_api(telegram_id: int):
             continue
         prizes.append(
             {
+                "claim_id": int(c.id),
                 "claim_code": c.claim_code,
                 "prize_type": c.prize_type,
                 "prize_label": c.prize_label,
@@ -4714,6 +4878,10 @@ async def inventory_convert_prize(req: ConvertPrizeReq):
                 raise HTTPException(status_code=400, detail="Этот приз нельзя конвертировать")
             if (claim.status or "") == "closed":
                 raise HTTPException(status_code=400, detail="Этот приз уже закрыт")
+
+            # если заявка уже отправлена/в обработке — конвертация недоступна
+            if str(claim.status) not in {"draft", "awaiting_contact"}:
+                raise HTTPException(status_code=400, detail="Заявка уже в обработке — конвертация недоступна")
 
             added = int(DIOR_PALETTE_CONVERT_VALUE)
 
