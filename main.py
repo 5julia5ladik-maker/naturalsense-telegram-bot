@@ -501,6 +501,33 @@ def preview_text(text_: str | None, limit: int = 180) -> str:
 
 
 
+
+
+def search_snippet(text_: str | None, q: str, radius: int = 80, hard_limit: int = 260) -> str:
+    """Возвращает 'сниппет' вокруг первого совпадения (как поиск Windows)."""
+    if not text_:
+        return ""
+    s = re.sub(r"\s+", " ", text_.strip())
+    q = (q or "").strip()
+    if not q:
+        return preview_text(s, limit=min(hard_limit, 180))
+
+    try:
+        m = re.search(re.escape(q), s, flags=re.IGNORECASE)
+    except re.error:
+        m = None
+
+    if not m:
+        return preview_text(s, limit=min(hard_limit, 180))
+
+    start = max(0, m.start() - radius)
+    end = min(len(s), m.end() + radius)
+
+    pre = "…" if start > 0 else ""
+    post = "…" if end < len(s) else ""
+    sn = pre + s[start:end] + post
+
+    return (sn[:hard_limit] + "…") if len(sn) > hard_limit else sn
 # -----------------------------------------------------------------------------
 # MEDIA (thumbnails for Mini App)
 # -----------------------------------------------------------------------------
@@ -1895,7 +1922,16 @@ def get_webapp_html() -> str:
       50%{transform:translateY(-4px); opacity:.95}
     }
 
-  </style>
+  
+    /* Search highlight */
+    mark.hl{
+      padding:0 3px;
+      border-radius:6px;
+      background:rgba(230,193,128,0.22);
+      color:rgba(255,255,255,0.95);
+      border:1px solid rgba(230,193,128,0.25);
+    }
+</style>
 </head>
 <body>
   <div id="nsSplash" class="nsSplash">
@@ -2015,6 +2051,102 @@ def get_webapp_html() -> str:
       msg:"",
       busy:false
     };
+    // -------------------------------------------------------------------------
+    // SEARCH UI (fix input bug: do not recreate input on each keypress)
+    // -------------------------------------------------------------------------
+    let searchInputEl = null;
+    let searchResultsBoxEl = null;
+    let searchAbortController = null;
+
+    function setInputValuePreserveCaret(inp, v){
+      try{
+        if(document.activeElement === inp){
+          const s = inp.selectionStart, e = inp.selectionEnd;
+          inp.value = v;
+          if(typeof s === "number" && typeof e === "number"){
+            inp.setSelectionRange(s, e);
+          }
+        }else{
+          inp.value = v;
+        }
+      }catch(_){
+        inp.value = v;
+      }
+    }
+
+    function escRegExp(s){
+      return (s||"").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function makeSnippet(text, q, radius=70){
+      const t = (text||"").toString();
+      const query = (q||"").trim();
+      if(!t) return "";
+      if(!query) return t;
+      try{
+        const reQ = new RegExp(escRegExp(query), "i");
+        const m = reQ.exec(t);
+        if(!m) return t.length > (radius*2+30) ? (t.slice(0, radius*2) + "…") : t;
+        const idx = m.index;
+        const start = Math.max(0, idx - radius);
+        const end = Math.min(t.length, idx + m[0].length + radius);
+        const pre = start>0 ? "…" : "";
+        const post = end<t.length ? "…" : "";
+        return pre + t.slice(start, end) + post;
+      }catch(e){
+        return t.length > (radius*2+30) ? (t.slice(0, radius*2) + "…") : t;
+      }
+    }
+
+    function highlightHTML(text, q){
+      const t = (text||"").toString();
+      const query = (q||"").trim();
+      if(!query) return esc(t);
+      const safe = esc(t);
+      try{
+        const reQ = new RegExp(escRegExp(query), "ig");
+        return safe.replace(reQ, (m)=>'<mark class="hl">'+m+'</mark>');
+      }catch(e){
+        return safe;
+      }
+    }
+
+    function updateSearchBox(){
+      if(state.tab !== "discover") return;
+      if(!searchResultsBoxEl) return;
+
+      searchResultsBoxEl.innerHTML = "";
+      const q = (state.q||"").trim();
+
+      if(!q){
+        const hint = el("div","sub","Например: &laquo;консилер&raquo;, &laquo;SPF&raquo;, &laquo;Drunk Elephant&raquo; …");
+        hint.style.marginTop="12px";
+        searchResultsBoxEl.appendChild(hint);
+        return;
+      }
+
+      if(state.searchLoading){
+        const l = el("div","sub","Ищу посты…");
+        l.style.marginTop="12px";
+        searchResultsBoxEl.appendChild(l);
+        return;
+      }
+
+      if(!state.searchResults || state.searchResults.length===0){
+        const empty = el("div","sub","Ничего не найдено.");
+        empty.style.marginTop="12px";
+        searchResultsBoxEl.appendChild(empty);
+        return;
+      }
+
+      const list = el("div");
+      list.style.marginTop="12px";
+      for(const p of state.searchResults){
+        list.appendChild(postCard(p, true));
+      }
+      searchResultsBoxEl.appendChild(list);
+    }
+
 
     const tgUserId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
 
@@ -2096,10 +2228,11 @@ def get_webapp_html() -> str:
 
     const journalCache = {}; // tag->posts preview list
 
-    async function apiGet(url){
+    async function apiGet(url, init){
       const sep = url.includes("?") ? "&" : "?";
       const bust = "t="+Date.now();
-      const r = await fetch(url + sep + bust, { cache: "no-store" });
+      const opts = Object.assign({ cache: "no-store" }, (init||{}));
+      const r = await fetch(url + sep + bust, opts);
       if(!r.ok) throw new Error("HTTP "+r.status);
       return r.json();
     }
@@ -2292,7 +2425,15 @@ def get_webapp_html() -> str:
 
       wrap.appendChild(tw);
       wrap.appendChild(el("div","miniMeta", esc(tagTitle)+" • ID "+esc(post.message_id)));
-      wrap.appendChild(el("div","miniText", esc(post.preview || "Открыть пост →")));
+            // В поиске подсвечиваем совпадение (как Windows)
+      if(full && state.tab==="discover" && (state.q||"").trim()){
+        const sn = makeSnippet(post.preview || "", state.q, 80);
+        const t = el("div","miniText");
+        t.innerHTML = highlightHTML(sn || (post.preview||"Открыть пост →"), state.q);
+        wrap.appendChild(t);
+      }else{
+        wrap.appendChild(el("div","miniText", esc(post.preview || "Открыть пост →")));
+      }
 
       const chips = el("div","chipRow");
       const tags = Array.isArray(post.tags) ? post.tags.slice(0, full?8:4) : [];
@@ -2447,47 +2588,48 @@ function renderПоиск(main){
 
       wrap.appendChild(top);
 
-      const inp = document.createElement("input");
-      inp.className="input";
-      inp.placeholder="Введите слово или фразу…";
-      inp.value = state.q || "";
-      inp.addEventListener("input", (e)=>{
-        state.q = e.target.value;
-        scheduleSearch();
-        render();
-      });
+      if(!searchInputEl){
+        searchInputEl = document.createElement("input");
+        searchInputEl.className="input";
+        searchInputEl.placeholder="Введите слово или фразу…";
+        searchInputEl.addEventListener("input", (e)=>{
+          state.q = e.target.value;
+          scheduleSearch();
+          updateSearchBox(); // без полного render() — иначе ломается ввод
+        });
+        searchInputEl.addEventListener("keydown", (e)=>{
+          // Esc очищает
+          if(e.key === "Escape"){
+            e.preventDefault();
+            state.q = "";
+            setInputValuePreserveCaret(searchInputEl, "");
+            scheduleSearch();
+            updateSearchBox();
+          }
+          // Enter — мгновенный поиск (без debounce)
+          if(e.key === "Enter"){
+            const q = (state.q||"").trim();
+            if(q){
+              try{ if(searchDebounce){ clearTimeout(searchDebounce); } }catch(_){}
+              runSearch(q, true);
+            }
+          }
+        });
+      }
+
+      // синхронизируем значение, не сбивая каретку
+      setInputValuePreserveCaret(searchInputEl, state.q || "");
 
       const inpWrap = el("div");
       inpWrap.style.marginTop="12px";
-      inpWrap.appendChild(inp);
+      inpWrap.appendChild(searchInputEl);
       wrap.appendChild(inpWrap);
 
-      const q = (state.q||"").trim();
+      // контейнер результатов (перерисовываем только его)
+      searchResultsBoxEl = el("div");
+      wrap.appendChild(searchResultsBoxEl);
 
-      // Стартуем поиск (асинхронно) только когда есть запрос
-      if(!q){
-        const hint = el("div","sub","Например: &laquo;консилер&raquo;, &laquo;SPF&raquo;, &laquo;Drunk Elephant&raquo; …");
-        hint.style.marginTop="12px";
-        wrap.appendChild(hint);
-      }else{
-        if(state.searchLoading){
-          const l = el("div","sub","Ищу посты…");
-          l.style.marginTop="12px";
-          wrap.appendChild(l);
-        }else if(!state.searchResults || state.searchResults.length===0){
-          const empty = el("div","sub","Ничего не найдено.");
-          empty.style.marginTop="12px";
-          wrap.appendChild(empty);
-        }else{
-          const list = el("div");
-          list.style.marginTop="12px";
-          for(const p of state.searchResults){
-            list.appendChild(postCard(p, true));
-          }
-          wrap.appendChild(list);
-        }
-      }
-
+      updateSearchBox();
       main.appendChild(wrap);
     }
 
@@ -2495,32 +2637,51 @@ function renderПоиск(main){
     function scheduleSearch(){
       const q = (state.q||"").trim();
       if(searchDebounce){ try{ clearTimeout(searchDebounce);}catch(e){} searchDebounce=null; }
+
       if(!q){
+        // отменяем текущий запрос
+        if(searchAbortController){ try{ searchAbortController.abort(); }catch(_){}
+          searchAbortController = null;
+        }
         state.searchResults = [];
         state.searchLoading = false;
         state.searchLastQ = "";
+        updateSearchBox();
         return;
       }
+
       searchDebounce = setTimeout(()=>{ runSearch(q); }, 250);
     }
 
-    async function runSearch(q){
+    async function runSearch(q, force){
       q = (q||"").trim();
       if(!q) return;
+
       // не делаем повторно тот же запрос
-      if(state.searchLastQ === q && Array.isArray(state.searchResults)) return;
+      if(!force && state.searchLastQ === q && Array.isArray(state.searchResults)) return;
+
+      // отменяем предыдущий запрос
+      if(searchAbortController){ try{ searchAbortController.abort(); }catch(_){}
+        searchAbortController = null;
+      }
+      searchAbortController = new AbortController();
 
       state.searchLoading = true;
       state.searchLastQ = q;
-      render();
+      updateSearchBox();
+
       try{
-        const arr = await apiGet("/api/search?q="+encodeURIComponent(q));
+        const arr = await apiGet("/api/search?q="+encodeURIComponent(q), { signal: searchAbortController.signal });
         state.searchResults = Array.isArray(arr) ? arr : [];
       }catch(e){
+        // если отменили — тихо выходим
+        if(e && (e.name === "AbortError" || (""+e).includes("AbortError"))){
+          return;
+        }
         state.searchResults = [];
       }finally{
         state.searchLoading = false;
-        render();
+        updateSearchBox();
       }
     }
 
@@ -2867,61 +3028,36 @@ function renderБонусы(main){
       const info = el("div","card2");
       info.style.marginTop="12px";
       info.innerHTML =
-        '<div style="position:relative">'+
-          '<div style="position:absolute;top:0;right:0;padding:6px 10px;border-radius:999px;border:1px solid rgba(230,193,128,0.25);background:rgba(230,193,128,0.10);font-size:13px;font-weight:850">💎 '+esc(state.user.points)+'</div>'+
-          '<div style="font-size:13px;color:var(--muted)">Привет, '+esc(state.user.first_name)+'!</div>'+
-          '<div style="margin-top:6px;font-size:13px;color:var(--muted)">'+esc(tierLabel(state.user.tier))+'</div>'+
-          '<div style="margin-top:10px;padding:10px;border-radius:14px;border:1px solid rgba(230,193,128,0.22);background:rgba(230,193,128,0.08)">'+
-            '<div class="row" style="align-items:center">'+
-              '<div style="display:flex;gap:10px;align-items:center">'+
-                '<div style="width:30px;height:30px;border-radius:10px;display:grid;place-items:center;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.12)">🔥</div>'+
-                '<div>'+
-                  '<div style="font-size:11px;color:var(--muted);letter-spacing:0.2px">Streak</div>'+
-                  '<div style="margin-top:2px;font-size:14px;font-weight:950">'+esc(state.user.daily_streak||0)+' дней</div>'+
-                '</div>'+
+        '<div style="position:relative;overflow:hidden">'+
+          '<div style="position:absolute;inset:-2px;background:radial-gradient(700px 260px at 12% 0%, rgba(230,193,128,0.22), transparent 55%), radial-gradient(520px 240px at 88% 10%, rgba(255,255,255,0.12), transparent 60%);pointer-events:none"></div>'+
+          '<div style="position:relative">'+
+            '<div style="position:absolute;top:0;right:0;padding:6px 10px;border-radius:999px;border:1px solid rgba(230,193,128,0.25);background:rgba(230,193,128,0.10);font-size:13px;font-weight:900">💎 '+esc(state.user.points)+'</div>'+
+            '<div style="font-size:12px;color:rgba(255,255,255,0.72);letter-spacing:0.2px">Личный кабинет</div>'+
+            '<div style="margin-top:6px;font-size:16px;font-weight:950">Привет, '+esc(state.user.first_name)+'!</div>'+
+            '<div style="margin-top:4px;font-size:13px;color:rgba(255,255,255,0.70)">'+esc(tierLabel(state.user.tier))+'</div>'+
+
+            '<div style="margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px">'+
+              '<div style="padding:10px;border-radius:16px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06)">'+
+                '<div style="font-size:11px;color:rgba(255,255,255,0.62)">🔥 Streak</div>'+
+                '<div style="margin-top:4px;font-size:14px;font-weight:950">'+esc(state.user.daily_streak||0)+'</div>'+
               '</div>'+
-              '<div style="text-align:right">'+
-                '<div style="font-size:11px;color:var(--muted);letter-spacing:0.2px">Best</div>'+
-                '<div style="margin-top:2px;font-size:13px;font-weight:900">'+esc(state.user.best_streak||0)+'</div>'+
+              '<div style="padding:10px;border-radius:16px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06)">'+
+                '<div style="font-size:11px;color:rgba(255,255,255,0.62)">🏁 Best</div>'+
+                '<div style="margin-top:4px;font-size:14px;font-weight:950">'+esc(state.user.best_streak||0)+'</div>'+
+              '</div>'+
+              '<div style="padding:10px;border-radius:16px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06)">'+
+                '<div style="font-size:11px;color:rgba(255,255,255,0.62)">👥 Реф</div>'+
+                '<div style="margin-top:4px;font-size:14px;font-weight:950">'+esc(state.user.referral_count||0)+'</div>'+
               '</div>'+
             '</div>'+
           '</div>'+
-          '<div class="row" style="margin-top:10px;font-size:14px"><div style="color:var(--muted)">🎟 Рефералы</div><div style="font-weight:800">'+esc(state.user.referral_count||0)+'</div></div>'+
         '</div>';
       content.appendChild(info);
 
       content.appendChild(el("div","hr"));
 
-      // Invite link
-      content.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">👥 Рефералы</div><div class="sub" style="margin-top:6px">+20 баллов за каждого нового пользователя (1 раз).</div>'));
-      const ref = (tgUserId && state.botUsername) ? ("https://t.me/"+state.botUsername+"?start="+tgUserId) : "";
-      if(ref){
-        const box = el("div","card2");
-        box.style.marginTop="10px";
-        box.innerHTML = '<div style="font-size:12px;color:rgba(255,255,255,0.85);word-break:break-all">'+esc(ref)+'</div>';
-        content.appendChild(box);
-      }else{
-        content.appendChild(el("div","sub",'Если ссылка не показалась — задай переменную окружения <b>BOT_USERNAME</b>.'));
-      }
-      const copy = el("div","btn");
-      copy.style.marginTop="10px";
-      copy.style.opacity = ref ? 1 : 0.5;
-      copy.style.cursor = ref ? "pointer" : "not-allowed";
-      copy.innerHTML = '<div><div class="btnTitle">📎 Скопировать ссылку</div><div class="btnSub">'+esc(state.msg || "Скопировать в буфер")+'</div></div><div style="opacity:0.85">›</div>';
-      copy.addEventListener("click", async ()=>{
-        if(!ref) return;
-        try{
-          await navigator.clipboard.writeText(ref);
-          state.msg = "✅ Скопировано";
-          haptic("light");
-        }catch(e){
-          state.msg = "ℹ️ Не удалось скопировать";
-        }
-        renderПрофильSheet();
-      });
-      content.appendChild(copy);
+      // Menu / views
 
-      content.appendChild(el("div","hr"));
 
       // Menu / views
       if(state.profileView==="menu"){
@@ -2935,7 +3071,8 @@ function renderБонусы(main){
           b.addEventListener("click", ()=>{ haptic(); onClick(); });
           return b;
         }
-        list.appendChild(menuBtn("👜 Моя косметичка","Призы и билеты", ()=>{ state.profileOpen=false; render(); openInventory(); }));
+                list.appendChild(menuBtn("👥 Рефералы","Ссылка и бонус +20", ()=>{ state.profileView="referrals"; state.msg=""; renderПрофильSheet(); }));
+list.appendChild(menuBtn("👜 Моя косметичка","Призы и билеты", ()=>{ state.profileOpen=false; render(); openInventory(); }));
         list.appendChild(menuBtn("🎁 Розыгрыши","Купить билеты (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet(); }));
         list.appendChild(menuBtn("🎡 Рулетка","Крутить (2000)", ()=>{ state.profileView="roulette"; renderПрофильSheet(); }));
         list.appendChild(menuBtn("🧾 История рулетки","Последние спины", ()=>{ state.profileView="history"; renderПрофильSheet(); }));
@@ -2948,7 +3085,50 @@ function renderБонусы(main){
         back.addEventListener("click", ()=>{ haptic(); state.profileView="menu"; state.msg=""; renderПрофильSheet(); });
         content.appendChild(back);
 
-        if(state.profileView==="raffle"){
+                if(state.profileView==="referrals"){
+          const box = el("div");
+          box.style.marginTop="12px";
+          box.innerHTML =
+            '<div style="font-size:14px;font-weight:950">👥 Рефералы</div>'+
+            '<div class="sub" style="margin-top:6px">+20 баллов за каждого нового пользователя (1 раз).</div>';
+          content.appendChild(box);
+
+          const ref = (tgUserId && state.botUsername) ? ("https://t.me/"+state.botUsername+"?start="+tgUserId) : "";
+          if(ref){
+            const linkBox = el("div","card2");
+            linkBox.style.marginTop="10px";
+            linkBox.innerHTML = '<div style="font-size:12px;color:rgba(255,255,255,0.85);word-break:break-all">'+esc(ref)+'</div>';
+            content.appendChild(linkBox);
+          }else{
+            content.appendChild(el("div","sub",'Если ссылка не показалась — задай переменную окружения <b>BOT_USERNAME</b>.'));
+          }
+
+          const copy = el("div","btn");
+          copy.style.marginTop="10px";
+          copy.style.opacity = ref ? 1 : 0.5;
+          copy.style.cursor = ref ? "pointer" : "not-allowed";
+          copy.innerHTML = '<div><div class="btnTitle">📎 Скопировать ссылку</div><div class="btnSub">'+esc(state.msg || "Скопировать в буфер")+'</div></div><div style="opacity:0.85">›</div>';
+          copy.addEventListener("click", async ()=>{
+            if(!ref) return;
+            try{
+              await navigator.clipboard.writeText(ref);
+              state.msg = "✅ Скопировано";
+              haptic("light");
+            }catch(e){
+              state.msg = "ℹ️ Не удалось скопировать";
+            }
+            renderПрофильSheet();
+          });
+          content.appendChild(copy);
+
+          if(state.msg && state.msg.startsWith("ℹ️")){
+            const m = el("div","card2", esc(state.msg));
+            m.style.marginTop="12px";
+            content.appendChild(m);
+          }
+        }
+
+if(state.profileView==="raffle"){
           const box = el("div");
           box.style.marginTop="12px";
           box.innerHTML =
@@ -3299,7 +3479,7 @@ async def api_search(q: str, limit: int = 50, offset: int = 0):
             "message_id": int(p.message_id),
             "url": p.permalink or make_permalink(int(p.message_id)),
             "tags": p.tags or [],
-            "preview": preview_text(p.text),
+            "preview": search_snippet(p.text, q),
             "media_type": media_type or None,
             "media_url": media_url,
         })
