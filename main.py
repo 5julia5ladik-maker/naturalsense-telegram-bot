@@ -3351,131 +3351,73 @@ function renderПоиск(main){
         const obj = ((x)=>({name:x[0], tag:x[1], sub:x[2]}))(item);
         const t = el("div","tile");
         t.addEventListener("click", ()=>{ haptic(); openPosts(obj.tag, obj.name); });
-        t.appendChild(el("div","tileTitle", esc(obj.nam
-        if(state.profileView==="roulette"){
-          const wrap = el("div","rouletteWrap");
+        t.appendChild(el("div","tileTitle", esc(obj.name)));
+        t.appendChild(el("div","tileSub", esc(obj.sub || ("#"+obj.tag))));
+        grid.appendChild(t);
+      }
 
-          const title = el("div");
-          title.style.marginTop="12px";
-          title.innerHTML =
-            '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
-            '<div class="sub" style="margin-top:6px">Крутить = 2000 баллов.</div>';
-          wrap.appendChild(title);
+      wrap.appendChild(grid);
+      main.appendChild(wrap);
+    }
 
-          const stage = el("div","wheelStage");
+    function renderПродукты(main){
+      const wrap = el("div","card2");
 
-          const wheelBox = el("div","wheelBox");
-          const canvas = document.createElement("canvas");
-          canvas.id = "wheelCanvas";
-          canvas.className = "wheelCanvas";
-          wheelBox.appendChild(canvas);
+      const top = el("div","row");
+      const tl = el("div");
+      tl.appendChild(el("div","h1","Продукты"));
+      tl.appendChild(el("div","sub","Типы продуктов"));
+      top.appendChild(tl);
 
-          const pointer = el("div","wheelPointer");
-          const dot = el("div","wheelPointerDot");
-          wheelBox.appendChild(pointer);
-          wheelBox.appendChild(dot);
+      const back = el("div","pill","← Назад");
+      back.style.cursor="pointer";
+      back.addEventListener("click", ()=>{ haptic(); state.tab="journal"; render(); });
+      top.appendChild(back);
 
-          const center = el("div","wheelCenter","NS");
-          wheelBox.appendChild(center);
+      wrap.appendChild(top);
 
-          stage.appendChild(wheelBox);
+      const grid = el("div","grid");
+      grid.style.marginTop="12px";
 
-          const micro = el("div","microHud",
-            "Баланс: "+esc(String(state.user?.points||0))+" 💎   •   Стоимость: 2000 💎"
-          );
-          stage.appendChild(micro);
+      const data = PRODUCTS.map(p=>[p[0], p[1], "#"+p[1]]);
+      for(const item of data){
+        const obj = ((x)=>({name:x[0], tag:x[1], sub:x[2]}))(item);
+        const t = el("div","tile");
+        t.addEventListener("click", ()=>{ haptic(); openPosts(obj.tag, obj.name); });
+        t.appendChild(el("div","tileTitle", esc(obj.name)));
+        t.appendChild(el("div","tileSub", esc(obj.sub || ("#"+obj.tag))));
+        grid.appendChild(t);
+      }
 
-          // ticker
-          const ticker = el("div","ticker");
-          ticker.style.cursor = "pointer";
-          ticker.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet(); });
-          const recent = (state.rouletteRecent||[]).map(x=>x.prize_label).filter(Boolean);
-          const tickerText = "Последние выигрыши: "+(recent.length?recent.join(" • "):"—");
-          const tt = el("div","tickerText", esc(tickerText));
-          tt.id = "rouletteTickerText";
-          ticker.appendChild(tt);
-          stage.appendChild(ticker);
+      wrap.appendChild(grid);
+      main.appendChild(wrap);
+    }
 
-          // chips
-          const chips = el("div","chipsRow");
-          (state.rouletteHistory||[]).slice(0,10).forEach(it=>{
-            const c = el("div","chip", esc((it.prize_label||"").replace("баллов","").trim() || "приз"));
-            c.style.cursor="pointer";
-            c.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet(); });
-            chips.appendChild(c);
-          });
-          stage.appendChild(chips);
+function renderБонусы(main){
+      const wrap = el("div","card2");
+      const top = el("div","row");
+      const tl = el("div");
+      tl.appendChild(el("div","h1","Бонусы"));
+      tl.appendChild(el("div","sub","Рулетка · Билеты · Косметичка"));
+      top.appendChild(tl);
+      if(state.user) top.appendChild(el("div","pill","💎 "+esc(state.user.points)+" баллов"));
+      wrap.appendChild(top);
 
-          wrap.appendChild(stage);
+      const grid = el("div","grid");
+      grid.style.marginTop="12px";
 
-          // CTA
-          const can = (state.user?.points||0) >= 2000 && !state.busy;
-          const b = el("div","btn");
-          b.style.marginTop="14px";
-          b.style.opacity = (can || state.busy) ? 1 : 0.55;
-          b.style.cursor = (can && !state.busy) ? "pointer" : "not-allowed";
-          b.innerHTML =
-            '<div><div class="btnTitle">'+(state.busy?"Крутим…":"Крутить")+
-            '</div><div class="btnSub">'+(state.busy?"":"−2000 💎")+'</div></div><div style="opacity:0.85">›</div>';
-          b.addEventListener("click", ()=>{ if(can && !state.busy){ spinRouletteLux(); } });
-          wrap.appendChild(b);
-
-          content.appendChild(wrap);
-
-          // draw wheel now
-          setTimeout(()=>{
-            drawWheel(document.getElementById("wheelCanvas"), state.rouletteWheel.angle||0);
-            startTicker();
-          }, 0);
-
-          // Result overlay + sheet
-          const prize = state.rouletteWheel.prize;
-          const overlay = el("div","resultSheetOverlay"+(state.rouletteWheel.overlay?" on":""));
-          overlay.addEventListener("click", ()=>{ closeResultSheet(); });
-          document.body.appendChild(overlay);
-
-          const sheet = el("div","resultSheet"+(prize?" on":""));
-          const card = el("div","resultCard");
-          if(prize){
-            const isDior = (prize.prize_key==="dior_palette");
-            card.appendChild(el("div","resultTitle", isDior ? "Главный приз" : "Выпало:"));
-            card.appendChild(el("div","resultValue", esc(prize.prize_label)));
-            card.appendChild(el("div","resultSub", isDior ? "Оформи получение или конвертируй в баллы." : "Готово."));
-            const btns = el("div","resultBtns");
-
-            if(isDior){
-              const b1 = document.createElement("button");
-              b1.className="btnPrimary";
-              b1.textContent = state.busy ? "Подожди…" : "Забрать";
-              b1.disabled = !!state.busy;
-              b1.addEventListener("click", ()=>{ if(!state.busy){ claimFromResult(); } });
-
-              const b2 = document.createElement("button");
-              b2.className="btnGhost";
-              b2.textContent = state.busy ? "Подожди…" : "Конвертировать";
-              b2.disabled = !!state.busy;
-              b2.addEventListener("click", ()=>{ if(!state.busy){ convertFromResult(); } });
-
-              btns.appendChild(b1);
-              btns.appendChild(b2);
-            }else{
-              const ok = document.createElement("button");
-              ok.className="btnPrimary";
-              ok.textContent = "Ок";
-              ok.addEventListener("click", ()=>{ closeResultSheet(); });
-              btns.appendChild(ok);
-            }
-
-            card.appendChild(btns);
-          }
-          sheet.appendChild(card);
-          document.body.appendChild(sheet);
-
-          // cleanup on next render
-          state._cleanup = state._cleanup || [];
-          state._cleanup.push(()=>{ try{ overlay.remove(); sheet.remove(); }catch(e){} });
-        }
-tileSub","Призы и билеты"));
+      const t1 = el("div","tile");
+      t1.addEventListener("click", ()=>{ haptic(); openПрофиль("roulette"); });
+      t1.appendChild(el("div","tileTitle","🎡 Рулетка"));
+      t1.appendChild(el("div","tileSub","Испытать удачу (2000)"));
+      const t2 = el("div","tile");
+      t2.addEventListener("click", ()=>{ haptic(); openПрофиль("raffle"); });
+      t2.appendChild(el("div","tileTitle","🎁 Розыгрыши"));
+      t2.appendChild(el("div","tileSub","Билет (500)"));
+      const t3 = el("div","tile");
+      t3.addEventListener("click", ()=>{ haptic(); openInventory(); });
+      t3.appendChild(el("div","tileTitle","👜 Косметичка"));
+      t3.appendChild(el("div","tileSub","Призы и билеты"));
       const t4 = el("div","tile");
       t4.addEventListener("click", ()=>{ haptic(); openPosts("Challenge","💎 Челленджи"); });
       t4.appendChild(el("div","tileTitle","💎 Челленджи"));
@@ -3825,63 +3767,130 @@ if(state.profileView==="raffle"){
           }
         }
 
-        if(state.profileView==="roulette"){
-          const box = el("div");
-          box.style.marginTop="12px";
-          box.innerHTML =
-            '<div style="font-size:14px;font-weight:900">🎡 Рулетка</div>'+
+if(state.profileView==="roulette"){
+          const wrap = el("div","rouletteWrap");
+
+          const title = el("div");
+          title.style.marginTop="12px";
+          title.innerHTML =
+            '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
             '<div class="sub" style="margin-top:6px">Крутить = 2000 баллов.</div>';
-          content.appendChild(box);
+          wrap.appendChild(title);
 
-          const can = (state.user.points||0) >= 2000 && !state.busy;
+          const stage = el("div","wheelStage");
+
+          const wheelBox = el("div","wheelBox");
+          const canvas = document.createElement("canvas");
+          canvas.id = "wheelCanvas";
+          canvas.className = "wheelCanvas";
+          wheelBox.appendChild(canvas);
+
+          const pointer = el("div","wheelPointer");
+          const dot = el("div","wheelPointerDot");
+          wheelBox.appendChild(pointer);
+          wheelBox.appendChild(dot);
+
+          const center = el("div","wheelCenter","NS");
+          wheelBox.appendChild(center);
+
+          stage.appendChild(wheelBox);
+
+          const micro = el("div","microHud",
+            "Баланс: "+esc(String(state.user?.points||0))+" 💎   •   Стоимость: 2000 💎"
+          );
+          stage.appendChild(micro);
+
+          // ticker
+          const ticker = el("div","ticker");
+          ticker.style.cursor = "pointer";
+          ticker.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet(); });
+          const recent = (state.rouletteRecent||[]).map(x=>x.prize_label).filter(Boolean);
+          const tickerText = "Последние выигрыши: "+(recent.length?recent.join(" • "):"—");
+          const tt = el("div","tickerText", esc(tickerText));
+          tt.id = "rouletteTickerText";
+          ticker.appendChild(tt);
+          stage.appendChild(ticker);
+
+          // chips
+          const chips = el("div","chipsRow");
+          (state.rouletteHistory||[]).slice(0,10).forEach(it=>{
+            const c = el("div","chip", esc((it.prize_label||"").replace("баллов","").trim() || "приз"));
+            c.style.cursor="pointer";
+            c.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet(); });
+            chips.appendChild(c);
+          });
+          stage.appendChild(chips);
+
+          wrap.appendChild(stage);
+
+          // CTA
+          const can = (state.user?.points||0) >= 2000 && !state.busy;
           const b = el("div","btn");
-          b.style.marginTop="10px";
-          b.style.opacity = can ? 1 : 0.5;
-          b.style.cursor = can ? "pointer" : "not-allowed";
-          b.innerHTML = '<div><div class="btnTitle">🎡 Крутить</div><div class="btnSub">'+(state.busy?"Подожди…":"Испытать удачу")+'</div></div><div style="opacity:0.85">›</div>';
-          b.addEventListener("click", ()=>{ if(can){ spinRoulette(); } });
-          content.appendChild(b);
+          b.style.marginTop="14px";
+          b.style.opacity = (can || state.busy) ? 1 : 0.55;
+          b.style.cursor = (can && !state.busy) ? "pointer" : "not-allowed";
+          b.innerHTML =
+            '<div><div class="btnTitle">'+(state.busy?"Крутим…":"Крутить")+
+            '</div><div class="btnSub">'+(state.busy?"":"−2000 💎")+'</div></div><div style="opacity:0.85">›</div>';
+          b.addEventListener("click", ()=>{ if(can && !state.busy){ spinRouletteLux(); } });
+          wrap.appendChild(b);
 
-          // Prize table compact
-          const table = el("div");
-          table.style.marginTop="10px";
-          table.innerHTML = '<div class="sub">Шансы рулетки (честно):</div>';
-          const list = el("div");
-          list.style.marginTop="10px";
-          list.style.display="grid";
-          list.style.gap="8px";
-          const rows = [
-            ["50%","+500"],["35%","+1000"],["15%","+1500"],["10%","+2000"],["5%","🎟 +1 билет"],["3.5%","+3000"],["1.5%","💎 главный приз"]
-          ];
-          for(const [p,t] of rows){
-            const r = el("div");
-            r.style.padding="10px";
-            r.style.borderRadius="14px";
-            r.style.border="1px solid var(--stroke)";
-            r.style.background="rgba(255,255,255,0.08)";
-            r.style.display="flex";
-            r.style.justifyContent="space-between";
-            r.style.fontSize="14px";
-            r.innerHTML = '<div style="color:var(--muted)">'+esc(p)+'</div><div style="font-weight:700">'+esc(t)+'</div>';
-            list.appendChild(r);
-          }
-          table.appendChild(list);
-          const lim = el("div");
-          lim.style.marginTop="10px";
-          lim.style.fontSize="12px";
-          lim.style.color="var(--muted)";
-          lim.textContent = "Лимит: 1 спин / 5с (тест)";
-          table.appendChild(lim);
-          content.appendChild(table);
+          content.appendChild(wrap);
 
-          if(state.msg){
-            const m = el("div","card2", esc(state.msg));
-            m.style.marginTop="12px";
-            content.appendChild(m);
+          // draw wheel now
+          setTimeout(()=>{
+            drawWheel(document.getElementById("wheelCanvas"), state.rouletteWheel.angle||0);
+            startTicker();
+          }, 0);
+
+          // Result overlay + sheet
+          const prize = state.rouletteWheel.prize;
+          const overlay = el("div","resultSheetOverlay"+(state.rouletteWheel.overlay?" on":""));
+          overlay.addEventListener("click", ()=>{ closeResultSheet(); });
+          document.body.appendChild(overlay);
+
+          const sheet = el("div","resultSheet"+(prize?" on":""));
+          const card = el("div","resultCard");
+          if(prize){
+            const isDior = (prize.prize_key==="dior_palette");
+            card.appendChild(el("div","resultTitle", isDior ? "Главный приз" : "Выпало:"));
+            card.appendChild(el("div","resultValue", esc(prize.prize_label)));
+            card.appendChild(el("div","resultSub", isDior ? "Оформи получение или конвертируй в баллы." : "Готово."));
+            const btns = el("div","resultBtns");
+
+            if(isDior){
+              const b1 = document.createElement("button");
+              b1.className="btnPrimary";
+              b1.textContent = state.busy ? "Подожди…" : "Забрать";
+              b1.disabled = !!state.busy;
+              b1.addEventListener("click", ()=>{ if(!state.busy){ claimFromResult(); } });
+
+              const b2 = document.createElement("button");
+              b2.className="btnGhost";
+              b2.textContent = state.busy ? "Подожди…" : "Конвертировать";
+              b2.disabled = !!state.busy;
+              b2.addEventListener("click", ()=>{ if(!state.busy){ convertFromResult(); } });
+
+              btns.appendChild(b1);
+              btns.appendChild(b2);
+            }else{
+              const ok = document.createElement("button");
+              ok.className="btnPrimary";
+              ok.textContent = "Ок";
+              ok.addEventListener("click", ()=>{ closeResultSheet(); });
+              btns.appendChild(ok);
+            }
+
+            card.appendChild(btns);
           }
+          sheet.appendChild(card);
+          document.body.appendChild(sheet);
+
+          // cleanup on next render
+          state._cleanup = state._cleanup || [];
+          state._cleanup.push(()=>{ try{ overlay.remove(); sheet.remove(); }catch(e){} });
         }
 
-        
         if(state.profileView==="claim"){
           const box = el("div");
           box.style.marginTop="12px";
