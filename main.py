@@ -125,13 +125,13 @@ PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
 
 # per 1_000_000
 ROULETTE_DISTRIBUTION: list[dict[str, Any]] = [
-    {"weight": 416_667, "type": "points", "value": 500, "label": "+500 баллов"},
-    {"weight": 291_667, "type": "points", "value": 1000, "label": "+1000 баллов"},
-    {"weight": 125_000, "type": "points", "value": 1500, "label": "+1500 баллов"},
-    {"weight": 83_333, "type": "points", "value": 2000, "label": "+2000 баллов"},
-    {"weight": 41_667, "type": "raffle_ticket", "value": 1, "label": "🎟 +1 билет"},
-    {"weight": 29_166, "type": "points", "value": 3000, "label": "+3000 баллов"},
-    {"weight": 12_500, "type": "physical_dior_palette", "value": 1, "label": "💎 главный приз"},
+    {"weight": 416_667, "key": "points_500", "type": "points", "value": 500, "label": "+500 баллов"},
+    {"weight": 291_667, "key": "points_1000", "type": "points", "value": 1000, "label": "+1000 баллов"},
+    {"weight": 125_000, "key": "points_1500", "type": "points", "value": 1500, "label": "+1500 баллов"},
+    {"weight": 83_333,  "key": "points_2000", "type": "points", "value": 2000, "label": "+2000 баллов"},
+    {"weight": 41_667,  "key": "ticket_1",   "type": "raffle_ticket", "value": 1, "label": "🎟 +1 билет"},
+    {"weight": 29_166,  "key": "points_3000", "type": "points", "value": 3000, "label": "+3000 баллов"},
+    {"weight": 12_500,  "key": "dior_palette", "type": "physical_dior_palette", "value": 1, "label": "✨ Dior Palette"},
 ]
 ROULETTE_TOTAL = sum(x["weight"] for x in ROULETTE_DISTRIBUTION)
 if ROULETTE_TOTAL != 1_000_000:
@@ -237,6 +237,10 @@ class RouletteSpin(Base):
     prize_value = Column(Integer, nullable=False)
     prize_label = Column(String, nullable=False)
 
+    resolution = Column(String, default="pending", nullable=False)  # pending|converted|claim
+    resolved_at = Column(DateTime, nullable=True)
+    resolved_meta = Column(JSON, nullable=True)
+
 
 Index("ix_roulette_spins_tid_created", RouletteSpin.telegram_id, RouletteSpin.created_at)
 
@@ -252,8 +256,16 @@ class RouletteClaim(Base):
     prize_type = Column(String, nullable=False)
     prize_label = Column(String, nullable=False)
 
-    status = Column(String, default="awaiting_contact", nullable=False)  # awaiting_contact|submitted|closed
+    status = Column(String, default="draft", nullable=False)  # draft|submitted|approved|rejected|fulfilled
     contact_text = Column(String, nullable=True)
+
+    full_name = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    country = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    address_line = Column(String, nullable=True)
+    postal_code = Column(String, nullable=True)
+    comment = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
@@ -312,6 +324,20 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN referred_by TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE posts ALTER COLUMN message_id TYPE BIGINT;")
+
+        # roulette (LUX wheel + claims)
+        await _safe_exec(conn, "ALTER TABLE roulette_spins ADD COLUMN IF NOT EXISTS resolution VARCHAR NOT NULL DEFAULT 'pending';")
+        await _safe_exec(conn, "ALTER TABLE roulette_spins ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP NULL;")
+        await _safe_exec(conn, "ALTER TABLE roulette_spins ADD COLUMN IF NOT EXISTS resolved_meta JSON NULL;")
+
+        await _safe_exec(conn, "ALTER TABLE roulette_claims ADD COLUMN IF NOT EXISTS full_name VARCHAR NULL;")
+        await _safe_exec(conn, "ALTER TABLE roulette_claims ADD COLUMN IF NOT EXISTS phone VARCHAR NULL;")
+        await _safe_exec(conn, "ALTER TABLE roulette_claims ADD COLUMN IF NOT EXISTS country VARCHAR NULL;")
+        await _safe_exec(conn, "ALTER TABLE roulette_claims ADD COLUMN IF NOT EXISTS city VARCHAR NULL;")
+        await _safe_exec(conn, "ALTER TABLE roulette_claims ADD COLUMN IF NOT EXISTS address_line VARCHAR NULL;")
+        await _safe_exec(conn, "ALTER TABLE roulette_claims ADD COLUMN IF NOT EXISTS postal_code VARCHAR NULL;")
+        await _safe_exec(conn, "ALTER TABLE roulette_claims ADD COLUMN IF NOT EXISTS comment VARCHAR NULL;")
+
 
     async with async_session_maker() as session:
         await ensure_default_raffle(session)
@@ -2083,6 +2109,86 @@ def get_webapp_html() -> str:
 }
 
 
+
+    /* ------------------ ROULETTE LUX (Obsidian Glass) ------------------ */
+    .rouletteWrap{margin-top:12px}
+    .wheelStage{display:flex;flex-direction:column;align-items:center;gap:10px}
+    .wheelBox{position:relative; width:min(78vw, 360px); aspect-ratio: 1 / 1; border-radius:999px;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 42%, rgba(0,0,0,0.0) 70%),
+                  rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.10);
+      box-shadow: 0 18px 40px rgba(0,0,0,0.55);
+      overflow:hidden;
+    }
+    .wheelCanvas{width:100%; height:100%; display:block}
+    .wheelCenter{position:absolute; inset:28%; border-radius:999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 10px 22px rgba(0,0,0,0.35);
+      display:flex; align-items:center; justify-content:center;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color: rgba(255,255,255,0.92);
+      font-weight: 900;
+      letter-spacing: 0.6px;
+    }
+    .wheelPointer{position:absolute; top:-8px; left:50%; transform:translateX(-50%);
+      width:0; height:0;
+      border-left:10px solid transparent;
+      border-right:10px solid transparent;
+      border-bottom:18px solid rgba(235,245,255,0.70);
+      filter: drop-shadow(0 8px 14px rgba(0,0,0,0.55));
+    }
+    .wheelPointerDot{position:absolute; top:10px; left:50%; transform:translateX(-50%);
+      width:10px; height:10px; border-radius:99px;
+      background: rgba(255,255,255,0.82);
+      box-shadow: 0 8px 14px rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.20);
+    }
+    .microHud{margin-top:10px; font-size:12px; color: rgba(255,255,255,0.62); text-align:center}
+    .ticker{margin-top:10px; height:32px; width:100%;
+      border-radius:14px; padding:0 12px;
+      display:flex; align-items:center;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.10);
+      overflow:hidden;
+    }
+    .tickerText{white-space:nowrap; will-change:transform; color: rgba(255,255,255,0.70); font-size:12px}
+    .chipsRow{margin-top:10px; display:flex; gap:8px; overflow:auto; padding-bottom:2px}
+    .chip{flex:0 0 auto; padding:9px 12px; border-radius:16px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: rgba(255,255,255,0.86);
+      font-size:12px;
+    }
+    .resultSheetOverlay{position:fixed; inset:0; background: rgba(0,0,0,0.0); pointer-events:none; transition:background 180ms ease}
+    .resultSheetOverlay.on{background: rgba(0,0,0,0.22); pointer-events:auto}
+    .resultSheet{position:fixed; left:0; right:0; bottom:-420px; padding:16px; transition:bottom 260ms cubic-bezier(.2,.9,.2,1);
+      z-index: 50;
+    }
+    .resultSheet.on{bottom:0}
+    .resultCard{max-width:520px; margin:0 auto; border-radius:22px; padding:14px 14px 12px 14px;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+    .resultTitle{font-weight:900; font-size:13px; color: rgba(255,255,255,0.92)}
+    .resultValue{margin-top:8px; font-weight:1000; font-size:22px; letter-spacing:0.4px; color: rgba(255,255,255,0.96)}
+    .resultSub{margin-top:6px; font-size:12px; color: rgba(255,255,255,0.62)}
+    .resultBtns{display:flex; gap:10px; margin-top:12px}
+    .btnGhost{flex:1; padding:12px 14px; border-radius:18px; border:1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.92); font-weight:900; text-align:center;
+      cursor:pointer;
+    }
+    .btnGhost[disabled]{opacity:0.55; cursor:not-allowed}
+    .btnPrimary{flex:1; padding:12px 14px; border-radius:18px; border:1px solid rgba(235,245,255,0.22);
+      background: rgba(235,245,255,0.10); color: rgba(255,255,255,0.96); font-weight:900; text-align:center;
+      cursor:pointer;
+    }
+    .sparkle{position:absolute; inset:0; pointer-events:none}
+
 </style>
 </head>
 <body>
@@ -2191,6 +2297,10 @@ def get_webapp_html() -> str:
       profileView:"menu",
       raffle:null,
       rouletteHistory:[],
+
+      rouletteRecent: [],
+      rouletteWheel: {angle:0, spinning:false, mode:"idle", lastTick:-1, startedAt:0, targetKey:null, spinId:null, prize:null, overlay:false},
+      claim: {open:false, claim_id:null, claim_code:null, status:null, prize_label:null, data:null},
       inventoryOpen:false,
       inventory:null,
       invMsg:"",
@@ -2498,7 +2608,7 @@ def get_webapp_html() -> str:
       state.profileOpen = true;
       state.profileView = view || "menu";
       render();
-      await Promise.all([loadRaffleStatus(), loadRouletteHistory()]);
+      await Promise.all([loadRaffleStatus(), loadRouletteHistory(), loadRouletteRecent()]);
       render();
     }
     function closeПрофиль(){
@@ -2545,6 +2655,351 @@ def get_webapp_html() -> str:
         state.busy = false;
         render();
       }
+    }
+
+
+    // ------------------ ROULETTE LUX (Obsidian Glass) ------------------
+    const ROULETTE_SEGMENTS = [
+      {key:"points_500", icon:"💎", text:"+500"},
+      {key:"points_1000", icon:"💎", text:"+1000"},
+      {key:"points_1500", icon:"💎", text:"+1500"},
+      {key:"points_2000", icon:"💎", text:"+2000"},
+      {key:"ticket_1", icon:"🎟", text:"+1"},
+      {key:"points_3000", icon:"💎", text:"+3000"},
+      {key:"dior_palette", icon:"✨", text:"Dior"},
+    ];
+    const SEG_N = ROULETTE_SEGMENTS.length;
+    const SEG_ANGLE = (Math.PI*2)/SEG_N;
+
+    let _wheelRaf = null;
+    let _tickerRaf = null;
+
+    function wheelIndexAtPointer(angle){
+      // angle: rotation applied to wheel (radians). Segments start at -PI/2.
+      // pointer is fixed at -PI/2. We want segment whose center aligns with pointer.
+      let a = (-(angle) % (Math.PI*2) + (Math.PI*2)) % (Math.PI*2);
+      // shift by half segment so boundaries map correctly
+      let idx = Math.floor((a + SEG_ANGLE/2) / SEG_ANGLE) % SEG_N;
+      return idx;
+    }
+
+    function keyToIndex(key){
+      const i = ROULETTE_SEGMENTS.findIndex(s=>s.key===key);
+      return i>=0?i:0;
+    }
+
+    function drawWheel(canvas, angle){
+      if(!canvas) return;
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const w = Math.max(10, Math.floor(rect.width*dpr));
+      const h = Math.max(10, Math.floor(rect.height*dpr));
+      if(canvas.width!==w || canvas.height!==h){
+        canvas.width = w; canvas.height = h;
+      }
+      const ctx = canvas.getContext("2d");
+      if(!ctx) return;
+      ctx.clearRect(0,0,w,h);
+      const cx = w/2, cy = h/2;
+      const r = Math.min(w,h)*0.48;
+
+      ctx.save();
+      ctx.translate(cx,cy);
+      ctx.rotate(angle);
+
+      // segments
+      for(let i=0;i<SEG_N;i++){
+        const start = -Math.PI/2 + i*SEG_ANGLE;
+        const end = start + SEG_ANGLE;
+
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.arc(0,0,r,start,end,false);
+        ctx.closePath();
+
+        const isAlt = (i%2===0);
+        ctx.fillStyle = isAlt ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.085)";
+        ctx.fill();
+
+        // divider
+        ctx.strokeStyle = "rgba(255,255,255,0.10)";
+        ctx.lineWidth = Math.max(1, Math.floor(1*dpr));
+        ctx.stroke();
+
+        // text/icon
+        const mid = (start+end)/2;
+        ctx.save();
+        ctx.rotate(mid);
+        ctx.translate(0, -r*0.67);
+        ctx.rotate(-mid);
+
+        const seg = ROULETTE_SEGMENTS[i];
+        // icon
+        ctx.font = `900 ${Math.floor(16*dpr)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+        ctx.textAlign="center"; ctx.textBaseline="middle";
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.fillText(seg.icon, 0, -Math.floor(10*dpr));
+
+        // label
+        ctx.font = `900 ${Math.floor(12*dpr)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+        ctx.fillStyle = "rgba(255,255,255,0.82)";
+        ctx.fillText(seg.text, 0, Math.floor(12*dpr));
+
+        // Dior subtle aura (draw tiny underline)
+        if(seg.key==="dior_palette"){
+          ctx.fillStyle = "rgba(220,235,255,0.20)";
+          ctx.fillRect(-Math.floor(18*dpr), Math.floor(22*dpr), Math.floor(36*dpr), Math.floor(2*dpr));
+        }
+
+        ctx.restore();
+      }
+
+      // rim highlight
+      ctx.beginPath();
+      ctx.arc(0,0,r,0,Math.PI*2);
+      ctx.strokeStyle = "rgba(235,245,255,0.16)";
+      ctx.lineWidth = Math.max(1, Math.floor(2*dpr));
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
+    function easeInOut(t){ return t<0.5 ? 2*t*t : 1 - Math.pow(-2*t+2,2)/2; }
+
+    function stopWheelRaf(){
+      if(_wheelRaf){ cancelAnimationFrame(_wheelRaf); _wheelRaf=null; }
+    }
+
+    function startFreeSpin(){
+      const w = state.rouletteWheel;
+      w.spinning = true;
+      w.mode = "free";
+      w.startedAt = Date.now();
+      w.lastTick = -1;
+      let lastTs = performance.now();
+      let vel = 0; // rad/sec
+      const accelDur = 700; // ms
+      const targetVel = 14.5; // rad/sec (fast)
+      function frame(ts){
+        const dt = Math.max(0, (ts-lastTs)/1000);
+        lastTs = ts;
+        const elapsed = Date.now() - w.startedAt;
+        if(elapsed < accelDur){
+          const p = elapsed/accelDur;
+          vel = targetVel * easeOutCubic(p);
+        }else{
+          vel = targetVel;
+        }
+        w.angle += vel*dt;
+
+        // tick
+        const idx = wheelIndexAtPointer(w.angle);
+        if(idx !== w.lastTick){
+          w.lastTick = idx;
+          haptic("light");
+        }
+
+        const canvas = document.getElementById("wheelCanvas");
+        drawWheel(canvas, w.angle);
+        _wheelRaf = requestAnimationFrame(frame);
+      }
+      stopWheelRaf();
+      _wheelRaf = requestAnimationFrame(frame);
+    }
+
+    function animateToAngle(finalAngle, durationMs, onDone){
+      const w = state.rouletteWheel;
+      const startAngle = w.angle;
+      const delta = finalAngle - startAngle;
+      const t0 = performance.now();
+      function frame(ts){
+        const p = Math.min(1, (ts-t0)/durationMs);
+        const e = (p<0.5) ? easeInOut(p) : easeOutCubic(p);
+        w.angle = startAngle + delta*e;
+
+        const idx = wheelIndexAtPointer(w.angle);
+        if(idx !== w.lastTick){
+          w.lastTick = idx;
+          haptic("light");
+        }
+
+        const canvas = document.getElementById("wheelCanvas");
+        drawWheel(canvas, w.angle);
+        if(p<1){
+          _wheelRaf = requestAnimationFrame(frame);
+        }else{
+          w.spinning = false;
+          w.mode = "idle";
+          stopWheelRaf();
+          if(onDone) onDone();
+        }
+      }
+      stopWheelRaf();
+      _wheelRaf = requestAnimationFrame(frame);
+    }
+
+    async function loadRouletteRecent(){
+      try{
+        const arr = await apiGet("/api/roulette/recent_wins?limit=12");
+        state.rouletteRecent = Array.isArray(arr) ? arr : [];
+      }catch(e){
+        state.rouletteRecent = [];
+      }
+    }
+
+    function startTicker(){
+      // simple ticker transform loop
+      if(_tickerRaf) cancelAnimationFrame(_tickerRaf);
+      const elTxt = document.getElementById("rouletteTickerText");
+      if(!elTxt) return;
+      let x = 0;
+      let last = performance.now();
+      function frame(ts){
+        const dt = (ts-last)/1000; last=ts;
+        const speed = 18; // px/sec
+        x -= speed*dt;
+        const w = elTxt.scrollWidth;
+        if(w>0 && Math.abs(x) > w) x = elTxt.parentElement ? elTxt.parentElement.clientWidth : 0;
+        elTxt.style.transform = "translateX("+x+"px)";
+        _tickerRaf = requestAnimationFrame(frame);
+      }
+      _tickerRaf = requestAnimationFrame(frame);
+    }
+
+    function openClaimForm(claim_id, claim_code, prize_label){
+      state.profileView = "claim";
+      state.claim.open = true;
+      state.claim.claim_id = claim_id;
+      state.claim.claim_code = claim_code;
+      state.claim.prize_label = prize_label;
+      state.claim.status = "draft";
+      renderПрофильSheet();
+      // load claim data
+      (async ()=>{
+        try{
+          const d = await apiGet("/api/roulette/claim/"+encodeURIComponent(claim_id)+"?telegram_id="+encodeURIComponent(tgUserId));
+          state.claim.data = d;
+          state.claim.status = d.status || "draft";
+        }catch(e){}
+        renderПрофильSheet();
+      })();
+    }
+
+    async function spinRouletteLux(){
+      if(!tgUserId || state.busy) return;
+      state.busy = true; state.msg=""; state.rouletteWheel.overlay=false;
+      renderПрофильSheet();
+
+      // start animation instantly
+      startFreeSpin();
+      const started = Date.now();
+      let resp = null, err = null;
+      try{
+        resp = await apiPost("/api/roulette/spin", {telegram_id: tgUserId});
+      }catch(e){ err = e; }
+
+      // ensure minimum spin time
+      const minTime = 900;
+      const elapsed = Date.now()-started;
+      if(elapsed < minTime){
+        await new Promise(r=>setTimeout(r, minTime-elapsed));
+      }
+
+      if(err || !resp){
+        stopWheelRaf();
+        state.busy=false;
+        state.msg = "❌ "+(err && err.message ? err.message : "Ошибка");
+        renderПрофильSheet();
+        return;
+      }
+
+      // compute final angle for target
+      const key = resp.prize_key || "";
+      const idx = keyToIndex(key);
+      const fullTurns = 3 + Math.floor(Math.random()*3); // 3..5
+      const targetCenter = (-Math.PI/2) + idx*SEG_ANGLE + SEG_ANGLE/2;
+
+      // We rotate wheel by angle; segment center must align with pointer (-PI/2).
+      // With our drawing, angle rotates the whole wheel. To put targetCenter at pointer, need angle = -idx*SEG_ANGLE (approx).
+      // We'll compute as: finalAngle = currentAngle + 2PI*turns + offset such that pointer index=idx.
+      let base = state.rouletteWheel.angle;
+      // find angle where wheelIndexAtPointer(angle)==idx and close to base
+      let desired = -idx*SEG_ANGLE; // good approximation
+      // normalize desired near base
+      const twoPi = Math.PI*2;
+      while(desired < base) desired += twoPi;
+      // add turns
+      let finalAngle = desired + twoPi*fullTurns;
+
+      // near-miss (rare, only if not dior)
+      if(key !== "dior_palette" && Math.random() < 0.10){
+        const sign = Math.random()<0.5 ? -1 : 1;
+        finalAngle += sign * (Math.PI/180) * (2 + Math.random()*2); // 2..4 deg
+        state.msg = "Очень близко.";
+      }
+
+      state.rouletteWheel.spinId = resp.spin_id;
+      state.rouletteWheel.targetKey = key;
+      state.rouletteWheel.prize = resp;
+
+      // decel animation
+      animateToAngle(finalAngle, 1850, async ()=>{
+        // show result sheet
+        state.busy = false;
+        state.rouletteWheel.overlay = (key==="dior_palette");
+        // refresh user / history / recent
+        await Promise.all([refreshUser(), loadRaffleStatus(), loadRouletteHistory(), loadRouletteRecent()]);
+        renderПрофильSheet();
+        // popup light
+        try{
+          if(tg && tg.HapticFeedback && key==="dior_palette"){
+            tg.HapticFeedback.notificationOccurred("success");
+          }
+        }catch(e){}
+      });
+    }
+
+    async function claimFromResult(){
+      const resp = state.rouletteWheel.prize;
+      if(!resp || !resp.spin_id) return;
+      state.busy = true; renderПрофильSheet();
+      try{
+        const d = await apiPost("/api/roulette/claim/create", {telegram_id: tgUserId, spin_id: resp.spin_id});
+        haptic("medium");
+        state.busy = false;
+        openClaimForm(d.claim_id, d.claim_code, resp.prize_label);
+      }catch(e){
+        state.busy = false;
+        state.msg = "❌ "+(e.message||"Ошибка");
+        renderПрофильSheet();
+      }
+    }
+
+    async function convertFromResult(){
+      const resp = state.rouletteWheel.prize;
+      if(!resp || !resp.spin_id) return;
+      state.busy = true; renderПрофильSheet();
+      try{
+        const d = await apiPost("/api/roulette/convert", {telegram_id: tgUserId, spin_id: resp.spin_id});
+        state.msg = "✅ Конвертировано: +"+d.converted_value;
+        haptic("light");
+        await Promise.all([refreshUser(), loadRaffleStatus(), loadRouletteHistory()]);
+      }catch(e){
+        state.msg = "❌ "+(e.message||"Ошибка");
+      }finally{
+        state.busy = false;
+        // close result
+        state.rouletteWheel.prize = null;
+        state.rouletteWheel.overlay = false;
+        renderПрофильSheet();
+      }
+    }
+
+    function closeResultSheet(){
+      state.rouletteWheel.prize = null;
+      state.rouletteWheel.overlay = false;
+      renderПрофильSheet();
     }
 
     // Rendering helpers
@@ -2896,73 +3351,131 @@ function renderПоиск(main){
         const obj = ((x)=>({name:x[0], tag:x[1], sub:x[2]}))(item);
         const t = el("div","tile");
         t.addEventListener("click", ()=>{ haptic(); openPosts(obj.tag, obj.name); });
-        t.appendChild(el("div","tileTitle", esc(obj.name)));
-        t.appendChild(el("div","tileSub", esc(obj.sub || ("#"+obj.tag))));
-        grid.appendChild(t);
-      }
+        t.appendChild(el("div","tileTitle", esc(obj.nam
+        if(state.profileView==="roulette"){
+          const wrap = el("div","rouletteWrap");
 
-      wrap.appendChild(grid);
-      main.appendChild(wrap);
-    }
+          const title = el("div");
+          title.style.marginTop="12px";
+          title.innerHTML =
+            '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
+            '<div class="sub" style="margin-top:6px">Крутить = 2000 баллов.</div>';
+          wrap.appendChild(title);
 
-    function renderПродукты(main){
-      const wrap = el("div","card2");
+          const stage = el("div","wheelStage");
 
-      const top = el("div","row");
-      const tl = el("div");
-      tl.appendChild(el("div","h1","Продукты"));
-      tl.appendChild(el("div","sub","Типы продуктов"));
-      top.appendChild(tl);
+          const wheelBox = el("div","wheelBox");
+          const canvas = document.createElement("canvas");
+          canvas.id = "wheelCanvas";
+          canvas.className = "wheelCanvas";
+          wheelBox.appendChild(canvas);
 
-      const back = el("div","pill","← Назад");
-      back.style.cursor="pointer";
-      back.addEventListener("click", ()=>{ haptic(); state.tab="journal"; render(); });
-      top.appendChild(back);
+          const pointer = el("div","wheelPointer");
+          const dot = el("div","wheelPointerDot");
+          wheelBox.appendChild(pointer);
+          wheelBox.appendChild(dot);
 
-      wrap.appendChild(top);
+          const center = el("div","wheelCenter","NS");
+          wheelBox.appendChild(center);
 
-      const grid = el("div","grid");
-      grid.style.marginTop="12px";
+          stage.appendChild(wheelBox);
 
-      const data = PRODUCTS.map(p=>[p[0], p[1], "#"+p[1]]);
-      for(const item of data){
-        const obj = ((x)=>({name:x[0], tag:x[1], sub:x[2]}))(item);
-        const t = el("div","tile");
-        t.addEventListener("click", ()=>{ haptic(); openPosts(obj.tag, obj.name); });
-        t.appendChild(el("div","tileTitle", esc(obj.name)));
-        t.appendChild(el("div","tileSub", esc(obj.sub || ("#"+obj.tag))));
-        grid.appendChild(t);
-      }
+          const micro = el("div","microHud",
+            "Баланс: "+esc(String(state.user?.points||0))+" 💎   •   Стоимость: 2000 💎"
+          );
+          stage.appendChild(micro);
 
-      wrap.appendChild(grid);
-      main.appendChild(wrap);
-    }
+          // ticker
+          const ticker = el("div","ticker");
+          ticker.style.cursor = "pointer";
+          ticker.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet(); });
+          const recent = (state.rouletteRecent||[]).map(x=>x.prize_label).filter(Boolean);
+          const tickerText = "Последние выигрыши: "+(recent.length?recent.join(" • "):"—");
+          const tt = el("div","tickerText", esc(tickerText));
+          tt.id = "rouletteTickerText";
+          ticker.appendChild(tt);
+          stage.appendChild(ticker);
 
-function renderБонусы(main){
-      const wrap = el("div","card2");
-      const top = el("div","row");
-      const tl = el("div");
-      tl.appendChild(el("div","h1","Бонусы"));
-      tl.appendChild(el("div","sub","Рулетка · Билеты · Косметичка"));
-      top.appendChild(tl);
-      if(state.user) top.appendChild(el("div","pill","💎 "+esc(state.user.points)+" баллов"));
-      wrap.appendChild(top);
+          // chips
+          const chips = el("div","chipsRow");
+          (state.rouletteHistory||[]).slice(0,10).forEach(it=>{
+            const c = el("div","chip", esc((it.prize_label||"").replace("баллов","").trim() || "приз"));
+            c.style.cursor="pointer";
+            c.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet(); });
+            chips.appendChild(c);
+          });
+          stage.appendChild(chips);
 
-      const grid = el("div","grid");
-      grid.style.marginTop="12px";
+          wrap.appendChild(stage);
 
-      const t1 = el("div","tile");
-      t1.addEventListener("click", ()=>{ haptic(); openПрофиль("roulette"); });
-      t1.appendChild(el("div","tileTitle","🎡 Рулетка"));
-      t1.appendChild(el("div","tileSub","Испытать удачу (2000)"));
-      const t2 = el("div","tile");
-      t2.addEventListener("click", ()=>{ haptic(); openПрофиль("raffle"); });
-      t2.appendChild(el("div","tileTitle","🎁 Розыгрыши"));
-      t2.appendChild(el("div","tileSub","Билет (500)"));
-      const t3 = el("div","tile");
-      t3.addEventListener("click", ()=>{ haptic(); openInventory(); });
-      t3.appendChild(el("div","tileTitle","👜 Косметичка"));
-      t3.appendChild(el("div","tileSub","Призы и билеты"));
+          // CTA
+          const can = (state.user?.points||0) >= 2000 && !state.busy;
+          const b = el("div","btn");
+          b.style.marginTop="14px";
+          b.style.opacity = (can || state.busy) ? 1 : 0.55;
+          b.style.cursor = (can && !state.busy) ? "pointer" : "not-allowed";
+          b.innerHTML =
+            '<div><div class="btnTitle">'+(state.busy?"Крутим…":"Крутить")+
+            '</div><div class="btnSub">'+(state.busy?"":"−2000 💎")+'</div></div><div style="opacity:0.85">›</div>';
+          b.addEventListener("click", ()=>{ if(can && !state.busy){ spinRouletteLux(); } });
+          wrap.appendChild(b);
+
+          content.appendChild(wrap);
+
+          // draw wheel now
+          setTimeout(()=>{
+            drawWheel(document.getElementById("wheelCanvas"), state.rouletteWheel.angle||0);
+            startTicker();
+          }, 0);
+
+          // Result overlay + sheet
+          const prize = state.rouletteWheel.prize;
+          const overlay = el("div","resultSheetOverlay"+(state.rouletteWheel.overlay?" on":""));
+          overlay.addEventListener("click", ()=>{ closeResultSheet(); });
+          document.body.appendChild(overlay);
+
+          const sheet = el("div","resultSheet"+(prize?" on":""));
+          const card = el("div","resultCard");
+          if(prize){
+            const isDior = (prize.prize_key==="dior_palette");
+            card.appendChild(el("div","resultTitle", isDior ? "Главный приз" : "Выпало:"));
+            card.appendChild(el("div","resultValue", esc(prize.prize_label)));
+            card.appendChild(el("div","resultSub", isDior ? "Оформи получение или конвертируй в баллы." : "Готово."));
+            const btns = el("div","resultBtns");
+
+            if(isDior){
+              const b1 = document.createElement("button");
+              b1.className="btnPrimary";
+              b1.textContent = state.busy ? "Подожди…" : "Забрать";
+              b1.disabled = !!state.busy;
+              b1.addEventListener("click", ()=>{ if(!state.busy){ claimFromResult(); } });
+
+              const b2 = document.createElement("button");
+              b2.className="btnGhost";
+              b2.textContent = state.busy ? "Подожди…" : "Конвертировать";
+              b2.disabled = !!state.busy;
+              b2.addEventListener("click", ()=>{ if(!state.busy){ convertFromResult(); } });
+
+              btns.appendChild(b1);
+              btns.appendChild(b2);
+            }else{
+              const ok = document.createElement("button");
+              ok.className="btnPrimary";
+              ok.textContent = "Ок";
+              ok.addEventListener("click", ()=>{ closeResultSheet(); });
+              btns.appendChild(ok);
+            }
+
+            card.appendChild(btns);
+          }
+          sheet.appendChild(card);
+          document.body.appendChild(sheet);
+
+          // cleanup on next render
+          state._cleanup = state._cleanup || [];
+          state._cleanup.push(()=>{ try{ overlay.remove(); sheet.remove(); }catch(e){} });
+        }
+tileSub","Призы и билеты"));
       const t4 = el("div","tile");
       t4.addEventListener("click", ()=>{ haptic(); openPosts("Challenge","💎 Челленджи"); });
       t4.appendChild(el("div","tileTitle","💎 Челленджи"));
@@ -3162,6 +3675,11 @@ function renderБонусы(main){
       overlay.classList.toggle("open", !!state.profileOpen);
       const content = document.getElementById("profileContent");
       content.innerHTML = "";
+      // cleanup floating overlays from previous render
+      if(state._cleanup && Array.isArray(state._cleanup)){
+        try{ state._cleanup.forEach(fn=>{ try{ fn(); }catch(e){} }); }catch(e){}
+      }
+      state._cleanup = [];
       if(!state.profileOpen) return;
 
       if(!state.user){
@@ -3363,7 +3881,116 @@ if(state.profileView==="raffle"){
           }
         }
 
-        if(state.profileView==="history"){
+        
+        if(state.profileView==="claim"){
+          const box = el("div");
+          box.style.marginTop="12px";
+          box.innerHTML =
+            '<div style="font-size:14px;font-weight:900">Получение приза</div>'+
+            '<div class="sub" style="margin-top:6px">Заполни анкету — мы подтвердим заявку.</div>';
+          content.appendChild(box);
+
+          const card = el("div","card2");
+          card.style.marginTop="12px";
+
+          const prize = state.claim.prize_label || "Приз";
+          const code = state.claim.claim_code ? ("Код: "+state.claim.claim_code) : "";
+          card.appendChild(el("div","miniMeta", esc(prize)));
+          if(code) card.appendChild(el("div","sub", esc(code)));
+
+          const st = (state.claim.status||"draft");
+          if(st && st !== "draft"){
+            const s = el("div","sub", "Статус: "+esc(st));
+            s.style.marginTop="10px";
+            card.appendChild(s);
+
+            const back = el("div","btn");
+            back.style.marginTop="12px";
+            back.innerHTML = '<div><div class="btnTitle">Назад</div><div class="btnSub">Вернуться</div></div><div style="opacity:0.85">›</div>';
+            back.addEventListener("click", ()=>{ state.profileView="roulette"; renderПрофильSheet(); });
+            card.appendChild(back);
+            content.appendChild(card);
+          }else{
+            const form = el("div");
+            form.style.marginTop="10px";
+
+            function inputRow(ph, id, val){
+              const inp = document.createElement("input");
+              inp.id=id; inp.placeholder=ph;
+              inp.value = val || "";
+              inp.style.width="100%";
+              inp.style.padding="12px 12px";
+              inp.style.marginTop="10px";
+              inp.style.borderRadius="14px";
+              inp.style.border="1px solid rgba(255,255,255,0.12)";
+              inp.style.background="rgba(255,255,255,0.04)";
+              inp.style.color="rgba(255,255,255,0.92)";
+              inp.style.outline="none";
+              return inp;
+            }
+
+            const d = state.claim.data || {};
+            const in1 = inputRow("Имя и фамилия", "c_full_name", d.full_name);
+            const in2 = inputRow("Телефон", "c_phone", d.phone);
+            const in3 = inputRow("Страна", "c_country", d.country);
+            const in4 = inputRow("Город", "c_city", d.city);
+            const in5 = inputRow("Адрес", "c_address", d.address_line);
+            const in6 = inputRow("Индекс", "c_postal", d.postal_code);
+            const in7 = inputRow("Комментарий (необязательно)", "c_comment", d.comment);
+
+            form.appendChild(in1); form.appendChild(in2); form.appendChild(in3); form.appendChild(in4);
+            form.appendChild(in5); form.appendChild(in6); form.appendChild(in7);
+
+            const send = el("div","btn");
+            send.style.marginTop="12px";
+            send.style.opacity = state.busy ? 0.6 : 1;
+            send.style.cursor = state.busy ? "not-allowed" : "pointer";
+            send.innerHTML = '<div><div class="btnTitle">'+(state.busy?"Отправляем…":"Отправить заявку")+'</div><div class="btnSub">Подтверждение в чате</div></div><div style="opacity:0.85">›</div>';
+            send.addEventListener("click", async ()=>{
+              if(state.busy) return;
+              state.busy=true; state.msg=""; renderПрофильSheet();
+              try{
+                await apiPost("/api/roulette/claim/submit", {
+                  telegram_id: tgUserId,
+                  claim_id: state.claim.claim_id,
+                  full_name: in1.value,
+                  phone: in2.value,
+                  country: in3.value,
+                  city: in4.value,
+                  address_line: in5.value,
+                  postal_code: in6.value,
+                  comment: in7.value
+                });
+                state.claim.status = "submitted";
+                state.msg = "✅ Заявка отправлена.";
+                haptic("light");
+              }catch(e){
+                state.msg = "❌ "+(e.message||"Ошибка");
+              }finally{
+                state.busy=false;
+                renderПрофильSheet();
+              }
+            });
+
+            const back = el("div","btn");
+            back.style.marginTop="10px";
+            back.innerHTML = '<div><div class="btnTitle">Назад</div><div class="btnSub">Вернуться</div></div><div style="opacity:0.85">›</div>';
+            back.addEventListener("click", ()=>{ state.profileView="roulette"; renderПрофильSheet(); });
+
+            card.appendChild(form);
+            card.appendChild(send);
+            card.appendChild(back);
+            content.appendChild(card);
+          }
+
+          if(state.msg){
+            const m = el("div","card2", esc(state.msg));
+            m.style.marginTop="12px";
+            content.appendChild(m);
+          }
+        }
+
+if(state.profileView==="history"){
           const box = el("div");
           box.style.marginTop="12px";
           box.innerHTML = '<div style="font-size:14px;font-weight:900">🧾 History</div>';
@@ -3721,13 +4348,43 @@ class SpinReq(BaseModel):
 
 class SpinResp(BaseModel):
     telegram_id: int
+    spin_id: int
     points: int
+    prize_key: str
     prize_type: str
     prize_value: int
     prize_label: str
     roll: int
     claimable: bool = False
     claim_code: Optional[str] = None
+
+
+
+class ClaimCreateReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    spin_id: int = Field(..., ge=1)
+
+class ClaimCreateResp(BaseModel):
+    telegram_id: int
+    spin_id: int
+    claim_id: int
+    claim_code: str
+    status: str
+
+class ClaimSubmitReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    claim_id: int = Field(..., ge=1)
+    full_name: str = Field(..., min_length=2, max_length=120)
+    phone: str = Field(..., min_length=3, max_length=60)
+    country: str = Field(..., min_length=2, max_length=80)
+    city: str = Field(..., min_length=1, max_length=80)
+    address_line: str = Field(..., min_length=5, max_length=240)
+    postal_code: str = Field(..., min_length=2, max_length=20)
+    comment: Optional[str] = Field(None, max_length=240)
+
+class ConvertReq(BaseModel):
+    telegram_id: int = Field(..., ge=1)
+    spin_id: int = Field(..., ge=1)
 
 
 class InventoryResp(BaseModel):
@@ -4050,8 +4707,26 @@ async def roulette_history(telegram_id: int, limit: int = 5):
                 "prize_type": r.prize_type,
                 "prize_value": r.prize_value,
                 "roll": r.roll,
+                "resolution": getattr(r, "resolution", "pending"),
             }
         )
+    return out
+
+
+@app.get("/api/roulette/recent_wins")
+async def roulette_recent_wins(limit: int = 12):
+    limit = max(3, min(int(limit), 30))
+    async with async_session_maker() as session:
+        rows = (
+            await session.execute(
+                select(RouletteSpin.prize_label, RouletteSpin.created_at)
+                .order_by(RouletteSpin.created_at.desc())
+                .limit(limit)
+            )
+        ).all()
+    out = []
+    for (label, dt) in rows:
+        out.append({"prize_label": str(label), "created_at": dt.isoformat() if dt else None})
     return out
 
 
@@ -4059,8 +4734,6 @@ async def roulette_history(telegram_id: int, limit: int = 5):
 async def roulette_spin(req: SpinReq):
     tid = int(req.telegram_id)
     now = datetime.utcnow()
-
-    claim_code: str | None = None
 
     async with async_session_maker() as session:
         async with session.begin():
@@ -4095,22 +4768,43 @@ async def roulette_spin(req: SpinReq):
 
             roll = secrets.randbelow(1_000_000)
             prize = pick_roulette_prize(roll)
+            prize_key = str(prize.get("key") or "")
             prize_type: PrizeType = prize["type"]
             prize_value = int(prize["value"])
             prize_label = str(prize["label"])
 
-            # выдача приза
+            # выдача приза (физический приз НЕ создаёт заявку автоматически — выбор в UI)
             if prize_type == "points":
                 user.points = (user.points or 0) + prize_value
-                session.add(PointTransaction(telegram_id=tid, type="roulette_prize", delta=prize_value, meta={"roll": roll, "prize": prize_label}))
+                session.add(
+                    PointTransaction(
+                        telegram_id=tid,
+                        type="roulette_prize",
+                        delta=prize_value,
+                        meta={"roll": roll, "prize": prize_label, "key": prize_key},
+                    )
+                )
             elif prize_type == "raffle_ticket":
                 ticket_row = await get_ticket_row(session, tid, DEFAULT_RAFFLE_ID)
                 ticket_row.count = int(ticket_row.count or 0) + prize_value
                 ticket_row.updated_at = now
-                session.add(PointTransaction(telegram_id=tid, type="roulette_prize", delta=0, meta={"roll": roll, "prize": "raffle_ticket", "qty": prize_value}))
+                session.add(
+                    PointTransaction(
+                        telegram_id=tid,
+                        type="roulette_prize",
+                        delta=0,
+                        meta={"roll": roll, "prize": "raffle_ticket", "qty": prize_value, "key": prize_key},
+                    )
+                )
             else:
-                # физический приз - только лог + уведомление админу
-                session.add(PointTransaction(telegram_id=tid, type="roulette_prize", delta=0, meta={"roll": roll, "prize": "physical_dior_palette"}))
+                session.add(
+                    PointTransaction(
+                        telegram_id=tid,
+                        type="roulette_prize",
+                        delta=0,
+                        meta={"roll": roll, "prize": "physical_dior_palette", "key": prize_key},
+                    )
+                )
 
             _recalc_tier(user)
 
@@ -4122,47 +4816,258 @@ async def roulette_spin(req: SpinReq):
                 prize_type=prize_type,
                 prize_value=prize_value,
                 prize_label=prize_label,
+                resolution="pending",
+                resolved_at=None,
+                resolved_meta=None,
             )
-            if prize_type == "physical_dior_palette":
-                # создаём заявку на получение приза
-                claim_code = generate_claim_code()
-                session.add(
-                    RouletteClaim(
-                        claim_code=claim_code,
-                        telegram_id=tid,
-                        spin_id=None,  # id будет после commit, связь не критична
-                        prize_type=prize_type,
-                        prize_label=prize_label,
-                        status="awaiting_contact",
-                    )
-                )
+            session.add(spin_row)
+            await session.flush()
+
+            spin_id = int(spin_row.id)
 
         await session.refresh(user)
 
-    if prize_type == "physical_dior_palette":
-        # ✅ сообщаем победителю в чат сразу (чтобы не потерял выигрыш)
-        if claim_code:
-            await notify_user_top_prize(tid, prize_label, claim_code)
-
-        uname = (user.username or "").strip()
-        mention = f"@{uname}" if uname else "(без username)"
-        await notify_admin(
-            "💎 ГЛАВНЫЙ ПРИЗ!\n"
-            f"user: {mention} | {user.first_name or '-'}\n"
-            f"telegram_id: {tid}\n"
-            f"link: {tg_user_link(tid)}\n"
-            f"claim: {claim_code}\n"
-            f"roll: {roll}\n"
-            "👉 Пользователю: отправьте /claim <код> и потом сообщение с контактами/адресом."
-        )
-
     return {
         "telegram_id": tid,
+        "spin_id": spin_id,
         "points": int(user.points or 0),
+        "prize_key": prize_key,
         "prize_type": prize_type,
         "prize_value": prize_value,
         "prize_label": prize_label,
         "roll": int(roll),
         "claimable": bool(prize_type == "physical_dior_palette"),
-        "claim_code": claim_code,
+        "claim_code": None,
     }
+
+
+@app.post("/api/roulette/convert")
+async def roulette_convert(req: ConvertReq):
+    tid = int(req.telegram_id)
+    spin_id = int(req.spin_id)
+    now = datetime.utcnow()
+
+    async with async_session_maker() as session:
+        async with session.begin():
+            user = (
+                await session.execute(
+                    select(User).where(User.telegram_id == tid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            spin = (
+                await session.execute(
+                    select(RouletteSpin)
+                    .where(RouletteSpin.id == spin_id, RouletteSpin.telegram_id == tid)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not spin:
+                raise HTTPException(status_code=404, detail="Spin not found")
+
+            if spin.prize_type != "physical_dior_palette":
+                raise HTTPException(status_code=400, detail="Этот приз нельзя конвертировать")
+
+            if getattr(spin, "resolution", "pending") != "pending":
+                raise HTTPException(status_code=400, detail="Этот спин уже обработан")
+
+            existing_claim = (
+                await session.execute(
+                    select(RouletteClaim.id).where(RouletteClaim.spin_id == spin_id)
+                )
+            ).scalar_one_or_none()
+            if existing_claim is not None:
+                raise HTTPException(status_code=400, detail="Заявка уже создана — конвертация недоступна")
+
+            # конвертация Dior -> points (фиксированная стоимость)
+            user.points = int(user.points or 0) + int(DIOR_PALETTE_CONVERT_VALUE)
+            session.add(
+                PointTransaction(
+                    telegram_id=tid,
+                    type="roulette_convert",
+                    delta=int(DIOR_PALETTE_CONVERT_VALUE),
+                    meta={"spin_id": spin_id, "convert": "dior_palette"},
+                )
+            )
+
+            spin.resolution = "converted"
+            spin.resolved_at = now
+            spin.resolved_meta = {"converted_value": int(DIOR_PALETTE_CONVERT_VALUE)}
+
+            _recalc_tier(user)
+
+        await session.refresh(user)
+
+    return {"ok": True, "balance_after": int(user.points or 0), "converted_value": int(DIOR_PALETTE_CONVERT_VALUE)}
+
+
+@app.post("/api/roulette/claim/create", response_model=ClaimCreateResp)
+async def roulette_claim_create(req: ClaimCreateReq):
+    tid = int(req.telegram_id)
+    spin_id = int(req.spin_id)
+    now = datetime.utcnow()
+
+    async with async_session_maker() as session:
+        async with session.begin():
+            user = (
+                await session.execute(
+                    select(User).where(User.telegram_id == tid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            spin = (
+                await session.execute(
+                    select(RouletteSpin)
+                    .where(RouletteSpin.id == spin_id, RouletteSpin.telegram_id == tid)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not spin:
+                raise HTTPException(status_code=404, detail="Spin not found")
+
+            if spin.prize_type != "physical_dior_palette":
+                raise HTTPException(status_code=400, detail="Этот приз нельзя забрать как физический")
+
+            # если уже есть claim — вернуть его
+            existing = (
+                await session.execute(
+                    select(RouletteClaim).where(RouletteClaim.spin_id == spin_id)
+                )
+            ).scalar_one_or_none()
+            if existing:
+                return {
+                    "telegram_id": tid,
+                    "spin_id": spin_id,
+                    "claim_id": int(existing.id),
+                    "claim_code": str(existing.claim_code),
+                    "status": str(existing.status),
+                }
+
+            if getattr(spin, "resolution", "pending") != "pending":
+                raise HTTPException(status_code=400, detail="Этот спин уже обработан")
+
+            claim_code = generate_claim_code()
+            claim = RouletteClaim(
+                claim_code=claim_code,
+                telegram_id=tid,
+                spin_id=spin_id,
+                prize_type=spin.prize_type,
+                prize_label=spin.prize_label,
+                status="draft",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(claim)
+
+            spin.resolution = "claim"
+            spin.resolved_at = now
+            spin.resolved_meta = {"claim_code": claim_code}
+
+            await session.flush()
+
+            claim_id = int(claim.id)
+
+    return {
+        "telegram_id": tid,
+        "spin_id": spin_id,
+        "claim_id": claim_id,
+        "claim_code": claim_code,
+        "status": "draft",
+    }
+
+
+@app.get("/api/roulette/claim/{claim_id}")
+async def roulette_claim_get(claim_id: int, telegram_id: int):
+    tid = int(telegram_id)
+    cid = int(claim_id)
+    async with async_session_maker() as session:
+        claim = (
+            await session.execute(
+                select(RouletteClaim).where(RouletteClaim.id == cid, RouletteClaim.telegram_id == tid)
+            )
+        ).scalar_one_or_none()
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+
+    return {
+        "claim_id": int(claim.id),
+        "claim_code": str(claim.claim_code),
+        "spin_id": int(claim.spin_id) if claim.spin_id is not None else None,
+        "status": str(claim.status),
+        "prize_label": str(claim.prize_label),
+        "full_name": claim.full_name,
+        "phone": claim.phone,
+        "country": claim.country,
+        "city": claim.city,
+        "address_line": claim.address_line,
+        "postal_code": claim.postal_code,
+        "comment": claim.comment,
+        "created_at": claim.created_at.isoformat() if claim.created_at else None,
+        "updated_at": claim.updated_at.isoformat() if claim.updated_at else None,
+    }
+
+
+@app.post("/api/roulette/claim/submit")
+async def roulette_claim_submit(req: ClaimSubmitReq):
+    tid = int(req.telegram_id)
+    now = datetime.utcnow()
+
+    async with async_session_maker() as session:
+        async with session.begin():
+            claim = (
+                await session.execute(
+                    select(RouletteClaim).where(RouletteClaim.id == int(req.claim_id), RouletteClaim.telegram_id == tid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not claim:
+                raise HTTPException(status_code=404, detail="Claim not found")
+
+            if str(claim.status) not in {"draft", "awaiting_contact"}:
+                # уже отправлено/закрыто
+                return {"ok": True, "status": str(claim.status)}
+
+            # сохраняем контактные данные
+            claim.full_name = req.full_name.strip()
+            claim.phone = req.phone.strip()
+            claim.country = req.country.strip()
+            claim.city = req.city.strip()
+            claim.address_line = req.address_line.strip()
+            claim.postal_code = req.postal_code.strip()
+            claim.comment = (req.comment or "").strip() or None
+
+            claim.contact_text = (
+                f"Имя: {claim.full_name}\n"
+                f"Телефон: {claim.phone}\n"
+                f"Страна: {claim.country}\n"
+                f"Город: {claim.city}\n"
+                f"Адрес: {claim.address_line}\n"
+                f"Индекс: {claim.postal_code}\n"
+                + (f"Комментарий: {claim.comment}\n" if claim.comment else "")
+            )
+
+            claim.status = "submitted"
+            claim.updated_at = now
+
+        # уведомление админу — уже после commit
+        uname = ""
+        async with async_session_maker() as s2:
+            u = (await s2.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
+            uname = (u.username or "").strip() if u else ""
+            fname = (u.first_name or "-") if u else "-"
+
+        mention = f"@{uname}" if uname else "(без username)"
+        await notify_admin(
+            "📦 ЗАЯВКА НА ПРИЗ (Рулетка)\n"
+            f"prize: {claim.prize_label}\n"
+            f"user: {mention} | {fname}\n"
+            f"telegram_id: {tid}\n"
+            f"link: {tg_user_link(tid)}\n"
+            f"claim: {claim.claim_code}\n\n"
+            f"{claim.contact_text}"
+        )
+
+    return {"ok": True, "status": "submitted"}
