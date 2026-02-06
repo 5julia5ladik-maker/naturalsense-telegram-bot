@@ -3048,14 +3048,8 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
     async function claimFromResult(){
       const resp = state.rouletteWheel.prize;
       if(!resp || !resp.spin_id) return;
-
-      const ok = await askConfirm(
-        "Конвертировать приз?",
-        "Вы получите +50 000 баллов. После конвертации забрать приз будет нельзя.",
-        "Да, конвертировать"
-      );
-      if(!ok) return;
-
+      // IMPORTANT: This is the "Забрать" flow.
+      // No conversion confirmation here — conversion has its own button and confirmation.
       state.busy = true; renderПрофильSheet();
       try{
         const d = await apiPost("/api/roulette/claim/create", {telegram_id: tgUserId, spin_id: resp.spin_id});
@@ -3072,6 +3066,14 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
     async function convertFromResult(){
       const resp = state.rouletteWheel.prize;
       if(!resp || !resp.spin_id) return;
+
+      const ok = await askConfirm(
+        "Конвертировать приз?",
+        "Вы получите +50 000 баллов. После конвертации забрать приз будет нельзя.",
+        "Да, конвертировать"
+      );
+      if(!ok) return;
+
       state.busy = true; renderПрофильSheet();
       try{
         const d = await apiPost("/api/roulette/convert", {telegram_id: tgUserId, spin_id: resp.spin_id});
