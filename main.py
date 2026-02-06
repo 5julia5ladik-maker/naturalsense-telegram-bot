@@ -1932,54 +1932,52 @@ def get_webapp_html() -> str:
       border:1px solid rgba(230,193,128,0.25);
     }
 
-    /* --- Premium "Личный кабинет" card (Gold frame) --- */
+    /* --- Premium "Личный кабинет" card (Quiet luxury, no gold) --- */
 .cabinetFrame{
   position:relative;
   border-radius:24px;
   padding:14px;
   background:
-    radial-gradient(900px 340px at 50% -18%, rgba(230,193,128,0.18), transparent 62%),
-    radial-gradient(520px 260px at 12% 18%, rgba(125,170,255,0.12), transparent 60%),
-    radial-gradient(520px 260px at 92% 22%, rgba(170,120,255,0.10), transparent 62%),
-    linear-gradient(180deg, rgba(28,34,48,0.82), rgba(12,15,22,0.82));
-  border:1px solid rgba(255,255,255,0.12);
+    radial-gradient(900px 340px at 50% -18%, rgba(140,170,255,0.14), transparent 62%),
+    radial-gradient(520px 260px at 12% 18%, rgba(255,255,255,0.06), transparent 60%),
+    radial-gradient(520px 260px at 92% 22%, rgba(170,120,255,0.08), transparent 62%),
+    linear-gradient(180deg, rgba(28,34,48,0.90), rgba(12,15,22,0.92));
+  border:1px solid rgba(255,255,255,0.10);
   box-shadow:
-    0 14px 34px rgba(0,0,0,0.40),
-    inset 0 1px 0 rgba(255,255,255,0.10),
-    inset 0 0 0 1px rgba(0,0,0,0.32);
+    0 14px 34px rgba(0,0,0,0.42),
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    inset 0 0 0 1px rgba(0,0,0,0.30);
   overflow:hidden;
 }
-/* gold hairline frame */
+/* subtle premium frame (no gold) */
 .cabinetFrame:before{
   content:"";
   position:absolute;
   inset:0;
-  padding:2px;
+  padding:1px;
   border-radius:24px;
-  background:conic-gradient(from 190deg,
-    rgba(255,236,205,0.92),
-    rgba(206,160,96,0.55),
-    rgba(255,236,205,0.88),
-    rgba(170,120,64,0.52),
-    rgba(255,236,205,0.92)
+  background:linear-gradient(135deg,
+    rgba(255,255,255,0.18),
+    rgba(140,170,255,0.10),
+    rgba(255,255,255,0.08)
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  opacity:0.85;
+  opacity:0.55;
   pointer-events:none;
 }
-/* soft gloss + micro texture */
+/* soft gloss + micro texture (quiet) */
 .cabinetFrame:after{
   content:"";
   position:absolute;
   inset:-60px;
   background:
-    radial-gradient(280px 220px at 18% 28%, rgba(230,193,128,0.08), transparent 62%),
-    radial-gradient(280px 220px at 82% 30%, rgba(230,193,128,0.06), transparent 64%),
-    linear-gradient(135deg, rgba(255,255,255,0.08), transparent 38%, rgba(0,0,0,0.28)),
-    repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 7px);
-  opacity:0.75;
+    radial-gradient(320px 240px at 18% 22%, rgba(255,255,255,0.06), transparent 62%),
+    radial-gradient(320px 240px at 84% 26%, rgba(140,170,255,0.07), transparent 64%),
+    linear-gradient(135deg, rgba(255,255,255,0.06), transparent 40%, rgba(0,0,0,0.26)),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 8px);
+  opacity:0.70;
   pointer-events:none;
 }
 
@@ -1989,7 +1987,7 @@ def get_webapp_html() -> str:
   align-items:center;
   justify-content:center;
   margin-bottom:8px;
-  color:rgba(255,255,255,0.78);
+  color:rgba(255,255,255,0.72);
   font-weight:900;
   letter-spacing:0.35px;
   font-size:13px;
@@ -2011,7 +2009,7 @@ def get_webapp_html() -> str:
 .cabinetTier{
   margin-top:6px;
   font-size:13px;
-  color:rgba(255,255,255,0.72);
+  color:rgba(255,255,255,0.70);
   display:flex;
   align-items:center;
   gap:6px;
@@ -2027,7 +2025,7 @@ def get_webapp_html() -> str:
 }
 .cabinetBalanceLabel{
   font-size:12px;
-  color:rgba(255,255,255,0.62);
+  color:rgba(255,255,255,0.58);
   font-weight:850;
   letter-spacing:0.2px;
 }
@@ -2037,14 +2035,14 @@ def get_webapp_html() -> str:
   gap:8px;
   padding:7px 10px;
   border-radius:999px;
-  border:1px solid rgba(230,193,128,0.22);
+  border:1px solid rgba(255,255,255,0.14);
   background:
-    radial-gradient(220px 120px at 30% 0%, rgba(230,193,128,0.18), transparent 60%),
-    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 16px rgba(0,0,0,0.34);
+    radial-gradient(220px 120px at 30% 0%, rgba(140,170,255,0.16), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 18px rgba(0,0,0,0.36);
   font-size:13px;
   font-weight:950;
-  color:rgba(255,255,255,0.92);
+  color:rgba(255,255,255,0.94);
   white-space:nowrap;
 }
 .cabinetBalanceGem{
@@ -2059,18 +2057,18 @@ def get_webapp_html() -> str:
   gap:10px;
 }
 .cabinetStat{
-  padding:10px 10px 9px;
+  padding:9px 10px 9px;
   border-radius:16px;
-  border:1px solid rgba(255,255,255,0.14);
+  border:1px solid rgba(255,255,255,0.12);
   background:
-    radial-gradient(260px 140px at 50% 0%, rgba(255,255,255,0.07), transparent 62%),
-    rgba(255,255,255,0.04);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
-  min-height:54px;
+    radial-gradient(260px 140px at 50% 0%, rgba(255,255,255,0.06), transparent 62%),
+    rgba(255,255,255,0.035);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  min-height:52px;
 }
 .cabinetStatLabel{
   font-size:11px;
-  color:rgba(255,255,255,0.60);
+  color:rgba(255,255,255,0.58);
   display:flex;
   align-items:center;
   gap:6px;
@@ -2083,6 +2081,7 @@ def get_webapp_html() -> str:
   font-weight:950;
   color:rgba(255,255,255,0.95);
 }
+
 
 </style>
 </head>
