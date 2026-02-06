@@ -2156,7 +2156,7 @@ def get_webapp_html() -> str:
       color: rgba(255,255,255,0.86);
       font-size:12px;
     }
-    .resultSheetOverlay{position:fixed; inset:0; background: rgba(0,0,0,0.0); pointer-events:none; transition:background 180ms ease; z-index:49}
+    .resultSheetOverlay{position:fixed; inset:0; background: rgba(0,0,0,0.0); pointer-events:none; transition:background 180ms ease; z-index:10050}
     .resultSheetOverlay.on{background: rgba(0,0,0,0.22); pointer-events:auto}
     /* Dior: subtle cold sparkle (quiet luxury) */
     .resultSheetOverlay.on.dior::before{
@@ -2179,7 +2179,7 @@ def get_webapp_html() -> str:
       100%{opacity:0; transform:translateY(-10px) scale(1.02)}
     }
     .resultSheet{position:fixed; left:0; right:0; bottom:-420px; padding:16px; transition:bottom 260ms cubic-bezier(.2,.9,.2,1);
-      z-index: 50;
+      z-index: 10051;
     }
     .resultSheet.on{bottom:0}
     .resultCard{max-width:520px; margin:0 auto; border-radius:22px; padding:14px 14px 12px 14px;
@@ -2746,7 +2746,10 @@ def get_webapp_html() -> str:
         ctx.save();
         // place content at the centerline of the segment and keep it upright
         ctx.rotate(mid);
-        ctx.translate(0, -r*0.58);
+        // Place content in the visual center of the ring (between inner hub and outer rim)
+        const innerR = r*0.46; // matches .wheelCenter inset ~28%
+        const labelR = (innerR + r) / 2;
+        ctx.translate(0, -labelR);
         ctx.rotate(-mid);
 
         const seg = ROULETTE_SEGMENTS[i];
