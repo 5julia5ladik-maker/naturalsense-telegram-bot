@@ -2133,12 +2133,12 @@ def get_webapp_html() -> str:
       letter-spacing: 0.6px;
     }
     
-    .wheelPointer{position:absolute; top:-18px; left:50%; transform:translateX(-50%);
-      width:0; height:0;
-      border-left:14px solid transparent;
-      border-right:14px solid transparent;
-      border-bottom:30px solid rgba(235,245,255,0.78);
-      filter: drop-shadow(0 10px 18px rgba(0,0,0,0.60));
+    .wheelPointer{position:absolute; top:-22px; left:50%; transform:translateX(-50%);
+      width:0; height:0; z-index:3;
+      border-left:10px solid transparent;
+      border-right:10px solid transparent;
+      border-bottom:28px solid rgba(235,245,255,0.86);
+      filter: drop-shadow(0 12px 20px rgba(0,0,0,0.62));
     }
     /* wheelPointerDot removed: pointer should be arrow only */
     .microHud{margin-top:10px; font-size:12px; color: rgba(255,255,255,0.62); text-align:center}
@@ -2715,88 +2715,112 @@ def get_webapp_html() -> str:
       return i>=0?i:0;
     }
 
-    function drawWheel(canvas, angle){
-      if(!canvas) return;
-      const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-      const w = Math.max(10, Math.floor(rect.width*dpr));
-      const h = Math.max(10, Math.floor(rect.height*dpr));
-      if(canvas.width!==w || canvas.height!==h){
-        canvas.width = w; canvas.height = h;
-      }
-      const ctx = canvas.getContext("2d");
-      if(!ctx) return;
-      ctx.clearRect(0,0,w,h);
-      const cx = w/2, cy = h/2;
-      const r = Math.min(w,h)*0.48;
+    
+function drawWheel(canvas, angle){
+  if(!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
 
-      ctx.save();
-      ctx.translate(cx,cy);
-      ctx.rotate(angle);
+  // --- Stable canvas sizing (prevents jitter / drifting text on some devices) ---
+  // We resize only when the *CSS size* changed noticeably, not on every frame.
+  const rect = canvas.getBoundingClientRect();
+  const cssW = rect.width;
+  const cssH = rect.height;
+  canvas._cssW = canvas._cssW || 0;
+  canvas._cssH = canvas._cssH || 0;
+  if(Math.abs(cssW - canvas._cssW) > 0.5 || Math.abs(cssH - canvas._cssH) > 0.5){
+    canvas._cssW = cssW;
+    canvas._cssH = cssH;
+    const w = Math.max(10, Math.round(cssW * dpr));
+    const h = Math.max(10, Math.round(cssH * dpr));
+    canvas.width = w;
+    canvas.height = h;
+  }
 
-      // segments
-      for(let i=0;i<SEG_N;i++){
-        const start = -Math.PI/2 + i*SEG_ANGLE;
-        const end = start + SEG_ANGLE;
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext("2d");
+  if(!ctx) return;
 
-        ctx.beginPath();
-        ctx.moveTo(0,0);
-        ctx.arc(0,0,r,start,end,false);
-        ctx.closePath();
+  ctx.clearRect(0,0,w,h);
+  const cx = w/2, cy = h/2;
+  const r = Math.min(w,h)*0.48;
+  const innerR = r*0.46;                // hub radius matches .wheelCenter inset
+  const labelR = (innerR + r) / 2;      // EXACT center of each sector ring
 
-        const isAlt = (i%2===0);
-        ctx.fillStyle = isAlt ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.085)";
-        ctx.fill();
+  // ---------------- Segments (wheel rotates) ----------------
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.rotate(angle);
 
-        // divider
-        ctx.strokeStyle = "rgba(255,255,255,0.10)";
-        ctx.lineWidth = Math.max(1, Math.floor(1*dpr));
-        ctx.stroke();
+  for(let i=0;i<SEG_N;i++){
+    const start = -Math.PI/2 + i*SEG_ANGLE;
+    const end = start + SEG_ANGLE;
 
-        // text/icon (snap strictly to the geometric center of each segment)
-        const mid = (start+end)/2;
-        ctx.save();
-        // place content at the centerline of the segment and keep it upright
-        ctx.rotate(mid);
-        // Place content in the visual center of the ring (between inner hub and outer rim)
-        const innerR = r*0.46; // matches .wheelCenter inset ~28%
-        const labelR = (innerR + r) / 2;
-        ctx.translate(0, -labelR);
+    ctx.beginPath();
+    ctx.moveTo(0,0);
+    ctx.arc(0,0,r,start,end,false);
+    ctx.closePath();
 
-        const seg = ROULETTE_SEGMENTS[i];
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
+    const isAlt = (i%2===0);
+    ctx.fillStyle = isAlt ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.085)";
+    ctx.fill();
 
-        // icon
-        ctx.font = `900 ${Math.floor(16*dpr)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
-        ctx.fillStyle = "rgba(255,255,255,0.92)";
-        ctx.fillText(seg.icon, 0, -Math.floor(8*dpr));
+    // divider
+    ctx.strokeStyle = "rgba(255,255,255,0.10)";
+    ctx.lineWidth = Math.max(1, Math.floor(1*dpr));
+    ctx.stroke();
+  }
 
-        // label
-        ctx.font = `900 ${Math.floor(12*dpr)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
-        ctx.fillStyle = "rgba(255,255,255,0.82)";
-        ctx.fillText(seg.text, 0, Math.floor(11*dpr));
+  // rim highlight (rotates with wheel)
+  ctx.beginPath();
+  ctx.arc(0,0,r,0,Math.PI*2);
+  ctx.strokeStyle = "rgba(235,245,255,0.16)";
+  ctx.lineWidth = Math.max(1, Math.floor(2*dpr));
+  ctx.stroke();
 
-        // Dior subtle aura (draw tiny underline)
-        if(seg.key==="dior_palette"){
-          ctx.fillStyle = "rgba(220,235,255,0.20)";
-          ctx.fillRect(-Math.floor(18*dpr), Math.floor(22*dpr), Math.floor(36*dpr), Math.floor(2*dpr));
-        }
+  ctx.restore();
 
-        ctx.restore();
-      }
+  // ---------------- Labels (locked to sector centers, NO drift) ----------------
+  // We draw labels in screen space using the CURRENT wheel angle to compute their positions.
+  // This makes icons/text "nailed" to each segment center and prevents any wobble.
+  ctx.save();
+  ctx.translate(cx,cy);
 
-      // rim highlight
-      ctx.beginPath();
-      ctx.arc(0,0,r,0,Math.PI*2);
-      ctx.strokeStyle = "rgba(235,245,255,0.16)";
-      ctx.lineWidth = Math.max(1, Math.floor(2*dpr));
-      ctx.stroke();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
 
-      ctx.restore();
+  for(let i=0;i<SEG_N;i++){
+    const seg = ROULETTE_SEGMENTS[i];
+    const mid = -Math.PI/2 + (i+0.5)*SEG_ANGLE;
+    const a = angle + mid;
+    const x = Math.cos(a) * labelR;
+    const y = Math.sin(a) * labelR;
+
+    // icon
+    ctx.font = `900 ${Math.floor(16*dpr)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.fillText(seg.icon, x, y - Math.floor(10*dpr));
+
+    // label
+    ctx.font = `900 ${Math.floor(12*dpr)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.fillText(seg.text, x, y + Math.floor(10*dpr));
+
+    if(seg.key==="dior_palette"){
+      ctx.fillStyle = "rgba(220,235,255,0.20)";
+      ctx.fillRect(
+        x - Math.floor(18*dpr),
+        y + Math.floor(22*dpr),
+        Math.floor(36*dpr),
+        Math.floor(2*dpr)
+      );
     }
+  }
 
-    function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
+  ctx.restore();
+}
+
+
+function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
     function easeInOut(t){ return t<0.5 ? 2*t*t : 1 - Math.pow(-2*t+2,2)/2; }
 
     function stopWheelRaf(){
