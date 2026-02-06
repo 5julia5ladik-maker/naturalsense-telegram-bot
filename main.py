@@ -2851,6 +2851,12 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
       if(_wheelRaf){ cancelAnimationFrame(_wheelRaf); _wheelRaf=null; }
     }
 
+    function stopTickerRaf(){
+      if(_tickerRaf){ cancelAnimationFrame(_tickerRaf); _tickerRaf=null; }
+      const elTxt = document.getElementById("rouletteTickerText");
+      if(elTxt){ try{ elTxt.style.transform = "translateX(0px)"; }catch(e){} }
+    }
+
     function startFreeSpin(){
       const w = state.rouletteWheel;
       w.spinning = true;
@@ -2930,7 +2936,7 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
 
     function startTicker(){
       // simple ticker transform loop
-      if(_tickerRaf) cancelAnimationFrame(_tickerRaf);
+      stopTickerRaf();
       const elTxt = document.getElementById("rouletteTickerText");
       if(!elTxt) return;
       let x = 0;
@@ -2984,27 +2990,31 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
       state.busy = true; state.msg=""; state.rouletteWheel.overlay=false;
       renderПрофильSheet();
 
-      // start animation instantly
-      startFreeSpin();
+      // IMPORTANT: no "fake spins"
+      // We do NOT start wheel animation until the server confirms the spin.
       const started = Date.now();
       let resp = null, err = null;
       try{
         resp = await apiPost("/api/roulette/spin", {telegram_id: tgUserId});
       }catch(e){ err = e; }
 
-      // ensure minimum spin time
-      const minTime = 900;
-      const elapsed = Date.now()-started;
-      if(elapsed < minTime){
-        await new Promise(r=>setTimeout(r, minTime-elapsed));
-      }
-
       if(err || !resp){
         stopWheelRaf();
+        stopTickerRaf();
         state.busy=false;
         state.msg = "❌ "+(err && err.message ? err.message : "Ошибка");
         renderПрофильSheet();
         return;
+      }
+
+      // Start wheel only after successful server response
+      startFreeSpin();
+
+      // ensure minimum spin time (so it feels like a real spin)
+      const minTime = 900;
+      const elapsed = Date.now()-started;
+      if(elapsed < minTime){
+        await new Promise(r=>setTimeout(r, minTime-elapsed));
       }
 
       // compute final angle for target
@@ -3044,6 +3054,7 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
         }catch(e){}
       });
     }
+
 
     async function claimFromResult(){
       const resp = state.rouletteWheel.prize;
@@ -3758,7 +3769,17 @@ function renderБонусы(main){
         try{ state._cleanup.forEach(fn=>{ try{ fn(); }catch(e){} }); }catch(e){}
       }
       state._cleanup = [];
-      if(!state.profileOpen) return;
+
+      // Stop roulette animations when profile is closed or when we are not on the roulette view
+      if(!state.profileOpen){
+        try{ stopWheelRaf(); }catch(e){}
+        try{ stopTickerRaf(); }catch(e){}
+        return;
+      }
+      if(state.profileView !== "roulette"){
+        try{ stopWheelRaf(); }catch(e){}
+        try{ stopTickerRaf(); }catch(e){}
+      }
 
       if(!state.user){
         content.appendChild(el("div","sub","Профиль недоступен."));
@@ -4045,7 +4066,7 @@ if(state.profileView==="roulette"){
           if(code) card.appendChild(el("div","sub", esc(code)));
 
           const st = (state.claim.status||"draft");
-          if(st && st !== "draft"){
+          if(st && st !== "draft" && st !== "awaiting_contact"){
             const s = el("div","sub", "Статус: "+esc(st));
             s.style.marginTop="10px";
             card.appendChild(s);
@@ -5204,6 +5225,12 @@ async def roulette_claim_create(req: ClaimCreateReq):
                 )
             ).scalar_one_or_none()
             if existing:
+                # If claim was auto-created on spin (inventory), make sure the spin is marked as "claim"
+                # so history/inventory stay consistent.
+                if getattr(spin, "resolution", "pending") == "pending":
+                    spin.resolution = "claim"
+                    spin.resolved_at = now
+                    spin.resolved_meta = {"claim_code": str(existing.claim_code)}
                 return {
                     "telegram_id": tid,
                     "spin_id": spin_id,
