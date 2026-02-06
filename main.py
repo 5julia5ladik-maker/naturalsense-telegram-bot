@@ -4845,7 +4845,6 @@ async def roulette_spin(req: SpinReq):
                         meta={"roll": roll, "prize": "physical_dior_palette", "key": prize_key},
                     )
                 )
-                )
 
             _recalc_tier(user)
 
