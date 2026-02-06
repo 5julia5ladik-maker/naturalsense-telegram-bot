@@ -2139,12 +2139,7 @@ def get_webapp_html() -> str:
       border-bottom:18px solid rgba(235,245,255,0.70);
       filter: drop-shadow(0 8px 14px rgba(0,0,0,0.55));
     }
-    .wheelPointerDot{position:absolute; top:10px; left:50%; transform:translateX(-50%);
-      width:10px; height:10px; border-radius:99px;
-      background: rgba(255,255,255,0.82);
-      box-shadow: 0 8px 14px rgba(0,0,0,0.55);
-      border: 1px solid rgba(255,255,255,0.20);
-    }
+    /* wheelPointerDot removed: pointer should be arrow only */
     .microHud{margin-top:10px; font-size:12px; color: rgba(255,255,255,0.62); text-align:center}
     .ticker{margin-top:10px; height:32px; width:100%;
       border-radius:14px; padding:0 12px;
@@ -2161,8 +2156,28 @@ def get_webapp_html() -> str:
       color: rgba(255,255,255,0.86);
       font-size:12px;
     }
-    .resultSheetOverlay{position:fixed; inset:0; background: rgba(0,0,0,0.0); pointer-events:none; transition:background 180ms ease}
+    .resultSheetOverlay{position:fixed; inset:0; background: rgba(0,0,0,0.0); pointer-events:none; transition:background 180ms ease; z-index:49}
     .resultSheetOverlay.on{background: rgba(0,0,0,0.22); pointer-events:auto}
+    /* Dior: subtle cold sparkle (quiet luxury) */
+    .resultSheetOverlay.on.dior::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+      background-image:
+        radial-gradient(circle at 20% 30%, rgba(235,245,255,0.22) 0 2px, transparent 3px),
+        radial-gradient(circle at 72% 22%, rgba(235,245,255,0.18) 0 2px, transparent 3px),
+        radial-gradient(circle at 58% 62%, rgba(235,245,255,0.16) 0 2px, transparent 3px),
+        radial-gradient(circle at 35% 70%, rgba(235,245,255,0.14) 0 2px, transparent 3px),
+        radial-gradient(circle at 82% 74%, rgba(235,245,255,0.14) 0 2px, transparent 3px);
+      opacity:0;
+      animation: sparklePop 900ms ease-out 1;
+    }
+    @keyframes sparklePop{
+      0%{opacity:0; transform:translateY(8px) scale(0.98)}
+      20%{opacity:1;}
+      100%{opacity:0; transform:translateY(-10px) scale(1.02)}
+    }
     .resultSheet{position:fixed; left:0; right:0; bottom:-420px; padding:16px; transition:bottom 260ms cubic-bezier(.2,.9,.2,1);
       z-index: 50;
     }
@@ -2726,24 +2741,27 @@ def get_webapp_html() -> str:
         ctx.lineWidth = Math.max(1, Math.floor(1*dpr));
         ctx.stroke();
 
-        // text/icon
+        // text/icon (snap strictly to the geometric center of each segment)
         const mid = (start+end)/2;
         ctx.save();
+        // place content at the centerline of the segment and keep it upright
         ctx.rotate(mid);
-        ctx.translate(0, -r*0.67);
+        ctx.translate(0, -r*0.58);
         ctx.rotate(-mid);
 
         const seg = ROULETTE_SEGMENTS[i];
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
         // icon
         ctx.font = `900 ${Math.floor(16*dpr)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
-        ctx.textAlign="center"; ctx.textBaseline="middle";
         ctx.fillStyle = "rgba(255,255,255,0.92)";
-        ctx.fillText(seg.icon, 0, -Math.floor(10*dpr));
+        ctx.fillText(seg.icon, 0, -Math.floor(8*dpr));
 
         // label
         ctx.font = `900 ${Math.floor(12*dpr)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
         ctx.fillStyle = "rgba(255,255,255,0.82)";
-        ctx.fillText(seg.text, 0, Math.floor(12*dpr));
+        ctx.fillText(seg.text, 0, Math.floor(11*dpr));
 
         // Dior subtle aura (draw tiny underline)
         if(seg.key==="dior_palette"){
@@ -2918,26 +2936,18 @@ def get_webapp_html() -> str:
       const key = resp.prize_key || "";
       const idx = keyToIndex(key);
       const fullTurns = 3 + Math.floor(Math.random()*3); // 3..5
-      const targetCenter = (-Math.PI/2) + idx*SEG_ANGLE + SEG_ANGLE/2;
-
-      // We rotate wheel by angle; segment center must align with pointer (-PI/2).
-      // With our drawing, angle rotates the whole wheel. To put targetCenter at pointer, need angle = -idx*SEG_ANGLE (approx).
-      // We'll compute as: finalAngle = currentAngle + 2PI*turns + offset such that pointer index=idx.
+      // Stop strictly at the CENTER of the winning segment.
+      // Derivation: pointer is at -PI/2, segment i center is at (-PI/2 + i*SEG_ANGLE + SEG_ANGLE/2) + angle.
+      // So we need angle = -i*SEG_ANGLE - SEG_ANGLE/2 (mod 2PI).
       let base = state.rouletteWheel.angle;
-      // find angle where wheelIndexAtPointer(angle)==idx and close to base
-      let desired = -idx*SEG_ANGLE; // good approximation
+      let desired = (-idx*SEG_ANGLE) - (SEG_ANGLE/2);
       // normalize desired near base
       const twoPi = Math.PI*2;
       while(desired < base) desired += twoPi;
       // add turns
       let finalAngle = desired + twoPi*fullTurns;
 
-      // near-miss (rare, only if not dior)
-      if(key !== "dior_palette" && Math.random() < 0.10){
-        const sign = Math.random()<0.5 ? -1 : 1;
-        finalAngle += sign * (Math.PI/180) * (2 + Math.random()*2); // 2..4 deg
-        state.msg = "Очень близко.";
-      }
+      // IMPORTANT: do not offset finalAngle (must snap to exact center).
 
       state.rouletteWheel.spinId = resp.spin_id;
       state.rouletteWheel.targetKey = key;
@@ -3786,9 +3796,8 @@ if(state.profileView==="roulette"){
           wheelBox.appendChild(canvas);
 
           const pointer = el("div","wheelPointer");
-          const dot = el("div","wheelPointerDot");
           wheelBox.appendChild(pointer);
-          wheelBox.appendChild(dot);
+
 
           const center = el("div","wheelCenter","NS");
           wheelBox.appendChild(center);
@@ -3845,14 +3854,16 @@ if(state.profileView==="roulette"){
 
           // Result overlay + sheet
           const prize = state.rouletteWheel.prize;
-          const overlay = el("div","resultSheetOverlay"+(state.rouletteWheel.overlay?" on":""));
-          overlay.addEventListener("click", ()=>{ closeResultSheet(); });
+          const isDiorPrize = !!(prize && prize.prize_key==="dior_palette");
+          // Overlay should appear for ANY prize (popup), Dior gets extra sparkle class.
+          const overlay = el("div","resultSheetOverlay"+(prize?" on":"")+(isDiorPrize?" dior":""));
+          overlay.addEventListener("click", ()=>{ if(!state.busy){ closeResultSheet(); } });
           document.body.appendChild(overlay);
 
           const sheet = el("div","resultSheet"+(prize?" on":""));
           const card = el("div","resultCard");
           if(prize){
-            const isDior = (prize.prize_key==="dior_palette");
+            const isDior = isDiorPrize;
             card.appendChild(el("div","resultTitle", isDior ? "Главный приз" : "Выпало:"));
             card.appendChild(el("div","resultValue", esc(prize.prize_label)));
             card.appendChild(el("div","resultSub", isDior ? "Оформи получение или конвертируй в баллы." : "Готово."));
@@ -3876,7 +3887,7 @@ if(state.profileView==="roulette"){
             }else{
               const ok = document.createElement("button");
               ok.className="btnPrimary";
-              ok.textContent = "Ок";
+              ok.textContent = "Принять";
               ok.addEventListener("click", ()=>{ closeResultSheet(); });
               btns.appendChild(ok);
             }
