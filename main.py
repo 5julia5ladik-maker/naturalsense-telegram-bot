@@ -4403,13 +4403,18 @@ if(state.profileView==="history"){
       iS.appendChild(iC); iO.appendChild(iS); root.appendChild(iO);
 
 // Шансы (Рулетка)
+const oldOdds = document.getElementById("oddsOverlay"); if(oldOdds) try{oldOdds.remove();}catch(e){}
 const oO = el("div","sheetOverlay"); oO.id="oddsOverlay";
+// Всегда поверх любых оверлеев
+oO.style.zIndex = "200000";
 oO.addEventListener("click", (e)=>{ if(e.target===oO){ haptic(); closeOdds(); }});
 const oS = el("div","sheet");
 oS.addEventListener("click",(e)=>e.stopPropagation());
 oS.appendChild(el("div","sheetHandle"));
 const oC = el("div"); oC.id="oddsContent";
-oS.appendChild(oC); oO.appendChild(oS); root.appendChild(oO);
+oS.appendChild(oC); oO.appendChild(oS);
+// ВАЖНО: монтируем поверх всего (в body), чтобы не попадать под слои рулетки/результата
+(document.body || document.documentElement).appendChild(oO);
 
       // Профиль
       const prO = el("div","sheetOverlay"); prO.id="profileOverlay";
