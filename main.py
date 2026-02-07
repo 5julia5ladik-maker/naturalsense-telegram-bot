@@ -1850,7 +1850,7 @@ def get_webapp_html() -> str:
       background:var(--sheetOverlay);
       backdrop-filter:blur(22px) saturate(180%);
       -webkit-backdrop-filter:blur(22px) saturate(180%);
-      z-index:10060;display:none;
+      z-index:9999;display:none;
       justify-content:center;align-items:flex-end;padding:10px;
     }
     .sheetOverlay.open{display:flex}
@@ -2344,10 +2344,6 @@ def get_webapp_html() -> str:
       inventoryOpen:false,
       inventory:null,
       invMsg:"",
-
-      oddsOpen:false,
-      rouletteOdds: [],
-      oddsLoading:false,
       q:"",
       searchResults: [],
       searchLoading: false,
@@ -2659,32 +2655,6 @@ def get_webapp_html() -> str:
       }
     }
 
-
-async function loadRouletteOdds(){
-  try{
-    state.oddsLoading = true;
-    const arr = await apiGet("/api/roulette/odds");
-    state.rouletteOdds = Array.isArray(arr) ? arr : [];
-  }catch(e){
-    state.rouletteOdds = [];
-  }finally{
-    state.oddsLoading = false;
-  }
-}
-
-async function openOdds(){
-  state.oddsOpen = true;
-  render();
-  if(!state.rouletteOdds || state.rouletteOdds.length===0){
-    await loadRouletteOdds();
-  }
-  render();
-}
-function closeOdds(){
-  state.oddsOpen = false;
-  render();
-}
-
     async function openПрофиль(view){
       state.profileOpen = true;
       state.profileView = view || "menu";
@@ -2720,22 +2690,18 @@ function closeOdds(){
       state.busy = true; state.msg = ""; render();
       try{
         const d = await apiPost("/api/roulette/spin", {telegram_id: tgUserId});
-
-        // Show in-app result sheet (НЕ Telegram popup), so it's always visible
-        state.rouletteWheel.prize = d;
-        state.rouletteWheel.overlay = true;
-
         state.msg = "🎡 Выпало: "+d.prize_label;
-
+        try{
+          if(tg && tg.showPopup){
+            tg.showPopup({title:"🎡 Рулетка", message:"Ваш приз: "+d.prize_label, buttons:[{type:"ok"}]});
+          }
+        }catch(e){}
         await refreshUser();
         await loadRaffleStatus();
         await loadRouletteHistory();
         haptic("light");
-        render();
-
       }catch(e){
         state.msg = "❌ "+(e.message||"Ошибка");
-        render();
       }finally{
         state.busy = false;
         render();
@@ -2967,6 +2933,132 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
         state.rouletteRecent = [];
       }
     }
+
+    async function openOddsModal(){
+      if(state.busy) return;
+      state.busy = true;
+      renderПрофильSheet();
+      let odds = null;
+      try{
+        odds = await apiGet("/api/roulette/odds");
+      }catch(e){
+        state.busy = false;
+        state.msg = "❌ "+(e.message||"Ошибка");
+        renderПрофильSheet();
+        return;
+      }
+      state.busy = false;
+      renderПрофильSheet();
+
+      // remove existing odds overlay if any
+      try{
+        const old = document.getElementById("oddsOverlay");
+        if(old) old.remove();
+      }catch(e){}
+
+      const overlay = document.createElement("div");
+      overlay.id = "oddsOverlay";
+      overlay.style.position = "fixed";
+      overlay.style.inset = "0";
+      overlay.style.background = "rgba(0,0,0,0.62)";
+      overlay.style.zIndex = "200000";
+      overlay.style.display = "flex";
+      overlay.style.alignItems = "flex-end";
+      overlay.style.justifyContent = "center";
+      overlay.style.padding = "14px";
+      overlay.addEventListener("click", (ev)=>{
+        if(ev.target === overlay){ overlay.remove(); }
+      });
+
+      const card = document.createElement("div");
+      card.style.width = "min(560px, 100%)";
+      card.style.borderRadius = "22px";
+      card.style.padding = "14px 14px 10px";
+      card.style.border = "1px solid rgba(255,255,255,0.14)";
+      card.style.background = "rgba(255,255,255,0.08)";
+      card.style.backdropFilter = "blur(16px)";
+      card.style.webkitBackdropFilter = "blur(16px)";
+      card.style.boxShadow = "0 18px 55px rgba(0,0,0,0.65)";
+      card.style.maxHeight = "78vh";
+      card.style.overflow = "auto";
+
+      const h = document.createElement("div");
+      h.style.display = "flex";
+      h.style.justifyContent = "space-between";
+      h.style.alignItems = "center";
+      h.style.gap = "10px";
+      h.innerHTML = '<div style="font-weight:950;font-size:14px">🎯 Шансы</div>';
+
+      const close = document.createElement("div");
+      close.textContent = "Закрыть";
+      close.style.cursor = "pointer";
+      close.style.fontSize = "13px";
+      close.style.fontWeight = "900";
+      close.style.color = "rgba(255,255,255,0.72)";
+      close.addEventListener("click", ()=>overlay.remove());
+      h.appendChild(close);
+      card.appendChild(h);
+
+      const sub = document.createElement("div");
+      sub.textContent = "Проценты совпадают с реальной логикой выпадения.";
+      sub.style.marginTop = "6px";
+      sub.style.fontSize = "12px";
+      sub.style.color = "rgba(255,255,255,0.62)";
+      card.appendChild(sub);
+
+      const list = document.createElement("div");
+      list.style.marginTop = "12px";
+      list.style.display = "grid";
+      list.style.gap = "8px";
+
+      (Array.isArray(odds) ? odds : []).forEach(it=>{
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.justifyContent = "space-between";
+        row.style.alignItems = "center";
+        row.style.padding = "10px 12px";
+        row.style.borderRadius = "16px";
+        row.style.border = "1px solid rgba(255,255,255,0.12)";
+        row.style.background = "rgba(255,255,255,0.04)";
+        const left = document.createElement("div");
+        left.textContent = it.label || it.key || "—";
+        left.style.fontWeight = "900";
+        left.style.fontSize = "13px";
+        left.style.color = "rgba(255,255,255,0.92)";
+        const right = document.createElement("div");
+        right.textContent = (it.percent_str || (String(it.percent||"")+"%"));
+        right.style.fontWeight = "1000";
+        right.style.fontSize = "13px";
+        right.style.color = "rgba(235,245,255,0.92)";
+        row.appendChild(left);
+        row.appendChild(right);
+        list.appendChild(row);
+      });
+
+      card.appendChild(list);
+
+      const okBtn = document.createElement("button");
+      okBtn.textContent = "ОК";
+      okBtn.style.marginTop = "12px";
+      okBtn.style.width = "100%";
+      okBtn.style.padding = "12px 14px";
+      okBtn.style.borderRadius = "18px";
+      okBtn.style.border = "1px solid rgba(235,245,255,0.22)";
+      okBtn.style.background = "rgba(235,245,255,0.10)";
+      okBtn.style.color = "rgba(255,255,255,0.96)";
+      okBtn.style.fontWeight = "950";
+      okBtn.style.cursor = "pointer";
+      okBtn.addEventListener("click", ()=>overlay.remove());
+      card.appendChild(okBtn);
+
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+
+      // cleanup on next render
+      state._cleanup = state._cleanup || [];
+      state._cleanup.push(()=>{ try{ overlay.remove(); }catch(e){} });
+    }
+
 
     function startTicker(){
       // simple ticker transform loop
@@ -3793,172 +3885,6 @@ function renderБонусы(main){
       }
     }
 
-
-function renderOddsSheet(){
-  const overlay = document.getElementById("oddsOverlay");
-  overlay.classList.toggle("open", !!state.oddsOpen);
-  const content = document.getElementById("oddsContent");
-  content.innerHTML = "";
-  if(!state.oddsOpen) return;
-
-  const hdr = el("div","row");
-  hdr.style.alignItems="baseline";
-  hdr.appendChild(el("div","h1","Шансы"));
-  const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
-  close.addEventListener("click", ()=>{ haptic(); closeOdds(); });
-  hdr.appendChild(close);
-  content.appendChild(hdr);
-
-  content.appendChild(el("div","sub","Вероятность каждой ячейки рулетки."));
-
-  if(state.oddsLoading){
-    content.appendChild(el("div","sub","Загрузка…"));
-    return;
-  }
-
-  const arr = Array.isArray(state.rouletteOdds) ? state.rouletteOdds : [];
-  if(arr.length===0){
-    content.appendChild(el("div","sub","Нет данных."));
-    return;
-  }
-
-  const list = el("div");
-  list.style.marginTop="12px";
-  list.style.display="grid";
-  list.style.gap="10px";
-
-  for(const it of arr){
-    const card = el("div","card2");
-    card.style.padding="14px";
-    card.style.display="flex";
-    card.style.justifyContent="space-between";
-    card.style.alignItems="center";
-    card.style.gap="12px";
-
-    const left = el("div");
-    left.innerHTML = '<div style="font-size:14px;font-weight:950">'+esc(it.label||"")+'</div>'+
-                     '<div class="sub" style="margin-top:6px">'+esc(it.percent_str||"")+'</div>';
-
-    const right = el("div","pill", esc(it.percent_str||""));
-    right.style.whiteSpace="nowrap";
-
-    card.appendChild(left);
-    card.appendChild(right);
-    list.appendChild(card);
-  }
-
-  content.appendChild(list);
-}
-
-    
-
-function renderResultSheet(){
-  const overlay = document.getElementById("resultOverlay");
-  const sheet = document.getElementById("resultSheet");
-  if(!overlay || !sheet) return;
-
-  const prize = state.rouletteWheel && state.rouletteWheel.prize ? state.rouletteWheel.prize : null;
-  const on = !!prize;
-  overlay.classList.toggle("on", on);
-
-  // add dior sparkle class only for main prize
-  const isDior = !!(prize && String(prize.prize_key||"") === "dior_palette");
-  overlay.classList.toggle("dior", on && isDior);
-
-  sheet.innerHTML = "";
-  if(!on) return;
-
-  sheet.appendChild(el("div","sheetHandle"));
-
-  const wrap = el("div");
-  wrap.style.padding = "16px 16px 18px";
-
-  // Header
-  const title = el("div", null, '<div style="font-size:18px;font-weight:950;letter-spacing:-0.01em">🎁 '+esc(prize.prize_label||"Приз")+'</div>');
-  wrap.appendChild(title);
-
-  // Sub / details
-  let subTxt = "";
-  if(prize.prize_type === "points"){
-    subTxt = "Начислено на баланс: <b style='color:rgba(255,255,255,0.92)'>+"+esc(prize.points||0)+"</b> баллов";
-  }else if(prize.prize_type === "ticket"){
-    subTxt = "Добавлено в косметичку: <b style='color:rgba(255,255,255,0.92)'>+"+esc(prize.ticket_qty||1)+"</b> билет(ов)";
-  }else if(isDior){
-    subTxt = "Главный приз. Можно <b>забрать</b> или <b>конвертировать</b> в баллы.";
-  }else{
-    subTxt = "Ваш приз готов.";
-  }
-  const sub = el("div","sub", subTxt);
-  sub.style.marginTop = "8px";
-  wrap.appendChild(sub);
-
-  // Actions
-  const actions = el("div");
-  actions.style.marginTop = "14px";
-  actions.style.display = "grid";
-  actions.style.gap = "10px";
-
-  if(isDior){
-    const claimBtn = el("div","btn");
-    claimBtn.style.justifyContent="center";
-    claimBtn.style.fontWeight="950";
-    claimBtn.style.border="1px solid rgba(235,245,255,0.22)";
-    claimBtn.style.background="rgba(235,245,255,0.10)";
-    claimBtn.innerHTML = '<div class="btnTitle">🎁 Забрать</div><div class="btnSub">Заполнить анкету</div>';
-    claimBtn.addEventListener("click", async ()=>{
-      if(state.busy) return;
-      haptic();
-      await claimFromResult();
-      renderResultSheet();
-    });
-
-    const convBtn = el("div","btn");
-    convBtn.style.justifyContent="center";
-    convBtn.style.fontWeight="950";
-    convBtn.style.border="1px solid rgba(255,255,255,0.16)";
-    convBtn.style.background="rgba(255,255,255,0.06)";
-    convBtn.innerHTML = '<div class="btnTitle">♻️ Конвертировать</div><div class="btnSub">Получить +50 000 баллов</div>';
-    convBtn.addEventListener("click", async ()=>{
-      if(state.busy) return;
-      haptic();
-      await convertFromResult();
-      renderResultSheet();
-    });
-
-    actions.appendChild(claimBtn);
-    actions.appendChild(convBtn);
-  }else{
-    const okBtn = el("div","btn");
-    okBtn.style.justifyContent="center";
-    okBtn.style.fontWeight="950";
-    okBtn.style.border="1px solid rgba(255,255,255,0.16)";
-    okBtn.style.background="rgba(255,255,255,0.06)";
-    okBtn.innerHTML = '<div class="btnTitle">Ок</div><div class="btnSub">Закрыть</div>';
-    okBtn.addEventListener("click", ()=>{ haptic(); closeResultSheet(); renderResultSheet(); });
-    actions.appendChild(okBtn);
-
-    const invBtn = el("div","btn");
-    invBtn.style.justifyContent="center";
-    invBtn.style.fontWeight="950";
-    invBtn.style.border="1px solid rgba(255,255,255,0.10)";
-    invBtn.style.background="rgba(255,255,255,0.04)";
-    invBtn.innerHTML = '<div class="btnTitle">👜 Моя косметичка</div><div class="btnSub">Посмотреть призы</div>';
-    invBtn.addEventListener("click", async ()=>{
-      haptic();
-      closeResultSheet();
-      await openInventory();
-      renderResultSheet();
-    });
-    actions.appendChild(invBtn);
-  }
-
-  wrap.appendChild(actions);
-
-  sheet.appendChild(wrap);
-}
-
-
-
     function renderПрофильSheet(){
       const overlay = document.getElementById("profileOverlay");
       overlay.classList.toggle("open", !!state.profileOpen);
@@ -4127,25 +4053,23 @@ if(state.profileView==="raffle"){
 if(state.profileView==="roulette"){
           const wrap = el("div","rouletteWrap");
 
-          
-const titleRow = el("div","row");
-titleRow.style.marginTop="12px";
-titleRow.style.alignItems="baseline";
+          const titleRow = el("div","row");
+          titleRow.style.marginTop="12px";
+          titleRow.style.justifyContent="space-between";
+          titleRow.style.alignItems="center";
 
-const titleLeft = el("div");
-titleLeft.innerHTML =
-  '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
-  '<div class="sub" style="margin-top:6px">Крутить = 2000 баллов.</div>';
-titleRow.appendChild(titleLeft);
+          const titleLeft = el("div");
+          titleLeft.innerHTML =
+            '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
+            '<div class="sub" style="margin-top:6px">Крутить = 2000 баллов.</div>';
+          titleRow.appendChild(titleLeft);
 
-const oddsBtn = el("div","pill","🎯 Шансы");
-oddsBtn.style.cursor="pointer";
-oddsBtn.style.userSelect="none";
-oddsBtn.addEventListener("click", ()=>{ haptic(); openOdds(); });
-titleRow.appendChild(oddsBtn);
+          const oddsBtn = el("div","cabinetPill","🎯 Шансы");
+          oddsBtn.style.cursor = "pointer";
+          oddsBtn.addEventListener("click", ()=>{ haptic(); openOddsModal(); });
+          titleRow.appendChild(oddsBtn);
 
-wrap.appendChild(titleRow);
-
+          wrap.appendChild(titleRow);
 
           const stage = el("div","wheelStage");
 
@@ -4224,7 +4148,7 @@ wrap.appendChild(titleRow);
           const card = el("div","resultCard");
           if(prize){
             const isDior = isDiorPrize;
-            card.appendChild(el("div","resultTitle", isDior ? "Главный приз" : "Выпало:"));
+            card.appendChild(el("div","resultTitle", isDior ? "Главный приз" : "🎉 Выигрыш"));
             card.appendChild(el("div","resultValue", esc(prize.prize_label)));
             card.appendChild(el("div","resultSub", isDior ? "Оформи получение или конвертируй в баллы." : "Готово."));
             const btns = el("div","resultBtns");
@@ -4247,7 +4171,7 @@ wrap.appendChild(titleRow);
             }else{
               const ok = document.createElement("button");
               ok.className="btnPrimary";
-              ok.textContent = "Принять";
+              ok.textContent = "ОК";
               ok.addEventListener("click", ()=>{ closeResultSheet(); });
               btns.appendChild(ok);
             }
@@ -4515,20 +4439,6 @@ if(state.profileView==="history"){
       const iC = el("div"); iC.id="invContent";
       iS.appendChild(iC); iO.appendChild(iS); root.appendChild(iO);
 
-// Шансы (Рулетка)
-const oldOdds = document.getElementById("oddsOverlay"); if(oldOdds) try{oldOdds.remove();}catch(e){}
-const oO = el("div","sheetOverlay"); oO.id="oddsOverlay";
-// Всегда поверх любых оверлеев
-oO.style.zIndex = "200000";
-oO.addEventListener("click", (e)=>{ if(e.target===oO){ haptic(); closeOdds(); }});
-const oS = el("div","sheet");
-oS.addEventListener("click",(e)=>e.stopPropagation());
-oS.appendChild(el("div","sheetHandle"));
-const oC = el("div"); oC.id="oddsContent";
-oS.appendChild(oC); oO.appendChild(oS);
-// ВАЖНО: монтируем поверх всего (в body), чтобы не попадать под слои рулетки/результата
-(document.body || document.documentElement).appendChild(oO);
-
       // Профиль
       const prO = el("div","sheetOverlay"); prO.id="profileOverlay";
       prO.addEventListener("click", (e)=>{ if(e.target===prO){ haptic(); closeПрофиль(); }});
@@ -4562,7 +4472,6 @@ oS.appendChild(oC); oO.appendChild(oS);
 
       renderPostsSheet();
       renderInventorySheet();
-      renderOddsSheet();
       renderПрофильSheet();
     }
 
@@ -5209,22 +5118,24 @@ async def roulette_recent_wins(limit: int = 12):
 
 
 
+
 @app.get("/api/roulette/odds")
 async def roulette_odds():
-    total = sum(int(x.get("weight") or 0) for x in ROULETTE_DISTRIBUTION) or 1
+    # Returns REAL odds based on ROULETTE_DISTRIBUTION weights (must match spin logic)
+    total = float(sum(int(x.get("weight") or 0) for x in ROULETTE_DISTRIBUTION) or 1)
     out = []
     for x in ROULETTE_DISTRIBUTION:
-        w = int(x.get("weight") or 0)
-        pct = (w / total) * 100.0
-        # pretty formatting: keep 2 decimals, but trim trailing zeros
-        pct_str = f"{pct:.2f}".rstrip("0").rstrip(".") + "%"
+        w = float(int(x.get("weight") or 0))
+        percent = (w / total) * 100.0
+        # Format: up to 4 decimals but trim zeros (e.g., 12.5%, 2.9166%)
+        s = f"{percent:.4f}".rstrip("0").rstrip(".") + "%"
         out.append(
             {
                 "key": str(x.get("key") or ""),
                 "label": str(x.get("label") or ""),
-                "weight": w,
-                "percent": pct,
-                "percent_str": pct_str,
+                "weight": int(x.get("weight") or 0),
+                "percent": percent,
+                "percent_str": s,
             }
         )
     return out
