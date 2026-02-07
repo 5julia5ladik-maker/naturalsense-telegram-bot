@@ -511,12 +511,6 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
 # -----------------------------------------------------------------------------
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
 
-def normalize_tag(tag: str | None) -> str | None:
-    """Normalize tag from webapp/API: accepts '#Люкс' or 'Люкс' and returns 'Люкс'."""
-    if not tag:
-        return None
-    return tag.strip().lstrip("#").strip()
-
 
 def extract_tags(text_: str | None) -> list[str]:
     if not text_:
@@ -681,59 +675,23 @@ async def upsert_post_from_channel(
         return p
 
 
-
 async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
-    tag = normalize_tag(tag)
     if tag and tag in BLOCKED_TAGS:
         return []
 
-    limit = max(1, min(int(limit), 100))
-    offset = max(0, int(offset))
-
     async with async_session_maker() as session:
-        base_q = (
+        q = (
             select(Post)
             .where(Post.is_deleted == False)  # noqa: E712
             .order_by(Post.message_id.desc())
+            .limit(limit)
+            .offset(offset)
         )
+        rows = (await session.execute(q)).scalars().all()
 
-        # ✅ Best path (Postgres): фильтруем по тегу прямо в SQL, чтобы работало по старым постам
-        if tag and getattr(engine.dialect, "name", "").startswith("postgres"):
-            q = base_q.where(Post.tags.contains([tag])).limit(limit).offset(offset)
-            return (await session.execute(q)).scalars().all()
-
-        # ✅ SQLite/прочее: делаем корректную пагинацию по "отфильтрованным" постам в Python,
-        # не обрезая выборку до фильтра (иначе старые #Люкс никогда не попадут)
-        if not tag:
-            q = base_q.limit(limit).offset(offset)
-            return (await session.execute(q)).scalars().all()
-
-        page_size = 500
-        raw_offset = 0
-        skipped = 0
-        out: list[Post] = []
-
-        while len(out) < limit:
-            q = base_q.limit(page_size).offset(raw_offset)
-            batch = (await session.execute(q)).scalars().all()
-            if not batch:
-                break
-
-            for p in batch:
-                if tag not in (p.tags or []):
-                    continue
-
-                if skipped < offset:
-                    skipped += 1
-                    continue
-
-                out.append(p)
-                if len(out) >= limit:
-                    break
-
-            raw_offset += page_size
-
-        return out
+    if tag:
+        rows = [p for p in rows if tag in (p.tags or [])]
+    return rows
 
 
 # -----------------------------------------------------------------------------
@@ -1593,7 +1551,7 @@ async def _telegram_runner():
     try:
         await tg_app.initialize()
         await tg_app.start()
-        await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
+        await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
         logger.info("✅ Telegram bot started (polling)")
         while True:
             await asyncio.sleep(3600)
@@ -4539,7 +4497,7 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     if not tag:
         return []
 
-    tag = normalize_tag(tag) or ""
+    tag = (tag or "").strip()
     if tag in BLOCKED_TAGS:
         return []
 
