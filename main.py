@@ -3850,6 +3850,115 @@ function renderOddsSheet(){
   content.appendChild(list);
 }
 
+    
+
+function renderResultSheet(){
+  const overlay = document.getElementById("resultOverlay");
+  const sheet = document.getElementById("resultSheet");
+  if(!overlay || !sheet) return;
+
+  const prize = state.rouletteWheel && state.rouletteWheel.prize ? state.rouletteWheel.prize : null;
+  const on = !!prize;
+  overlay.classList.toggle("on", on);
+
+  // add dior sparkle class only for main prize
+  const isDior = !!(prize && String(prize.prize_key||"") === "dior_palette");
+  overlay.classList.toggle("dior", on && isDior);
+
+  sheet.innerHTML = "";
+  if(!on) return;
+
+  sheet.appendChild(el("div","sheetHandle"));
+
+  const wrap = el("div");
+  wrap.style.padding = "16px 16px 18px";
+
+  // Header
+  const title = el("div", null, '<div style="font-size:18px;font-weight:950;letter-spacing:-0.01em">🎁 '+esc(prize.prize_label||"Приз")+'</div>');
+  wrap.appendChild(title);
+
+  // Sub / details
+  let subTxt = "";
+  if(prize.prize_type === "points"){
+    subTxt = "Начислено на баланс: <b style='color:rgba(255,255,255,0.92)'>+"+esc(prize.points||0)+"</b> баллов";
+  }else if(prize.prize_type === "ticket"){
+    subTxt = "Добавлено в косметичку: <b style='color:rgba(255,255,255,0.92)'>+"+esc(prize.ticket_qty||1)+"</b> билет(ов)";
+  }else if(isDior){
+    subTxt = "Главный приз. Можно <b>забрать</b> или <b>конвертировать</b> в баллы.";
+  }else{
+    subTxt = "Ваш приз готов.";
+  }
+  const sub = el("div","sub", subTxt);
+  sub.style.marginTop = "8px";
+  wrap.appendChild(sub);
+
+  // Actions
+  const actions = el("div");
+  actions.style.marginTop = "14px";
+  actions.style.display = "grid";
+  actions.style.gap = "10px";
+
+  if(isDior){
+    const claimBtn = el("div","btn");
+    claimBtn.style.justifyContent="center";
+    claimBtn.style.fontWeight="950";
+    claimBtn.style.border="1px solid rgba(235,245,255,0.22)";
+    claimBtn.style.background="rgba(235,245,255,0.10)";
+    claimBtn.innerHTML = '<div class="btnTitle">🎁 Забрать</div><div class="btnSub">Заполнить анкету</div>';
+    claimBtn.addEventListener("click", async ()=>{
+      if(state.busy) return;
+      haptic();
+      await claimFromResult();
+      renderResultSheet();
+    });
+
+    const convBtn = el("div","btn");
+    convBtn.style.justifyContent="center";
+    convBtn.style.fontWeight="950";
+    convBtn.style.border="1px solid rgba(255,255,255,0.16)";
+    convBtn.style.background="rgba(255,255,255,0.06)";
+    convBtn.innerHTML = '<div class="btnTitle">♻️ Конвертировать</div><div class="btnSub">Получить +50 000 баллов</div>';
+    convBtn.addEventListener("click", async ()=>{
+      if(state.busy) return;
+      haptic();
+      await convertFromResult();
+      renderResultSheet();
+    });
+
+    actions.appendChild(claimBtn);
+    actions.appendChild(convBtn);
+  }else{
+    const okBtn = el("div","btn");
+    okBtn.style.justifyContent="center";
+    okBtn.style.fontWeight="950";
+    okBtn.style.border="1px solid rgba(255,255,255,0.16)";
+    okBtn.style.background="rgba(255,255,255,0.06)";
+    okBtn.innerHTML = '<div class="btnTitle">Ок</div><div class="btnSub">Закрыть</div>';
+    okBtn.addEventListener("click", ()=>{ haptic(); closeResultSheet(); renderResultSheet(); });
+    actions.appendChild(okBtn);
+
+    const invBtn = el("div","btn");
+    invBtn.style.justifyContent="center";
+    invBtn.style.fontWeight="950";
+    invBtn.style.border="1px solid rgba(255,255,255,0.10)";
+    invBtn.style.background="rgba(255,255,255,0.04)";
+    invBtn.innerHTML = '<div class="btnTitle">👜 Моя косметичка</div><div class="btnSub">Посмотреть призы</div>';
+    invBtn.addEventListener("click", async ()=>{
+      haptic();
+      closeResultSheet();
+      await openInventory();
+      renderResultSheet();
+    });
+    actions.appendChild(invBtn);
+  }
+
+  wrap.appendChild(actions);
+
+  sheet.appendChild(wrap);
+}
+
+
+
     function renderПрофильSheet(){
       const overlay = document.getElementById("profileOverlay");
       overlay.classList.toggle("open", !!state.profileOpen);
