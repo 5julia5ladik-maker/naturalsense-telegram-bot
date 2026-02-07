@@ -2720,18 +2720,22 @@ function closeOdds(){
       state.busy = true; state.msg = ""; render();
       try{
         const d = await apiPost("/api/roulette/spin", {telegram_id: tgUserId});
+
+        // Show in-app result sheet (НЕ Telegram popup), so it's always visible
+        state.rouletteWheel.prize = d;
+        state.rouletteWheel.overlay = true;
+
         state.msg = "🎡 Выпало: "+d.prize_label;
-        try{
-          if(tg && tg.showPopup){
-            tg.showPopup({title:"🎡 Рулетка", message:"Ваш приз: "+d.prize_label, buttons:[{type:"ok"}]});
-          }
-        }catch(e){}
+
         await refreshUser();
         await loadRaffleStatus();
         await loadRouletteHistory();
         haptic("light");
+        render();
+
       }catch(e){
         state.msg = "❌ "+(e.message||"Ошибка");
+        render();
       }finally{
         state.busy = false;
         render();
