@@ -284,6 +284,12 @@ if str(DATABASE_URL).startswith(("postgresql", "postgres")):
     _engine_kwargs.update({"pool_recycle": 1800, "pool_size": 5, "max_overflow": 10})
 engine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+logger.info("DB dialect: %s", engine.dialect.name)
+if engine.dialect.name == "sqlite":
+    logger.warning("⚠️ Используется SQLite (%s). На Railway/Render/Heroku при деплое данные могут обнуляться. Рекомендуется Postgres (DATABASE_URL).", str(engine.url))
+
 # Backward-compatible alias (some handlers use async_session)
 async_session = async_session_maker
 
@@ -4531,6 +4537,33 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
             "media_url": media_url,
         })
     return out
+
+
+@app.get("/api/health")
+async def api_health():
+    """Диагностика: какая БД используется и сколько постов в базе."""
+    async with async_session_maker() as session:
+        total = (await session.execute(select(func.count(Post.id)))).scalar() or 0
+        alive = (
+            (await session.execute(select(func.count(Post.id)).where(Post.is_deleted == False)))  # noqa: E712
+        ).scalar() or 0
+
+    db_url = str(engine.url)
+    # маскируем креды, если есть
+    if "@" in db_url and "://" in db_url:
+        prefix, rest = db_url.split("://", 1)
+        if "@" in rest:
+            creds, host = rest.split("@", 1)
+            db_url = f"{prefix}://***@{host}"
+
+    return {
+        "ok": True,
+        "db_dialect": engine.dialect.name,
+        "db_url": db_url,
+        "posts_total": int(total),
+        "posts_alive": int(alive),
+    }
+
 
 @app.get("/api/search")
 async def api_search(q: str, limit: int = 50, offset: int = 0):
