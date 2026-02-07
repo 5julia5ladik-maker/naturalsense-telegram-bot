@@ -34,7 +34,6 @@ from sqlalchemy import (
     Column,
     Integer,
     String,
-    cast,
     DateTime,
     JSON,
     Boolean,
@@ -284,12 +283,6 @@ if str(DATABASE_URL).startswith(("postgresql", "postgres")):
     _engine_kwargs.update({"pool_recycle": 1800, "pool_size": 5, "max_overflow": 10})
 engine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-logger.info("DB dialect: %s", engine.dialect.name)
-if engine.dialect.name == "sqlite":
-    logger.warning("⚠️ Используется SQLite (%s). На Railway/Render/Heroku при деплое данные могут обнуляться. Рекомендуется Postgres (DATABASE_URL).", str(engine.url))
-
 # Backward-compatible alias (some handlers use async_session)
 async_session = async_session_maker
 
@@ -518,6 +511,12 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
 # -----------------------------------------------------------------------------
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
 
+def normalize_tag(tag: str | None) -> str | None:
+    """Normalize tag from webapp/API: accepts '#Люкс' or 'Люкс' and returns 'Люкс'."""
+    if not tag:
+        return None
+    return tag.strip().lstrip("#").strip()
+
 
 def extract_tags(text_: str | None) -> list[str]:
     if not text_:
@@ -682,34 +681,59 @@ async def upsert_post_from_channel(
         return p
 
 
-async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
-    """Возвращает посты (неудалённые) с корректной фильтрацией по тегу в БД.
 
-    Важно: раньше код делал LIMIT/OFFSET, а потом фильтровал по тегу в Python,
-    из‑за чего старые посты по тегу (#Люкс и т.п.) часто никогда не попадали в выборку.
-    """
+async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
+    tag = normalize_tag(tag)
     if tag and tag in BLOCKED_TAGS:
         return []
 
+    limit = max(1, min(int(limit), 100))
+    offset = max(0, int(offset))
+
     async with async_session_maker() as session:
-        q = select(Post).where(Post.is_deleted == False)  # noqa: E712
+        base_q = (
+            select(Post)
+            .where(Post.is_deleted == False)  # noqa: E712
+            .order_by(Post.message_id.desc())
+        )
 
-        if tag:
-            dialect = engine.dialect.name
-            # PostgreSQL: JSON/JSONB contains — самый корректный и быстрый вариант
-            if dialect == "postgresql":
-                try:
-                    q = q.where(Post.tags.contains([tag]))
-                except Exception:
-                    # на всякий случай — fallback через строковый LIKE
-                    q = q.where(cast(Post.tags, String).like(f'%"{tag}"%'))
-            else:
-                # SQLite / другие: fallback — ищем "tag" внутри JSON-строки
-                q = q.where(cast(Post.tags, String).like(f'%"{tag}"%'))
+        # ✅ Best path (Postgres): фильтруем по тегу прямо в SQL, чтобы работало по старым постам
+        if tag and getattr(engine.dialect, "name", "").startswith("postgres"):
+            q = base_q.where(Post.tags.contains([tag])).limit(limit).offset(offset)
+            return (await session.execute(q)).scalars().all()
 
-        q = q.order_by(Post.message_id.desc()).limit(limit).offset(offset)
-        rows = (await session.execute(q)).scalars().all()
-        return rows
+        # ✅ SQLite/прочее: делаем корректную пагинацию по "отфильтрованным" постам в Python,
+        # не обрезая выборку до фильтра (иначе старые #Люкс никогда не попадут)
+        if not tag:
+            q = base_q.limit(limit).offset(offset)
+            return (await session.execute(q)).scalars().all()
+
+        page_size = 500
+        raw_offset = 0
+        skipped = 0
+        out: list[Post] = []
+
+        while len(out) < limit:
+            q = base_q.limit(page_size).offset(raw_offset)
+            batch = (await session.execute(q)).scalars().all()
+            if not batch:
+                break
+
+            for p in batch:
+                if tag not in (p.tags or []):
+                    continue
+
+                if skipped < offset:
+                    skipped += 1
+                    continue
+
+                out.append(p)
+                if len(out) >= limit:
+                    break
+
+            raw_offset += page_size
+
+        return out
 
 
 # -----------------------------------------------------------------------------
@@ -4515,7 +4539,7 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     if not tag:
         return []
 
-    tag = (tag or "").strip()
+    tag = normalize_tag(tag) or ""
     if tag in BLOCKED_TAGS:
         return []
 
@@ -4537,33 +4561,6 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
             "media_url": media_url,
         })
     return out
-
-
-@app.get("/api/health")
-async def api_health():
-    """Диагностика: какая БД используется и сколько постов в базе."""
-    async with async_session_maker() as session:
-        total = (await session.execute(select(func.count(Post.id)))).scalar() or 0
-        alive = (
-            (await session.execute(select(func.count(Post.id)).where(Post.is_deleted == False)))  # noqa: E712
-        ).scalar() or 0
-
-    db_url = str(engine.url)
-    # маскируем креды, если есть
-    if "@" in db_url and "://" in db_url:
-        prefix, rest = db_url.split("://", 1)
-        if "@" in rest:
-            creds, host = rest.split("@", 1)
-            db_url = f"{prefix}://***@{host}"
-
-    return {
-        "ok": True,
-        "db_dialect": engine.dialect.name,
-        "db_url": db_url,
-        "posts_total": int(total),
-        "posts_alive": int(alive),
-    }
-
 
 @app.get("/api/search")
 async def api_search(q: str, limit: int = 50, offset: int = 0):
