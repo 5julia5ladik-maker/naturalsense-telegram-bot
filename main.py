@@ -34,6 +34,7 @@ from sqlalchemy import (
     Column,
     Integer,
     String,
+    cast,
     DateTime,
     JSON,
     Boolean,
@@ -676,22 +677,33 @@ async def upsert_post_from_channel(
 
 
 async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
+    """Возвращает посты (неудалённые) с корректной фильтрацией по тегу в БД.
+
+    Важно: раньше код делал LIMIT/OFFSET, а потом фильтровал по тегу в Python,
+    из‑за чего старые посты по тегу (#Люкс и т.п.) часто никогда не попадали в выборку.
+    """
     if tag and tag in BLOCKED_TAGS:
         return []
 
     async with async_session_maker() as session:
-        q = (
-            select(Post)
-            .where(Post.is_deleted == False)  # noqa: E712
-            .order_by(Post.message_id.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        rows = (await session.execute(q)).scalars().all()
+        q = select(Post).where(Post.is_deleted == False)  # noqa: E712
 
-    if tag:
-        rows = [p for p in rows if tag in (p.tags or [])]
-    return rows
+        if tag:
+            dialect = engine.dialect.name
+            # PostgreSQL: JSON/JSONB contains — самый корректный и быстрый вариант
+            if dialect == "postgresql":
+                try:
+                    q = q.where(Post.tags.contains([tag]))
+                except Exception:
+                    # на всякий случай — fallback через строковый LIKE
+                    q = q.where(cast(Post.tags, String).like(f'%"{tag}"%'))
+            else:
+                # SQLite / другие: fallback — ищем "tag" внутри JSON-строки
+                q = q.where(cast(Post.tags, String).like(f'%"{tag}"%'))
+
+        q = q.order_by(Post.message_id.desc()).limit(limit).offset(offset)
+        rows = (await session.execute(q)).scalars().all()
+        return rows
 
 
 # -----------------------------------------------------------------------------
@@ -1510,10 +1522,6 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
 
     text_ = msg.text or msg.caption or ""
 
-    # ✅ Если редактируют старый пост — поднимаем его "вверх" в журнале.
-    # Иначе он сохранится с оригинальной датой и будет далеко внизу из‑за сортировки по Post.date desc.
-    effective_date = getattr(msg, "edit_date", None) or datetime.utcnow()
-
     # Detect media (for Mini App previews)
     media_type = None
     media_file_id = None
@@ -1540,7 +1548,7 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
 
     await upsert_post_from_channel(
         message_id=msg.message_id,
-        date=effective_date,
+        date=msg.date,
         text_=text_,
         media_type=media_type,
         media_file_id=media_file_id,
@@ -1555,7 +1563,7 @@ async def _telegram_runner():
     try:
         await tg_app.initialize()
         await tg_app.start()
-        await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
         logger.info("✅ Telegram bot started (polling)")
         while True:
             await asyncio.sleep(3600)
