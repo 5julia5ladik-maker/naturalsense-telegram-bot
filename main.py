@@ -1850,7 +1850,7 @@ def get_webapp_html() -> str:
       background:var(--sheetOverlay);
       backdrop-filter:blur(22px) saturate(180%);
       -webkit-backdrop-filter:blur(22px) saturate(180%);
-      z-index:9999;display:none;
+      z-index:10060;display:none;
       justify-content:center;align-items:flex-end;padding:10px;
     }
     .sheetOverlay.open{display:flex}
