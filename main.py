@@ -1510,6 +1510,10 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
 
     text_ = msg.text or msg.caption or ""
 
+    # ✅ Если редактируют старый пост — поднимаем его "вверх" в журнале.
+    # Иначе он сохранится с оригинальной датой и будет далеко внизу из‑за сортировки по Post.date desc.
+    effective_date = getattr(msg, "edit_date", None) or datetime.utcnow()
+
     # Detect media (for Mini App previews)
     media_type = None
     media_file_id = None
@@ -1536,7 +1540,7 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
 
     await upsert_post_from_channel(
         message_id=msg.message_id,
-        date=msg.date,
+        date=effective_date,
         text_=text_,
         media_type=media_type,
         media_file_id=media_file_id,
