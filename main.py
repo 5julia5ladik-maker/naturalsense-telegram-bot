@@ -276,7 +276,12 @@ Index("ix_roulette_claims_tid_created", RouletteClaim.telegram_id, RouletteClaim
 # -----------------------------------------------------------------------------
 # DATABASE
 # -----------------------------------------------------------------------------
-engine = create_async_engine(DATABASE_URL, echo=False)
+# Engine with keepalive (fix: "connection is closed" on asyncpg idle disconnects)
+_engine_kwargs = {"echo": False, "pool_pre_ping": True}
+# Recycle connections for Postgres/asyncpg to avoid stale closed sockets
+if str(DATABASE_URL).startswith(("postgresql", "postgres")):
+    _engine_kwargs.update({"pool_recycle": 1800, "pool_size": 5, "max_overflow": 10})
+engine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 # Backward-compatible alias (some handlers use async_session)
 async_session = async_session_maker
@@ -2340,6 +2345,8 @@ def get_webapp_html() -> str:
 
       rouletteRecent: [],
       rouletteWheel: {angle:0, spinning:false, mode:"idle", lastTick:-1, startedAt:0, targetKey:null, spinId:null, prize:null, overlay:false},
+      rouletteStatus: {can_spin:true, seconds_left:0, enough_points:true, points:0, spin_cost:2000},
+      rouletteCooldownTick: 0,
       claim: {open:false, claim_id:null, claim_code:null, status:null, prize_label:null, data:null, step:1, form:{full_name:"", phone:"", country:"", city:"", address_line:"", postal_code:"", comment:""}},
       inventoryOpen:false,
       inventory:null,
@@ -2934,132 +2941,6 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
       }
     }
 
-    async function openOddsModal(){
-      if(state.busy) return;
-      state.busy = true;
-      renderПрофильSheet();
-      let odds = null;
-      try{
-        odds = await apiGet("/api/roulette/odds");
-      }catch(e){
-        state.busy = false;
-        state.msg = "❌ "+(e.message||"Ошибка");
-        renderПрофильSheet();
-        return;
-      }
-      state.busy = false;
-      renderПрофильSheet();
-
-      // remove existing odds overlay if any
-      try{
-        const old = document.getElementById("oddsOverlay");
-        if(old) old.remove();
-      }catch(e){}
-
-      const overlay = document.createElement("div");
-      overlay.id = "oddsOverlay";
-      overlay.style.position = "fixed";
-      overlay.style.inset = "0";
-      overlay.style.background = "rgba(0,0,0,0.62)";
-      overlay.style.zIndex = "200000";
-      overlay.style.display = "flex";
-      overlay.style.alignItems = "flex-end";
-      overlay.style.justifyContent = "center";
-      overlay.style.padding = "14px";
-      overlay.addEventListener("click", (ev)=>{
-        if(ev.target === overlay){ overlay.remove(); }
-      });
-
-      const card = document.createElement("div");
-      card.style.width = "min(560px, 100%)";
-      card.style.borderRadius = "22px";
-      card.style.padding = "14px 14px 10px";
-      card.style.border = "1px solid rgba(255,255,255,0.14)";
-      card.style.background = "rgba(255,255,255,0.08)";
-      card.style.backdropFilter = "blur(16px)";
-      card.style.webkitBackdropFilter = "blur(16px)";
-      card.style.boxShadow = "0 18px 55px rgba(0,0,0,0.65)";
-      card.style.maxHeight = "78vh";
-      card.style.overflow = "auto";
-
-      const h = document.createElement("div");
-      h.style.display = "flex";
-      h.style.justifyContent = "space-between";
-      h.style.alignItems = "center";
-      h.style.gap = "10px";
-      h.innerHTML = '<div style="font-weight:950;font-size:14px">🎯 Шансы</div>';
-
-      const close = document.createElement("div");
-      close.textContent = "Закрыть";
-      close.style.cursor = "pointer";
-      close.style.fontSize = "13px";
-      close.style.fontWeight = "900";
-      close.style.color = "rgba(255,255,255,0.72)";
-      close.addEventListener("click", ()=>overlay.remove());
-      h.appendChild(close);
-      card.appendChild(h);
-
-      const sub = document.createElement("div");
-      sub.textContent = "Проценты совпадают с реальной логикой выпадения.";
-      sub.style.marginTop = "6px";
-      sub.style.fontSize = "12px";
-      sub.style.color = "rgba(255,255,255,0.62)";
-      card.appendChild(sub);
-
-      const list = document.createElement("div");
-      list.style.marginTop = "12px";
-      list.style.display = "grid";
-      list.style.gap = "8px";
-
-      (Array.isArray(odds) ? odds : []).forEach(it=>{
-        const row = document.createElement("div");
-        row.style.display = "flex";
-        row.style.justifyContent = "space-between";
-        row.style.alignItems = "center";
-        row.style.padding = "10px 12px";
-        row.style.borderRadius = "16px";
-        row.style.border = "1px solid rgba(255,255,255,0.12)";
-        row.style.background = "rgba(255,255,255,0.04)";
-        const left = document.createElement("div");
-        left.textContent = it.label || it.key || "—";
-        left.style.fontWeight = "900";
-        left.style.fontSize = "13px";
-        left.style.color = "rgba(255,255,255,0.92)";
-        const right = document.createElement("div");
-        right.textContent = (it.percent_str || (String(it.percent||"")+"%"));
-        right.style.fontWeight = "1000";
-        right.style.fontSize = "13px";
-        right.style.color = "rgba(235,245,255,0.92)";
-        row.appendChild(left);
-        row.appendChild(right);
-        list.appendChild(row);
-      });
-
-      card.appendChild(list);
-
-      const okBtn = document.createElement("button");
-      okBtn.textContent = "ОК";
-      okBtn.style.marginTop = "12px";
-      okBtn.style.width = "100%";
-      okBtn.style.padding = "12px 14px";
-      okBtn.style.borderRadius = "18px";
-      okBtn.style.border = "1px solid rgba(235,245,255,0.22)";
-      okBtn.style.background = "rgba(235,245,255,0.10)";
-      okBtn.style.color = "rgba(255,255,255,0.96)";
-      okBtn.style.fontWeight = "950";
-      okBtn.style.cursor = "pointer";
-      okBtn.addEventListener("click", ()=>overlay.remove());
-      card.appendChild(okBtn);
-
-      overlay.appendChild(card);
-      document.body.appendChild(overlay);
-
-      // cleanup on next render
-      state._cleanup = state._cleanup || [];
-      state._cleanup.push(()=>{ try{ overlay.remove(); }catch(e){} });
-    }
-
-
     function startTicker(){
       // simple ticker transform loop
       stopTickerRaf();
@@ -3111,7 +2992,36 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
       })();
     }
 
-    async function spinRouletteLux(){
+    
+    async function updateRouletteStatus(){
+      if(!tgUserId) return;
+      try{
+        const st = await apiGet("/api/roulette/status?telegram_id="+encodeURIComponent(tgUserId));
+        state.rouletteStatus = st;
+      }catch(e){
+        // ignore UI status errors
+      }
+    }
+
+    function startRouletteCooldownTicker(){
+      // One ticker for countdown UI (prevents multiple intervals)
+      if(state._rouletteCooldownTimer) return;
+      state._rouletteCooldownTimer = setInterval(()=>{
+        try{
+          if(!state.rouletteStatus) return;
+          if(state.rouletteStatus.seconds_left && state.rouletteStatus.seconds_left > 0){
+            state.rouletteStatus.seconds_left = Math.max(0, (state.rouletteStatus.seconds_left|0) - 1);
+            state.rouletteStatus.can_spin_time = state.rouletteStatus.seconds_left===0;
+            state.rouletteStatus.can_spin = state.rouletteStatus.can_spin_time && !!state.rouletteStatus.enough_points;
+            state.rouletteCooldownTick = (state.rouletteCooldownTick||0)+1;
+            // rerender only if roulette screen visible
+            if(state.profileView==="roulette"){ renderПрофильSheet(); }
+          }
+        }catch(e){}
+      }, 1000);
+    }
+
+async function spinRouletteLux(){
       if(!tgUserId || state.busy) return;
       state.busy = true; state.msg=""; state.rouletteWheel.overlay=false;
       renderПрофильSheet();
@@ -3129,6 +3039,7 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
         stopTickerRaf();
         state.busy=false;
         state.msg = "❌ "+(err && err.message ? err.message : "Ошибка");
+        await updateRouletteStatus();
         renderПрофильSheet();
         return;
       }
@@ -3168,9 +3079,9 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
       animateToAngle(finalAngle, 1850, async ()=>{
         // show result sheet
         state.busy = false;
-        state.rouletteWheel.overlay = (key==="dior_palette");
+        state.rouletteWheel.overlay = true; // show result sheet for ANY prize
         // refresh user / history / recent
-        await Promise.all([refreshUser(), loadRaffleStatus(), loadRouletteHistory(), loadRouletteRecent()]);
+        await Promise.all([refreshUser(), loadRaffleStatus(), loadRouletteHistory(), loadRouletteRecent(), updateRouletteStatus()]);
         renderПрофильSheet();
         // popup light
         try{
@@ -4053,23 +3964,12 @@ if(state.profileView==="raffle"){
 if(state.profileView==="roulette"){
           const wrap = el("div","rouletteWrap");
 
-          const titleRow = el("div","row");
-          titleRow.style.marginTop="12px";
-          titleRow.style.justifyContent="space-between";
-          titleRow.style.alignItems="center";
-
-          const titleLeft = el("div");
-          titleLeft.innerHTML =
+          const title = el("div");
+          title.style.marginTop="12px";
+          title.innerHTML =
             '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
             '<div class="sub" style="margin-top:6px">Крутить = 2000 баллов.</div>';
-          titleRow.appendChild(titleLeft);
-
-          const oddsBtn = el("div","cabinetPill","🎯 Шансы");
-          oddsBtn.style.cursor = "pointer";
-          oddsBtn.addEventListener("click", ()=>{ haptic(); openOddsModal(); });
-          titleRow.appendChild(oddsBtn);
-
-          wrap.appendChild(titleRow);
+          wrap.appendChild(title);
 
           const stage = el("div","wheelStage");
 
@@ -4117,7 +4017,8 @@ if(state.profileView==="roulette"){
           wrap.appendChild(stage);
 
           // CTA
-          const can = (state.user?.points||0) >= 2000 && !state.busy;
+          const st = state.rouletteStatus || {can_spin:true, seconds_left:0, enough_points:true};
+          const can = !!st.can_spin && !state.busy;
           const b = el("div","btn");
           b.style.marginTop="14px";
           b.style.opacity = (can || state.busy) ? 1 : 0.55;
@@ -4128,7 +4029,11 @@ if(state.profileView==="roulette"){
           b.addEventListener("click", ()=>{ if(can && !state.busy){ spinRouletteLux(); } });
           wrap.appendChild(b);
 
-          content.appendChild(wrap);
+                    // status + cooldown UI
+          updateRouletteStatus();
+          startRouletteCooldownTicker();
+
+content.appendChild(wrap);
 
           // draw wheel now
           setTimeout(()=>{
@@ -4137,18 +4042,28 @@ if(state.profileView==="roulette"){
           }, 0);
 
           // Result overlay + sheet
+          // Remove previous result overlays (avoid stacking / z-index bugs)
+          try{
+            const oldO = document.getElementById("nsResultOverlay"); if(oldO) oldO.remove();
+            const oldS = document.getElementById("nsResultSheet"); if(oldS) oldS.remove();
+          }catch(e){}
+
           const prize = state.rouletteWheel.prize;
           const isDiorPrize = !!(prize && prize.prize_key==="dior_palette");
           // Overlay should appear for ANY prize (popup), Dior gets extra sparkle class.
           const overlay = el("div","resultSheetOverlay"+(prize?" on":"")+(isDiorPrize?" dior":""));
+          overlay.id="nsResultOverlay";
+          overlay.style.zIndex = "200000";
           overlay.addEventListener("click", ()=>{ if(!state.busy){ closeResultSheet(); } });
           document.body.appendChild(overlay);
 
           const sheet = el("div","resultSheet"+(prize?" on":""));
+          sheet.id="nsResultSheet";
+          sheet.style.zIndex = "200001";
           const card = el("div","resultCard");
           if(prize){
             const isDior = isDiorPrize;
-            card.appendChild(el("div","resultTitle", isDior ? "Главный приз" : "🎉 Выигрыш"));
+            card.appendChild(el("div","resultTitle", isDior ? "Главный приз" : "Выпало:"));
             card.appendChild(el("div","resultValue", esc(prize.prize_label)));
             card.appendChild(el("div","resultSub", isDior ? "Оформи получение или конвертируй в баллы." : "Готово."));
             const btns = el("div","resultBtns");
@@ -4171,7 +4086,7 @@ if(state.profileView==="roulette"){
             }else{
               const ok = document.createElement("button");
               ok.className="btnPrimary";
-              ok.textContent = "ОК";
+              ok.textContent = "Принять";
               ok.addEventListener("click", ()=>{ closeResultSheet(); });
               btns.appendChild(ok);
             }
@@ -5118,27 +5033,52 @@ async def roulette_recent_wins(limit: int = 12):
 
 
 
+@app.get("/api/roulette/status")
+async def roulette_status(telegram_id: int):
+    """
+    UI helper: tells if user can spin now and how many seconds left until next spin.
+    Also returns current points and spin cost.
+    """
+    tid = int(telegram_id)
+    now = datetime.utcnow()
+    async with async_session_maker() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == tid))
+        ).scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-@app.get("/api/roulette/odds")
-async def roulette_odds():
-    # Returns REAL odds based on ROULETTE_DISTRIBUTION weights (must match spin logic)
-    total = float(sum(int(x.get("weight") or 0) for x in ROULETTE_DISTRIBUTION) or 1)
-    out = []
-    for x in ROULETTE_DISTRIBUTION:
-        w = float(int(x.get("weight") or 0))
-        percent = (w / total) * 100.0
-        # Format: up to 4 decimals but trim zeros (e.g., 12.5%, 2.9166%)
-        s = f"{percent:.4f}".rstrip("0").rstrip(".") + "%"
-        out.append(
-            {
-                "key": str(x.get("key") or ""),
-                "label": str(x.get("label") or ""),
-                "weight": int(x.get("weight") or 0),
-                "percent": percent,
-                "percent_str": s,
-            }
-        )
-    return out
+        last_spin = (
+            await session.execute(
+                select(RouletteSpin.created_at)
+                .where(RouletteSpin.telegram_id == tid)
+                .order_by(RouletteSpin.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    secs_left = 0
+    can_spin_time = True
+    if last_spin and (now - last_spin) < ROULETTE_LIMIT_WINDOW:
+        delta = ROULETTE_LIMIT_WINDOW - (now - last_spin)
+        secs_left = max(1, int(delta.total_seconds()) + (1 if (delta.total_seconds() % 1) > 0 else 0))
+        can_spin_time = False
+
+    points = int(user.points or 0)
+    enough_points = points >= int(ROULETTE_SPIN_COST)
+    can_spin = can_spin_time and enough_points
+
+    return {
+        "telegram_id": tid,
+        "points": points,
+        "spin_cost": int(ROULETTE_SPIN_COST),
+        "cooldown_seconds": int(ROULETTE_LIMIT_WINDOW.total_seconds()),
+        "seconds_left": int(secs_left),
+        "can_spin": bool(can_spin),
+        "can_spin_time": bool(can_spin_time),
+        "enough_points": bool(enough_points),
+    }
+
 
 
 @app.post("/api/roulette/spin", response_model=SpinResp)
