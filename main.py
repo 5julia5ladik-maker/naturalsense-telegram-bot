@@ -2344,6 +2344,10 @@ def get_webapp_html() -> str:
       inventoryOpen:false,
       inventory:null,
       invMsg:"",
+
+      oddsOpen:false,
+      rouletteOdds: [],
+      oddsLoading:false,
       q:"",
       searchResults: [],
       searchLoading: false,
@@ -2654,6 +2658,32 @@ def get_webapp_html() -> str:
         state.rouletteHistory = [];
       }
     }
+
+
+async function loadRouletteOdds(){
+  try{
+    state.oddsLoading = true;
+    const arr = await apiGet("/api/roulette/odds");
+    state.rouletteOdds = Array.isArray(arr) ? arr : [];
+  }catch(e){
+    state.rouletteOdds = [];
+  }finally{
+    state.oddsLoading = false;
+  }
+}
+
+async function openOdds(){
+  state.oddsOpen = true;
+  render();
+  if(!state.rouletteOdds || state.rouletteOdds.length===0){
+    await loadRouletteOdds();
+  }
+  render();
+}
+function closeOdds(){
+  state.oddsOpen = false;
+  render();
+}
 
     async function openПрофиль(view){
       state.profileOpen = true;
@@ -3759,6 +3789,63 @@ function renderБонусы(main){
       }
     }
 
+
+function renderOddsSheet(){
+  const overlay = document.getElementById("oddsOverlay");
+  overlay.classList.toggle("open", !!state.oddsOpen);
+  const content = document.getElementById("oddsContent");
+  content.innerHTML = "";
+  if(!state.oddsOpen) return;
+
+  const hdr = el("div","row");
+  hdr.style.alignItems="baseline";
+  hdr.appendChild(el("div","h1","Шансы"));
+  const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
+  close.addEventListener("click", ()=>{ haptic(); closeOdds(); });
+  hdr.appendChild(close);
+  content.appendChild(hdr);
+
+  content.appendChild(el("div","sub","Вероятность каждой ячейки рулетки."));
+
+  if(state.oddsLoading){
+    content.appendChild(el("div","sub","Загрузка…"));
+    return;
+  }
+
+  const arr = Array.isArray(state.rouletteOdds) ? state.rouletteOdds : [];
+  if(arr.length===0){
+    content.appendChild(el("div","sub","Нет данных."));
+    return;
+  }
+
+  const list = el("div");
+  list.style.marginTop="12px";
+  list.style.display="grid";
+  list.style.gap="10px";
+
+  for(const it of arr){
+    const card = el("div","card2");
+    card.style.padding="14px";
+    card.style.display="flex";
+    card.style.justifyContent="space-between";
+    card.style.alignItems="center";
+    card.style.gap="12px";
+
+    const left = el("div");
+    left.innerHTML = '<div style="font-size:14px;font-weight:950">'+esc(it.label||"")+'</div>'+
+                     '<div class="sub" style="margin-top:6px">'+esc(it.percent_str||"")+'</div>';
+
+    const right = el("div","pill", esc(it.percent_str||""));
+    right.style.whiteSpace="nowrap";
+
+    card.appendChild(left);
+    card.appendChild(right);
+    list.appendChild(card);
+  }
+
+  content.appendChild(list);
+}
+
     function renderПрофильSheet(){
       const overlay = document.getElementById("profileOverlay");
       overlay.classList.toggle("open", !!state.profileOpen);
@@ -3927,12 +4014,25 @@ if(state.profileView==="raffle"){
 if(state.profileView==="roulette"){
           const wrap = el("div","rouletteWrap");
 
-          const title = el("div");
-          title.style.marginTop="12px";
-          title.innerHTML =
-            '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
-            '<div class="sub" style="margin-top:6px">Крутить = 2000 баллов.</div>';
-          wrap.appendChild(title);
+          
+const titleRow = el("div","row");
+titleRow.style.marginTop="12px";
+titleRow.style.alignItems="baseline";
+
+const titleLeft = el("div");
+titleLeft.innerHTML =
+  '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
+  '<div class="sub" style="margin-top:6px">Крутить = 2000 баллов.</div>';
+titleRow.appendChild(titleLeft);
+
+const oddsBtn = el("div","pill","🎯 Шансы");
+oddsBtn.style.cursor="pointer";
+oddsBtn.style.userSelect="none";
+oddsBtn.addEventListener("click", ()=>{ haptic(); openOdds(); });
+titleRow.appendChild(oddsBtn);
+
+wrap.appendChild(titleRow);
+
 
           const stage = el("div","wheelStage");
 
@@ -4302,6 +4402,15 @@ if(state.profileView==="history"){
       const iC = el("div"); iC.id="invContent";
       iS.appendChild(iC); iO.appendChild(iS); root.appendChild(iO);
 
+// Шансы (Рулетка)
+const oO = el("div","sheetOverlay"); oO.id="oddsOverlay";
+oO.addEventListener("click", (e)=>{ if(e.target===oO){ haptic(); closeOdds(); }});
+const oS = el("div","sheet");
+oS.addEventListener("click",(e)=>e.stopPropagation());
+oS.appendChild(el("div","sheetHandle"));
+const oC = el("div"); oC.id="oddsContent";
+oS.appendChild(oC); oO.appendChild(oS); root.appendChild(oO);
+
       // Профиль
       const prO = el("div","sheetOverlay"); prO.id="profileOverlay";
       prO.addEventListener("click", (e)=>{ if(e.target===prO){ haptic(); closeПрофиль(); }});
@@ -4335,6 +4444,7 @@ if(state.profileView==="history"){
 
       renderPostsSheet();
       renderInventorySheet();
+      renderOddsSheet();
       renderПрофильSheet();
     }
 
@@ -4977,6 +5087,28 @@ async def roulette_recent_wins(limit: int = 12):
     out = []
     for (label, dt) in rows:
         out.append({"prize_label": str(label), "created_at": dt.isoformat() if dt else None})
+    return out
+
+
+
+@app.get("/api/roulette/odds")
+async def roulette_odds():
+    total = sum(int(x.get("weight") or 0) for x in ROULETTE_DISTRIBUTION) or 1
+    out = []
+    for x in ROULETTE_DISTRIBUTION:
+        w = int(x.get("weight") or 0)
+        pct = (w / total) * 100.0
+        # pretty formatting: keep 2 decimals, but trim trailing zeros
+        pct_str = f"{pct:.2f}".rstrip("0").rstrip(".") + "%"
+        out.append(
+            {
+                "key": str(x.get("key") or ""),
+                "label": str(x.get("label") or ""),
+                "weight": w,
+                "percent": pct,
+                "percent_str": pct_str,
+            }
+        )
     return out
 
 
