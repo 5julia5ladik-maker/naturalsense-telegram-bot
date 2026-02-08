@@ -1500,6 +1500,8 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
 
+    logger.info(f"📩 channel_post received: id={msg.message_id} has_photo={bool(getattr(msg,'photo',None))} has_text={bool(getattr(msg,'text',None))} has_caption={bool(getattr(msg,'caption',None))}")
+
     text_ = (msg.caption if msg.caption is not None else msg.text) or ""
 
     # Detect media (for Mini App previews)
@@ -1541,6 +1543,8 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
     msg = update.edited_channel_post
     if not msg:
         return
+
+    logger.info(f"✏️ edited_channel_post received: id={msg.message_id} has_photo={bool(getattr(msg,'photo',None))} has_text={bool(getattr(msg,'text',None))} has_caption={bool(getattr(msg,'caption',None))}")
 
     text_ = (msg.caption if msg.caption is not None else msg.text) or ""
 
@@ -1584,6 +1588,11 @@ async def _telegram_runner():
     global tg_app
     try:
         await tg_app.initialize()
+        # Ensure polling receives updates even if a webhook was set previously
+        try:
+            await tg_app.bot.delete_webhook(drop_pending_updates=True)
+        except Exception as e:
+            logger.warning(f"⚠️ delete_webhook failed: {e}")
         await tg_app.start()
         await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
         logger.info("✅ Telegram bot started (polling)")
