@@ -698,39 +698,35 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
         return []
 
     tag = (tag or "").strip() if tag else None
-    want_norm = _norm_tag(tag) if tag else None
+    want_norm = None
+    if tag:
+        # Канонизируем запрос тега (например, 'люкс' -> 'Люкс'), сравниваем без учета регистра
+        tag_canon = CANON_TAGS.get(_norm_tag(tag), tag)
+        want_norm = _norm_tag(tag_canon)
+
+    # ВАЖНО: чтобы старые посты с тегом не пропадали, сначала берем расширенное окно,
+    # затем фильтруем по тегу и только потом применяем offset/limit к отфильтрованному списку.
+    # Это не меняет логику приложения — только позволяет видеть посты с тегом за пределами последних N.
+    window = max(1000, (offset + limit) * 40)
+    window = min(window, 5000)
 
     async with async_session_maker() as session:
         q = (
             select(Post)
             .where(Post.is_deleted == False)  # noqa: E712
+            .order_by(Post.message_id.desc())
+            .limit(window)
         )
-
-        # ✅ ВАЖНО: фильтруем по тегу ДО limit/offset, иначе старые посты с тегом не попадут в выборку
-        if tag:
-            try:
-                dialect = session.bind.dialect.name  # type: ignore[union-attr]
-            except Exception:
-                dialect = ""
-
-            if dialect in ("postgresql", "postgres"):
-                # JSON contains for Postgres
-                q = q.where(Post.tags.contains([tag]))  # type: ignore[arg-type]
-            elif dialect == "sqlite":
-                # SQLite JSON1: search inside JSON array
-                q = q.where(sql_text("EXISTS (SELECT 1 FROM json_each(posts.tags) WHERE value = :tag)")).params(tag=tag)
-            else:
-                # Fallback (works cross-db, but may be slower): post-filter after fetch
-                pass
-
-        q = q.order_by(Post.message_id.desc()).limit(limit).offset(offset)
-
         rows = (await session.execute(q)).scalars().all()
 
-    # Fallback normalization filter (kept for safety)
-    if tag and want_norm:
-        rows = [p for p in rows if any(_norm_tag(x) == want_norm for x in (p.tags or []))]
-    return rows
+    if want_norm:
+        def _canon_norm(x: str) -> str:
+            return _norm_tag(CANON_TAGS.get(_norm_tag(x), x))
+
+        rows = [p for p in rows if any(_canon_norm(x) == want_norm for x in (p.tags or []))]
+
+    return rows[offset: offset + limit]
+
 
 # -----------------------------------------------------------------------------
 # DELETE SWEEPER (AUTO CHECK)
