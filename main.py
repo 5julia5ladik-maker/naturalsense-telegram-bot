@@ -1,5 +1,6 @@
 import os
 import re
+import html
 import asyncio
 import logging
 import secrets
@@ -794,7 +795,98 @@ async def sweeper_loop():
             await sweep_deleted_posts(batch=30)
         except Exception as e:
             logger.error("Sweeper error: %s", e)
-        await asyncio.sleep(30)  # 30 секунд
+        await asyncio.sleep(30)  
+# -----------------------------------------------------------------------------
+# PUBLIC RECONCILE (AUTO DISCOVER NEW POSTS)
+# -----------------------------------------------------------------------------
+async def fetch_public_post_text(message_id: int) -> str | None:
+    """Fetches public embed HTML and extracts visible text. Returns None if not accessible or not found."""
+    url = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code == 404:
+                return None
+            if r.status_code != 200:
+                return None
+            html_text = r.text or ""
+    except Exception:
+        return None
+
+    low = html_text.lower()
+    # Not found / private / need join
+    if "message not found" in low or "post not found" in low:
+        return None
+    if "join channel" in low or "private channel" in low:
+        return None
+
+    # Very lightweight HTML-to-text extraction (no external deps)
+    txt = html_text
+    txt = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", txt)
+    txt = re.sub(r"(?is)<br\s*/?>", "\n", txt)
+    txt = re.sub(r"(?is)</p\s*>", "\n", txt)
+    txt = re.sub(r"(?is)<[^>]+>", " ", txt)
+    txt = html.unescape(txt)
+    txt = re.sub(r"[ \t\r]+", " ", txt)
+    txt = re.sub(r"\n\s+", "\n", txt)
+    txt = txt.strip()
+
+    # Heuristic: keep only the longest chunk that likely contains the message text
+    # If extraction failed, return empty string to still allow tagging from raw.
+    return txt if txt else ""
+
+async def reconcile_recent_public_posts(max_probe: int = 60):
+    """Best-effort: probe message_id gaps after the newest known id and index what exists.
+    This makes the bot resilient if it missed channel_post updates."""
+    try:
+        async with async_session() as session:
+            res = await session.execute(select(func.max(Post.message_id)))
+            last_id = res.scalar() or 0
+    except Exception:
+        return
+
+    start_id = int(last_id) + 1
+    end_id = start_id + int(max_probe) - 1
+
+    for mid in range(start_id, end_id + 1):
+        txt = await fetch_public_post_text(mid)
+        if txt is None:
+            continue
+
+        # Avoid indexing duplicates if concurrent runner
+        try:
+            async with async_session() as session:
+                exists = await session.execute(select(Post).where(Post.message_id == mid))
+                if exists.scalar_one_or_none():
+                    continue
+        except Exception:
+            pass
+
+        # Extract tags from the visible text (works for both text posts and captions)
+        tags = extract_tags(txt)
+
+        # Use the extracted text as post text; date is unknown from public embed reliably
+        await upsert_post_from_channel(
+            message_id=mid,
+            date=datetime.now(timezone.utc),
+            text_=txt,
+            media_type=None,
+            media_file_id=None,
+        )
+        # Ensure tags are persisted even if text got truncated upstream
+        if tags:
+            try:
+                async with async_session() as session:
+                    await session.execute(
+                        update(Post).where(Post.message_id == mid).values(tags=tags)
+                    )
+                    await session.commit()
+            except Exception:
+                pass
+
+        logger.info("🔎 Reconciled public post id=%s tags=%s", mid, tags)
+
+# 30 секунд
 
 
 # -----------------------------------------------------------------------------
@@ -1500,8 +1592,6 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
 
-    logger.info(f"📩 channel_post received: id={msg.message_id} has_photo={bool(getattr(msg,'photo',None))} has_text={bool(getattr(msg,'text',None))} has_caption={bool(getattr(msg,'caption',None))}")
-
     text_ = (msg.caption if msg.caption is not None else msg.text) or ""
 
     # Detect media (for Mini App previews)
@@ -1543,8 +1633,6 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
     msg = update.edited_channel_post
     if not msg:
         return
-
-    logger.info(f"✏️ edited_channel_post received: id={msg.message_id} has_photo={bool(getattr(msg,'photo',None))} has_text={bool(getattr(msg,'text',None))} has_caption={bool(getattr(msg,'caption',None))}")
 
     text_ = (msg.caption if msg.caption is not None else msg.text) or ""
 
@@ -1588,16 +1676,18 @@ async def _telegram_runner():
     global tg_app
     try:
         await tg_app.initialize()
-        # Ensure polling receives updates even if a webhook was set previously
-        try:
-            await tg_app.bot.delete_webhook(drop_pending_updates=True)
-        except Exception as e:
-            logger.warning(f"⚠️ delete_webhook failed: {e}")
         await tg_app.start()
-        await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        # Ensure webhook is disabled when using polling
+        try:
+            await tg_app.bot.delete_webhook(drop_pending_updates=False)
+        except Exception:
+            pass
+        await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
         logger.info("✅ Telegram bot started (polling)")
         while True:
-            await asyncio.sleep(3600)
+            # Auto-discover missed channel posts (best-effort)
+            await reconcile_recent_public_posts(max_probe=60)
+            await asyncio.sleep(30)
     except asyncio.CancelledError:
         raise
     except Exception as e:
