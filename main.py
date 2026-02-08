@@ -2298,7 +2298,7 @@ def get_webapp_html() -> str:
       try{
         if(tg){
           tg.setHeaderColor(bg);
-          tg.setНазадgroundColor(bg);
+          tg.setBackgroundColor(bg);
         }
       }catch(e){}
     }
