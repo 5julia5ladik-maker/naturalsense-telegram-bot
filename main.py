@@ -4619,13 +4619,15 @@ async def api_post_media(message_id: int):
 
 @app.get("/api/tag_card/{tag}")
 async def api_tag_card(tag: str):
-    """SVG-заглушка для постов без картинки: отдельная карта под каждый тег."""
-    t = (tag or "").strip()
-    if not t:
-        t = "Пост"
+    """
+    PNG-заглушка для постов без картинки: отдельная карта под каждый тег.
 
-    # Лёгкая вариативность оформления по тегу (акцент/подзаголовок)
+    Важно: PNG используется вместо SVG, потому что некоторые Telegram WebView
+    некорректно отображают SVG в <img>.
+    """
+    t = (tag or "").strip() or "Пост"
     key = _norm_tag(t)
+
     subtitle_map = {
         "люкс": "Luxury Selection",
         "новинка": "New Drop",
@@ -4640,7 +4642,6 @@ async def api_tag_card(tag: str):
     }
     subtitle = subtitle_map.get(key, "Natural Sense")
 
-    # Акценты по тегу (минимальные отличия, чтобы было «под каждый тег»)
     accent_map = {
         "люкс": ("#C9D1D9", "#0B0F14"),
         "новинка": ("#E6E1D6", "#0B0F14"),
@@ -4655,36 +4656,78 @@ async def api_tag_card(tag: str):
     }
     accent, bg = accent_map.get(key, ("#DDE3EA", "#0B0F14"))
 
-    # SVG 16:9 — выглядит как превью
-    svg = f'''<?xml version="1.0" encoding="UTF-8"?>
+    # --- simple in-memory cache ---
+    cache_key = f"{accent}|{bg}|{t}|{subtitle}"
+    if not hasattr(api_tag_card, "_cache"):
+        api_tag_card._cache = {}
+    cache: dict[str, bytes] = api_tag_card._cache  # type: ignore[attr-defined]
+    if cache_key in cache:
+        return Response(content=cache[cache_key], media_type="image/png", headers={"Cache-Control": "public, max-age=31536000"})
+
+    # --- render PNG ---
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except Exception:
+        # Fallback: if Pillow is missing, return SVG like before
+        svg = f"""<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="{bg}" stop-opacity="1"/>
-      <stop offset="100%" stop-color="{bg}" stop-opacity="0.92"/>
-    </linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000" flood-opacity="0.35"/>
-    </filter>
-  </defs>
+  <rect x="0" y="0" width="1280" height="720" fill="{bg}"/>
+  <text x="120" y="240" fill="{accent}" font-family="Arial" font-size="36" font-weight="700">#{t}</text>
+  <text x="120" y="340" fill="#FFFFFF" font-family="Arial" font-size="64" font-weight="800">NS•Natural Sense</text>
+  <text x="120" y="420" fill="rgba(255,255,255,0.75)" font-family="Arial" font-size="30" font-weight="600">{subtitle}</text>
+</svg>"""
+        return Response(content=svg, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=31536000"})
 
-  <rect x="0" y="0" width="1280" height="720" fill="url(#g)"/>
-  <rect x="72" y="72" width="1136" height="576" rx="44" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.16)" stroke-width="2" filter="url(#shadow)"/>
+    W, H = 1280, 720
+    img = Image.new("RGB", (W, H), bg)
+    d = ImageDraw.Draw(img)
 
-  <circle cx="160" cy="160" r="10" fill="{accent}" opacity="0.9"/>
-  <circle cx="196" cy="160" r="6" fill="{accent}" opacity="0.6"/>
+    # Card area
+    pad = 72
+    card = [pad, pad, W - pad, H - pad]
+    # semi-transparent look imitation (draw darker rectangle + border)
+    d.rounded_rectangle(card, radius=44, fill=(20, 26, 34), outline=(60, 70, 82), width=2)
 
-  <text x="120" y="230" fill="{accent}" font-family="Inter, -apple-system, Segoe UI, Arial" font-size="30" font-weight="600" opacity="0.9">#{t}</text>
+    # Accent dots
+    def hex_to_rgb(h):
+        h = h.lstrip("#")
+        return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+    acc = hex_to_rgb(accent)
+    d.ellipse((120, 120, 140, 140), fill=acc)
+    d.ellipse((156, 126, 168, 138), fill=acc)
 
-  <text x="120" y="330" fill="#FFFFFF" font-family="Inter, -apple-system, Segoe UI, Arial" font-size="64" font-weight="800" letter-spacing="0.5">{t}</text>
-  <text x="120" y="392" fill="rgba(255,255,255,0.78)" font-family="Inter, -apple-system, Segoe UI, Arial" font-size="28" font-weight="500">{subtitle}</text>
+    # Fonts (best-effort)
+    def load_font(size, bold=False):
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        ]
+        for p in candidates:
+            try:
+                return ImageFont.truetype(p, size=size)
+            except Exception:
+                continue
+        return ImageFont.load_default()
 
-  <text x="120" y="610" fill="rgba(255,255,255,0.55)" font-family="Inter, -apple-system, Segoe UI, Arial" font-size="22" font-weight="500">Natural Sense • Journal</text>
+    f_tag = load_font(34, bold=True)
+    f_title = load_font(66, bold=True)
+    f_sub = load_font(32, bold=False)
 
-  <path d="M1040 220 C1110 170, 1180 200, 1160 280 C1145 345, 1085 340, 1040 380 C980 430, 990 520, 1090 540"
-        fill="none" stroke="{accent}" stroke-opacity="0.22" stroke-width="10"/>
-</svg>'''
-    return Response(content=svg, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=31536000"})
+    # Text
+    d.text((120, 200), f"#{t}", font=f_tag, fill=acc)
+    d.text((120, 300), "NS•Natural Sense", font=f_title, fill=(255, 255, 255))
+    d.text((120, 390), subtitle, font=f_sub, fill=(210, 215, 222))
+
+    # Export
+    import io as _io
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    png = buf.getvalue()
+    cache[cache_key] = png
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=31536000"})
+
 
 
 
