@@ -11,7 +11,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import (
@@ -511,7 +511,7 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
 # -----------------------------------------------------------------------------
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
 
-# Канонизация "системных" тегов (категории журнала) — чтобы старые #люкс тоже работали
+# Канонизация системных тегов: старые #люкс/#ЛЮКС будут считаться как #Люкс
 CANON_TAGS = {
     "новинка": "Новинка",
     "люкс": "Люкс",
@@ -520,15 +520,14 @@ CANON_TAGS = {
     "оценка": "Оценка",
     "факты": "Факты",
     "состав": "Состав",
+    "челенджи": "Челенджи",
     "челленджи": "Челленджи",
     "challenge": "Challenge",
     "sephorapromo": "SephoraPromo",
 }
 
-
 def _norm_tag(s: str) -> str:
     return (s or "").strip().casefold()
-
 
 def extract_tags(text_: str | None) -> list[str]:
     if not text_:
@@ -543,8 +542,6 @@ def extract_tags(text_: str | None) -> list[str]:
             seen.add(canon)
             out.append(canon)
     return out
-
-
 def preview_text(text_: str | None, limit: int = 180) -> str:
     if not text_:
         return ""
@@ -712,10 +709,7 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
 
     if tag:
         want = _norm_tag(tag)
-        rows = [
-            p for p in rows
-            if any(_norm_tag(x) == want for x in (p.tags or []))
-        ]
+        rows = [p for p in rows if any(_norm_tag(x) == want for x in (p.tags or []))]
     return rows
 
 
@@ -4534,6 +4528,9 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     for p in rows:
         media_type = (p.media_type or "").strip().lower()
         media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else None
+        if not media_url:
+            main_tag = (p.tags or [None])[0] or "Пост"
+            media_url = f"/api/tag_card/{main_tag}"
 
         out.append({
             "message_id": int(p.message_id),
@@ -4576,6 +4573,9 @@ async def api_search(q: str, limit: int = 50, offset: int = 0):
     for p in rows:
         media_type = (p.media_type or "").strip().lower()
         media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else None
+        if not media_url:
+            main_tag = (p.tags or [None])[0] or "Пост"
+            media_url = f"/api/tag_card/{main_tag}"
 
         out.append({
             "message_id": int(p.message_id),
@@ -4614,6 +4614,77 @@ async def api_post_media(message_id: int):
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=31536000"},
     )
+
+
+
+@app.get("/api/tag_card/{tag}")
+async def api_tag_card(tag: str):
+    """SVG-заглушка для постов без картинки: отдельная карта под каждый тег."""
+    t = (tag or "").strip()
+    if not t:
+        t = "Пост"
+
+    # Лёгкая вариативность оформления по тегу (акцент/подзаголовок)
+    key = _norm_tag(t)
+    subtitle_map = {
+        "люкс": "Luxury Selection",
+        "новинка": "New Drop",
+        "тренд": "Trending Now",
+        "факты": "Beauty Facts",
+        "состав": "Ingredients",
+        "история": "Brand Story",
+        "оценка": "Review",
+        "челленджи": "Challenge",
+        "challenge": "Challenge",
+        "sephorapromo": "Sephora Promo",
+    }
+    subtitle = subtitle_map.get(key, "Natural Sense")
+
+    # Акценты по тегу (минимальные отличия, чтобы было «под каждый тег»)
+    accent_map = {
+        "люкс": ("#C9D1D9", "#0B0F14"),
+        "новинка": ("#E6E1D6", "#0B0F14"),
+        "тренд": ("#D6E7E2", "#0B0F14"),
+        "факты": ("#E0D6E7", "#0B0F14"),
+        "состав": ("#E7E2D6", "#0B0F14"),
+        "история": ("#D6DDE7", "#0B0F14"),
+        "оценка": ("#E7D6DA", "#0B0F14"),
+        "челленджи": ("#D6E7D9", "#0B0F14"),
+        "challenge": ("#D6E7D9", "#0B0F14"),
+        "sephorapromo": ("#E7D6E2", "#0B0F14"),
+    }
+    accent, bg = accent_map.get(key, ("#DDE3EA", "#0B0F14"))
+
+    # SVG 16:9 — выглядит как превью
+    svg = f'''<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="{bg}" stop-opacity="1"/>
+      <stop offset="100%" stop-color="{bg}" stop-opacity="0.92"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="720" fill="url(#g)"/>
+  <rect x="72" y="72" width="1136" height="576" rx="44" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.16)" stroke-width="2" filter="url(#shadow)"/>
+
+  <circle cx="160" cy="160" r="10" fill="{accent}" opacity="0.9"/>
+  <circle cx="196" cy="160" r="6" fill="{accent}" opacity="0.6"/>
+
+  <text x="120" y="230" fill="{accent}" font-family="Inter, -apple-system, Segoe UI, Arial" font-size="30" font-weight="600" opacity="0.9">#{t}</text>
+
+  <text x="120" y="330" fill="#FFFFFF" font-family="Inter, -apple-system, Segoe UI, Arial" font-size="64" font-weight="800" letter-spacing="0.5">{t}</text>
+  <text x="120" y="392" fill="rgba(255,255,255,0.78)" font-family="Inter, -apple-system, Segoe UI, Arial" font-size="28" font-weight="500">{subtitle}</text>
+
+  <text x="120" y="610" fill="rgba(255,255,255,0.55)" font-family="Inter, -apple-system, Segoe UI, Arial" font-size="22" font-weight="500">Natural Sense • Journal</text>
+
+  <path d="M1040 220 C1110 170, 1180 200, 1160 280 C1145 345, 1085 340, 1040 380 C980 430, 990 520, 1090 540"
+        fill="none" stroke="{accent}" stroke-opacity="0.22" stroke-width="10"/>
+</svg>'''
+    return Response(content=svg, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=31536000"})
 
 
 
