@@ -1500,7 +1500,7 @@ async def on_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
 
-    text_ = msg.text or msg.caption or ""
+    text_ = (msg.caption if msg.caption is not None else msg.text) or ""
 
     # Detect media (for Mini App previews)
     media_type = None
@@ -1542,7 +1542,7 @@ async def on_edited_channel_post(update: Update, context: ContextTypes.DEFAULT_T
     if not msg:
         return
 
-    text_ = msg.text or msg.caption or ""
+    text_ = (msg.caption if msg.caption is not None else msg.text) or ""
 
     # Detect media (for Mini App previews)
     media_type = None
