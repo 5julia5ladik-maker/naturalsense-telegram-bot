@@ -511,16 +511,37 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
 # -----------------------------------------------------------------------------
 TAG_RE = re.compile(r"#([A-Za-zА-Яа-я0-9_]+)")
 
+# Канонизация "системных" тегов (категории журнала) — чтобы старые #люкс тоже работали
+CANON_TAGS = {
+    "новинка": "Новинка",
+    "люкс": "Люкс",
+    "тренд": "Тренд",
+    "история": "История",
+    "оценка": "Оценка",
+    "факты": "Факты",
+    "состав": "Состав",
+    "челленджи": "Челленджи",
+    "challenge": "Challenge",
+    "sephorapromo": "SephoraPromo",
+}
+
+
+def _norm_tag(s: str) -> str:
+    return (s or "").strip().casefold()
+
 
 def extract_tags(text_: str | None) -> list[str]:
     if not text_:
         return []
-    tags = [m.group(1) for m in TAG_RE.finditer(text_)]
-    out, seen = [], set()
-    for t in tags:
-        if t not in seen:
-            seen.add(t)
-            out.append(t)
+    raw = [m.group(1) for m in TAG_RE.finditer(text_)]
+    out: list[str] = []
+    seen: set[str] = set()
+    for t in raw:
+        key = _norm_tag(t)
+        canon = CANON_TAGS.get(key, t.strip())
+        if canon and canon not in seen:
+            seen.add(canon)
+            out.append(canon)
     return out
 
 
@@ -690,7 +711,11 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
         rows = (await session.execute(q)).scalars().all()
 
     if tag:
-        rows = [p for p in rows if tag in (p.tags or [])]
+        want = _norm_tag(tag)
+        rows = [
+            p for p in rows
+            if any(_norm_tag(x) == want for x in (p.tags or []))
+        ]
     return rows
 
 
