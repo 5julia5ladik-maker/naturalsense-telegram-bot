@@ -116,26 +116,26 @@ STREAK_MILESTONES = {
 }
 
 RAFFLE_TICKET_COST = 500
-ROULETTE_SPIN_COST = 2000
-ROULETTE_LIMIT_WINDOW = timedelta(seconds=5)  # TEST: 5s cooldown
+ROULETTE_SPIN_COST = 300
+ROULETTE_LIMIT_WINDOW = timedelta(seconds=1)  # anti double-tap cooldown  # TEST: 5s cooldown
 DEFAULT_RAFFLE_ID = 1
 
 # -----------------------------------------------------------------------------
 # INVENTORY / CONVERSION (FIXED RATES)
 # -----------------------------------------------------------------------------
 TICKET_CONVERT_RATE = 300          # 1 raffle ticket -> 300 points
-DIOR_PALETTE_CONVERT_VALUE = 50_000  # 1 Dior palette -> 50_000 points (fixed)
+DIOR_PALETTE_CONVERT_VALUE = 3000  # 1 Dior palette -> 3000 points (fixed)  # 1 Dior palette -> 50_000 points (fixed)
 
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
 
 # per 1_000_000
 ROULETTE_DISTRIBUTION: list[dict[str, Any]] = [
-    {"weight": 416_667, "key": "points_500", "type": "points", "value": 500, "label": "+500 баллов"},
-    {"weight": 291_667, "key": "points_1000", "type": "points", "value": 1000, "label": "+1000 баллов"},
-    {"weight": 125_000, "key": "points_1500", "type": "points", "value": 1500, "label": "+1500 баллов"},
-    {"weight": 83_333,  "key": "points_2000", "type": "points", "value": 2000, "label": "+2000 баллов"},
+    {"weight": 416_667, "key": "points_500", "type": "points", "value": 50, "label": "+50 баллов"},
+    {"weight": 291_667, "key": "points_1000", "type": "points", "value": 100, "label": "+100 баллов"},
+    {"weight": 125_000, "key": "points_1500", "type": "points", "value": 150, "label": "+150 баллов"},
+    {"weight": 83_333,  "key": "points_2000", "type": "points", "value": 200, "label": "+200 баллов"},
     {"weight": 41_667,  "key": "ticket_1",   "type": "raffle_ticket", "value": 1, "label": "🎟 +1 билет"},
-    {"weight": 29_166,  "key": "points_3000", "type": "points", "value": 3000, "label": "+3000 баллов"},
+    {"weight": 29_166,  "key": "points_3000", "type": "points", "value": 300, "label": "+300 баллов"},
     {"weight": 12_500,  "key": "dior_palette", "type": "physical_dior_palette", "value": 1, "label": "✨ Dior Palette"},
 ]
 ROULETTE_TOTAL = sum(x["weight"] for x in ROULETTE_DISTRIBUTION)
