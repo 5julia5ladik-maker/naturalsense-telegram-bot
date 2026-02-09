@@ -4701,6 +4701,7 @@ async def api_search(q: str, limit: int = 50, offset: int = 0):
     async with async_session() as session:
         stmt = (
             select(Post)
+            .where(Post.is_deleted.is_(False))
             .where(func.lower(func.coalesce(Post.text, "")).like(q_like))
             .order_by(Post.date.desc())
             .limit(limit)
