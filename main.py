@@ -2877,13 +2877,13 @@ def get_webapp_html() -> str:
 
     // ------------------ ROULETTE LUX (Obsidian Glass) ------------------
     const ROULETTE_SEGMENTS = [
-      {key:"points_500", icon:"💎", text:"+500"},
-      {key:"points_1000", icon:"💎", text:"+1000"},
-      {key:"points_1500", icon:"💎", text:"+1500"},
-      {key:"points_2000", icon:"💎", text:"+2000"},
-      {key:"ticket_1", icon:"🎟", text:"+1"},
-      {key:"points_3000", icon:"💎", text:"+3000"},
-      {key:"dior_palette", icon:"✨", text:"Dior"},
+      {key:"points_500",  icon:"💎", text:"+50"},
+      {key:"points_1000", icon:"💎", text:"+100"},
+      {key:"points_1500", icon:"💎", text:"+150"},
+      {key:"points_2000", icon:"💎", text:"+200"},
+      {key:"ticket_1",    icon:"🎟", text:"+1"},
+      {key:"points_3000", icon:"💎", text:"+300"},
+      {key:"dior_palette",icon:"✨", text:"Dior"},
     ];
     const SEG_N = ROULETTE_SEGMENTS.length;
     const SEG_ANGLE = (Math.PI*2)/SEG_N;
@@ -4041,7 +4041,7 @@ content.appendChild(info);
                 list.appendChild(menuBtn("👥 Рефералы","Ссылка и бонус +20", ()=>{ state.profileView="referrals"; state.msg=""; renderПрофильSheet(); }));
 list.appendChild(menuBtn("👜 Моя косметичка","Призы и билеты", ()=>{ state.profileOpen=false; render(); openInventory(); }));
         list.appendChild(menuBtn("🎁 Розыгрыши","Купить билеты (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet(); }));
-        list.appendChild(menuBtn("🎡 Рулетка","Крутить (2000)", ()=>{ state.profileView="roulette"; renderПрофильSheet(); }));
+        list.appendChild(menuBtn("🎡 Рулетка","Крутить (300)", ()=>{ state.profileView="roulette"; renderПрофильSheet(); }));
         list.appendChild(menuBtn("🧾 История рулетки","Последние спины", ()=>{ state.profileView="history"; renderПрофильSheet(); }));
         content.appendChild(list);
       }else{
@@ -4127,7 +4127,7 @@ if(state.profileView==="roulette"){
           title.style.marginTop="12px";
           title.innerHTML =
             '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
-            '<div class="sub" style="margin-top:6px">Крутить = 2000 баллов.</div>';
+            '<div class="sub" style="margin-top:6px">Крутить = 300 баллов.</div>';
           wrap.appendChild(title);
 
           const stage = el("div","wheelStage");
@@ -4148,7 +4148,7 @@ if(state.profileView==="roulette"){
           stage.appendChild(wheelBox);
 
           const micro = el("div","microHud",
-            "Баланс: "+esc(String(state.user?.points||0))+" 💎   •   Стоимость: 2000 💎"
+            "Баланс: "+esc(String(state.user?.points||0))+" 💎   •   Стоимость: 300 💎"
           );
           stage.appendChild(micro);
 
