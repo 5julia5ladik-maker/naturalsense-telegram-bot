@@ -4,6 +4,7 @@ import html
 import asyncio
 import logging
 import secrets
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Literal, Any
@@ -669,11 +670,8 @@ async def upsert_post_from_channel(
         if p:
             p.date = date_naive
             p.text = text_
-            # Preserve media on caption/text edits where Telegram may omit media fields
-            if media_type is not None:
-                p.media_type = media_type
-            if media_file_id is not None:
-                p.media_file_id = media_file_id
+            p.media_type = media_type
+            p.media_file_id = media_file_id
             p.permalink = permalink
             p.tags = tags
             p.is_deleted = False
@@ -4669,7 +4667,7 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     out = []
     for p in rows:
         media_type = (p.media_type or "").strip().lower()
-        media_url = f"/api/post_media/{int(p.message_id)}?v={ASSET_VERSION}" if (media_type == "photo" and p.media_file_id) else None
+        media_url = f"/api/post_media/{int(p.message_id)}?fid={p.media_file_id}&v={ASSET_VERSION}" if (media_type == "photo" and p.media_file_id) else None
         if not media_url:
             main_tag = (p.tags or [None])[0] or "Пост"
             media_url = f"/api/tag_card/{main_tag}?v={ASSET_VERSION}"
@@ -4733,8 +4731,14 @@ async def api_search(q: str, limit: int = 50, offset: int = 0):
 
 
 @app.get("/api/post_media/{message_id}")
-async def api_post_media(message_id: int):
-    """Возвращает картинку поста (если сохранён media_file_id)."""
+async def api_post_media(message_id: int, fid: str | None = None, v: str | None = None):
+    """
+    Возвращает картинку поста (если сохранён media_file_id).
+
+    Важно для Telegram WebView:
+    - Если отдавать no-store/no-cache, то при возврате назад картинки грузятся заново.
+    - Поэтому для реальных фото включаем нормальный публичный кэш + versioning по fid.
+    """
     message_id = int(message_id)
 
     async with async_session() as session:
@@ -4748,16 +4752,26 @@ async def api_post_media(message_id: int):
     if media_type != "photo" or not post.media_file_id:
         raise HTTPException(status_code=404, detail="No photo for this post")
 
+    # Если клиент пришёл со старым fid (картинка у поста сменилась),
+    # перекидываем на актуальный URL, чтобы кэш был консистентным.
+    if fid and fid != post.media_file_id:
+        return RedirectResponse(
+            url=f"/api/post_media/{message_id}?fid={post.media_file_id}&v={ASSET_VERSION}",
+            status_code=302,
+        )
+
     local_path = await get_cached_media_file(post.media_file_id)
 
+    etag = hashlib.sha1(post.media_file_id.encode("utf-8")).hexdigest()
+    headers = {
+        # Делаем WebView счастливым: не перекачивает при back/forward.
+        # Обновление контролируем через fid в URL.
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": f'W/"{etag}"',
+    }
+
     # Telegram фото может быть jpeg/webp; большинство клиентов понимают image/jpeg.
-    return FileResponse(
-        local_path,
-        media_type="image/jpeg",
-        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache", "Expires": "0"},
-    )
-
-
+    return FileResponse(local_path, media_type="image/jpeg", headers=headers)
 
 @app.get("/api/tag_card/{tag}")
 async def api_tag_card(tag: str, v: str | None = None):
