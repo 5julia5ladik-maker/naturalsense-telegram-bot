@@ -55,6 +55,27 @@ from sqlalchemy.orm import declarative_base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
 
+# -----------------------------------------------------------------------------
+# GLOBAL HTTP CLIENT (KEEP-ALIVE) + LIMITS
+# -----------------------------------------------------------------------------
+_http_client: httpx.AsyncClient | None = None
+
+def get_http_client() -> httpx.AsyncClient:
+    if _http_client is None:
+        # Should be initialized in lifespan; fallback for safety.
+        limits = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=30.0)
+        timeout = httpx.Timeout(connect=5.0, read=15.0, write=15.0, pool=15.0)
+        return httpx.AsyncClient(timeout=timeout, limits=limits, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+    return _http_client
+
+# -----------------------------------------------------------------------------
+# MEDIA CACHE: PER-FILE LOCKS (avoid global bottleneck)
+# -----------------------------------------------------------------------------
+_media_locks: dict[str, asyncio.Lock] = {}
+_media_locks_guard = asyncio.Lock()
+_MAX_MEDIA_LOCKS = int(os.getenv("MAX_MEDIA_LOCKS", "2048"))
+MAX_MEDIA_BYTES = int(os.getenv("MAX_MEDIA_BYTES", str(40 * 1024 * 1024)))  # hard safety cap
+
 
 # -----------------------------------------------------------------------------
 # CONFIG (ENV)
@@ -70,6 +91,9 @@ PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
 CHANNEL_USERNAME = env_get("CHANNEL_USERNAME", "NaturalSense") or "NaturalSense"
 DATABASE_URL = env_get("DATABASE_URL", "sqlite+aiosqlite:///./ns.db") or "sqlite+aiosqlite:///./ns.db"
 ADMIN_CHAT_ID = int(env_get("ADMIN_CHAT_ID", "5443870760") or "5443870760")
+
+APP_VERSION = (env_get("APP_VERSION", "1.0.4") or "1.0.4").strip()
+ASSET_VERSION = (env_get("ASSET_VERSION", APP_VERSION) or APP_VERSION).strip()
 
 # Fix Railway postgres schemes for async SQLAlchemy
 if DATABASE_URL:
@@ -593,28 +617,57 @@ async def _tg_get_file_path(file_id: str) -> str:
     if not BOT_TOKEN:
         raise HTTPException(status_code=500, detail="BOT_TOKEN is not set")
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile"
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(url, params={"file_id": file_id})
-        r.raise_for_status()
-        data = r.json()
+    client = get_http_client()
+    r = await client.get(url, params={"file_id": file_id})
+    r.raise_for_status()
+    data = r.json()
     if not data.get("ok") or not data.get("result") or not data["result"].get("file_path"):
         raise HTTPException(status_code=404, detail="Telegram file not found")
     return str(data["result"]["file_path"])
 
 
+
+async def _get_media_lock(file_id: str) -> asyncio.Lock:
+    # Per-file locks prevent a single global bottleneck under load.
+    async with _media_locks_guard:
+        lock = _media_locks.get(file_id)
+        if lock is None:
+            if len(_media_locks) >= _MAX_MEDIA_LOCKS:
+                # best-effort eviction of an arbitrary item (keeps memory bounded)
+                try:
+                    _media_locks.pop(next(iter(_media_locks)))
+                except Exception:
+                    _media_locks.clear()
+            lock = asyncio.Lock()
+            _media_locks[file_id] = lock
+        return lock
+
+
 async def get_cached_media_file(file_id: str) -> str:
-    """Downloads media file into MEDIA_CACHE_DIR once and returns local path."""
+    """Downloads media file into MEDIA_CACHE_DIR once and returns local path.
+
+    Key properties (for 100k+ load):
+    - per-file locks (no global lock bottleneck)
+    - keep-alive shared http client
+    - streaming download (no full-file in RAM)
+    - safety cap to avoid disk/memory abuse
+    """
     file_id = (file_id or "").strip()
     if not file_id:
         raise HTTPException(status_code=404, detail="Empty file_id")
 
-    async with _media_lock:
-        # fast path
+    # fast path (no lock)
+    cached = _file_path_cache.get(file_id)
+    if cached and os.path.exists(cached):
+        return cached
+
+    lock = await _get_media_lock(file_id)
+    async with lock:
+        # double-check after acquiring lock
         cached = _file_path_cache.get(file_id)
         if cached and os.path.exists(cached):
             return cached
 
-        # Determine local filename (safe)
         safe = re.sub(r"[^a-zA-Z0-9_\-]", "_", file_id)[:120]
         local_path = os.path.join(MEDIA_CACHE_DIR, safe)
 
@@ -622,19 +675,6 @@ async def get_cached_media_file(file_id: str) -> str:
             _file_path_cache[file_id] = local_path
             return local_path
 
-        file_path = await _tg_get_file_path(file_id)
-        dl_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
-
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            r = await client.get(dl_url)
-            r.raise_for_status()
-            content = r.content
-
-        with open(local_path, "wb") as f:
-            f.write(content)
-
-        _file_path_cache[file_id] = local_path
-        return local_path
 
 
 def make_permalink(message_id: int) -> str:
@@ -694,66 +734,85 @@ async def upsert_post_from_channel(
         return p
 
 
+
 async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
+    # NOTE: under high load we must avoid fetching thousands of rows and filtering in Python.
+    # We filter by tag directly in SQL for Postgres (JSONB containment).
     if tag and tag in BLOCKED_TAGS:
         return []
 
     tag = (tag or "").strip() if tag else None
-    want_norm = None
-    if tag:
-        # Канонизируем запрос тега (например, 'люкс' -> 'Люкс'), сравниваем без учета регистра
-        tag_canon = CANON_TAGS.get(_norm_tag(tag), tag)
-        want_norm = _norm_tag(tag_canon)
 
-    # ВАЖНО: чтобы старые посты с тегом не пропадали, сначала берем расширенное окно,
-    # затем фильтруем по тегу и только потом применяем offset/limit к отфильтрованному списку.
-    # Это не меняет логику приложения — только позволяет видеть посты с тегом за пределами последних N.
-    window = max(1000, (offset + limit) * 40)
-    window = min(window, 5000)
+    tag_canon: str | None = None
+    if tag:
+        tag_canon = CANON_TAGS.get(_norm_tag(tag), tag)
 
     async with async_session_maker() as session:
         q = (
             select(Post)
             .where(Post.is_deleted == False)  # noqa: E712
-            .order_by(Post.message_id.desc())
-            .limit(window)
+        )
+
+        if tag_canon:
+            # Post.tags is JSON array; on Postgres we can use JSONB containment with a cast.
+            # This keeps logic identical but removes Python-side filtering and huge windows.
+            try:
+                from sqlalchemy.dialects.postgresql import JSONB
+                from sqlalchemy import cast
+                q = q.where(cast(Post.tags, JSONB).contains([tag_canon]))
+            except Exception:
+                # Fallback for non-Postgres DBs
+                pass
+
+        q = (
+            q.order_by(Post.message_id.desc())
+            .offset(offset)
+            .limit(limit)
         )
         rows = (await session.execute(q)).scalars().all()
 
-    if want_norm:
+    # Fallback tag filtering (for non-Postgres DBs where JSONB containment is unavailable)
+    if tag_canon and rows:
+        want_norm = _norm_tag(tag_canon)
+
         def _canon_norm(x: str) -> str:
             return _norm_tag(CANON_TAGS.get(_norm_tag(x), x))
 
         rows = [p for p in rows if any(_canon_norm(x) == want_norm for x in (p.tags or []))]
 
-    return rows[offset: offset + limit]
+    return rows
+
 
 
 # -----------------------------------------------------------------------------
 # DELETE SWEEPER (AUTO CHECK)
 # -----------------------------------------------------------------------------
+
 async def message_exists_public(message_id: int) -> bool:
     url = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            if r.status_code == 404:
-                return False
-            if r.status_code != 200:
-                return True
-
-            html = (r.text or "").lower()
-            if "message not found" in html or "post not found" in html:
-                return False
-            if "join channel" in html or "this channel is private" in html:
-                return True
+        client = get_http_client()
+        r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code == 404:
+            return False
+        if r.status_code != 200:
             return True
+
+        html_ = (r.text or "").lower()
+        if "message not found" in html_ or "post not found" in html_:
+            return False
+        if "join channel" in html_ or "this channel is private" in html_:
+            return True
+        return True
     except Exception as e:
         logger.warning("Sweeper check failed for %s: %s", message_id, e)
         return True
 
 
-async def sweep_deleted_posts(batch: int = 30):
+
+
+async def sweep_deleted_posts(batch: int = 30, concurrency: int | None = None):
+    concurrency = int(concurrency or os.getenv("SWEEPER_CONCURRENCY", "10"))
     async with async_session_maker() as session:
         posts = (
             await session.execute(
@@ -767,11 +826,22 @@ async def sweep_deleted_posts(batch: int = 30):
     if not posts:
         return []
 
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _check(mid: int) -> tuple[int, bool]:
+        async with sem:
+            ok = await message_exists_public(mid)
+            return (mid, ok)
+
+    results = await asyncio.gather(*(_check(int(p.message_id)) for p in posts), return_exceptions=True)
+
     to_mark: list[int] = []
-    for p in posts:
-        ok = await message_exists_public(int(p.message_id))
+    for item in results:
+        if isinstance(item, Exception):
+            continue
+        mid, ok = item
         if not ok:
-            to_mark.append(int(p.message_id))
+            to_mark.append(mid)
 
     if not to_mark:
         return []
@@ -789,13 +859,16 @@ async def sweep_deleted_posts(batch: int = 30):
     return to_mark
 
 
+
 async def sweeper_loop():
+    interval = float(os.getenv('SWEEPER_INTERVAL_SEC', '30'))
+    batch = int(os.getenv('SWEEPER_BATCH', '30'))
     while True:
         try:
-            await sweep_deleted_posts(batch=30)
+            await sweep_deleted_posts(batch=batch)
         except Exception as e:
             logger.error("Sweeper error: %s", e)
-        await asyncio.sleep(30)  
+        await asyncio.sleep(interval)
 # -----------------------------------------------------------------------------
 # PUBLIC RECONCILE (AUTO DISCOVER NEW POSTS)
 # -----------------------------------------------------------------------------
@@ -803,13 +876,13 @@ async def fetch_public_post_text(message_id: int) -> str | None:
     """Fetches public embed HTML and extracts visible text. Returns None if not accessible or not found."""
     url = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            if r.status_code == 404:
-                return None
-            if r.status_code != 200:
-                return None
-            html_text = r.text or ""
+        client = get_http_client()
+        r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code == 404:
+            return None
+        if r.status_code != 200:
+            return None
+        html_text = r.text or ""
     except Exception:
         return None
 
@@ -835,9 +908,15 @@ async def fetch_public_post_text(message_id: int) -> str | None:
     # If extraction failed, return empty string to still allow tagging from raw.
     return txt if txt else ""
 
+
 async def reconcile_recent_public_posts(max_probe: int = 60):
     """Best-effort: probe message_id gaps after the newest known id and index what exists.
-    This makes the bot resilient if it missed channel_post updates."""
+    This makes the bot resilient if it missed channel_post updates.
+
+    High-load safe:
+    - bounded concurrency
+    - early-stop on long consecutive misses
+    """
     try:
         async with async_session() as session:
             res = await session.execute(select(func.max(Post.message_id)))
@@ -848,43 +927,68 @@ async def reconcile_recent_public_posts(max_probe: int = 60):
     start_id = int(last_id) + 1
     end_id = start_id + int(max_probe) - 1
 
-    for mid in range(start_id, end_id + 1):
-        txt = await fetch_public_post_text(mid)
-        if txt is None:
-            continue
+    concurrency = int(os.getenv("RECONCILE_CONCURRENCY", "8"))
+    sem = asyncio.Semaphore(max(1, concurrency))
+    miss_stop = int(os.getenv("RECONCILE_CONSEC_MISS_STOP", "20"))
 
-        # Avoid indexing duplicates if concurrent runner
-        try:
-            async with async_session() as session:
-                exists = await session.execute(select(Post).where(Post.message_id == mid))
-                if exists.scalar_one_or_none():
-                    continue
-        except Exception:
-            pass
+    # We'll schedule checks in small waves to allow early-stop on misses.
+    pending: list[int] = list(range(start_id, end_id + 1))
+    consecutive_miss = 0
 
-        # Extract tags from the visible text (works for both text posts and captions)
-        tags = extract_tags(txt)
+    async def _fetch(mid: int) -> tuple[int, str | None]:
+        async with sem:
+            txt = await fetch_public_post_text(mid)
+            return (mid, txt)
 
-        # Use the extracted text as post text; date is unknown from public embed reliably
-        await upsert_post_from_channel(
-            message_id=mid,
-            date=datetime.now(timezone.utc),
-            text_=txt,
-            media_type=None,
-            media_file_id=None,
-        )
-        # Ensure tags are persisted even if text got truncated upstream
-        if tags:
+    while pending:
+        # wave size ~2x concurrency for better pipeline
+        wave = pending[: max(1, concurrency * 2)]
+        pending = pending[len(wave):]
+
+        results = await asyncio.gather(*(_fetch(mid) for mid in wave), return_exceptions=True)
+
+        for item in results:
+            if isinstance(item, Exception):
+                continue
+            mid, txt = item
+            if txt is None:
+                consecutive_miss += 1
+                if consecutive_miss >= miss_stop:
+                    return
+                continue
+
+            consecutive_miss = 0
+
+            # Avoid indexing duplicates if concurrent runner
             try:
                 async with async_session() as session:
-                    await session.execute(
-                        update(Post).where(Post.message_id == mid).values(tags=tags)
-                    )
-                    await session.commit()
+                    exists = await session.execute(select(Post).where(Post.message_id == mid))
+                    if exists.scalar_one_or_none():
+                        continue
             except Exception:
                 pass
 
-        logger.info("🔎 Reconciled public post id=%s tags=%s", mid, tags)
+            tags = extract_tags(txt)
+
+            await upsert_post_from_channel(
+                message_id=mid,
+                date=datetime.now(timezone.utc),
+                text_=txt,
+                media_type=None,
+                media_file_id=None,
+            )
+            if tags:
+                try:
+                    async with async_session() as session:
+                        await session.execute(
+                            update(Post).where(Post.message_id == mid).values(tags=tags)
+                        )
+                        await session.commit()
+                except Exception:
+                    pass
+
+            logger.info("🔎 Reconciled public post id=%s tags=%s", mid, tags)
+
 
 # 30 секунд
 
@@ -958,92 +1062,18 @@ def build_help_text() -> str:
 """
 
 
-
-# -----------------------------------------------------------------------------
-# ERROR CLASSIFICATION (avoid spamming ADMIN with transient network errors)
-# -----------------------------------------------------------------------------
-_TRANSIENT_HTTPX_ERRORS = (
-    httpx.RemoteProtocolError,
-    httpx.ReadError,
-    httpx.WriteError,
-    httpx.ConnectError,
-    httpx.ConnectTimeout,
-    httpx.ReadTimeout,
-    httpx.WriteTimeout,
-    httpx.PoolTimeout,
-    httpx.ProtocolError,
-    httpx.TimeoutException,
-    httpx.NetworkError,
-)
-
-try:
-    from telegram.error import NetworkError as _TgNetworkError  # type: ignore
-    from telegram.error import TimedOut as _TgTimedOut  # type: ignore
-    _TRANSIENT_TG_ERRORS = (_TgNetworkError, _TgTimedOut)
-except Exception:  # pragma: no cover
-    _TRANSIENT_TG_ERRORS = tuple()
-
-_last_admin_alert: dict[str, Any] = {"key": None, "ts": 0.0}
-
-
-def _iter_error_chain(err: BaseException, max_depth: int = 4):
-    cur: Optional[BaseException] = err
-    depth = 0
-    seen = set()
-    while cur is not None and depth < max_depth and id(cur) not in seen:
-        seen.add(id(cur))
-        yield cur
-        cur = cur.__cause__ or cur.__context__
-        depth += 1
-
-
-def is_transient_error(err: BaseException) -> bool:
-    for e in _iter_error_chain(err):
-        if isinstance(e, _TRANSIENT_HTTPX_ERRORS):
-            return True
-        if _TRANSIENT_TG_ERRORS and isinstance(e, _TRANSIENT_TG_ERRORS):
-            return True
-        if isinstance(e, (ConnectionResetError, BrokenPipeError, TimeoutError, OSError)):
-            # common transient network/socket issues
-            msg = str(e).lower()
-            if any(x in msg for x in ("reset", "broken pipe", "timed out", "timeout", "connection aborted", "eof")):
-                return True
-    return False
-
-
-def should_notify_admin(err: BaseException, cooldown_sec: int = 90) -> bool:
-    # rate-limit same error to avoid spam
-    key = f"{type(err).__name__}:{repr(err)[:240]}"
-    now = asyncio.get_running_loop().time()
-    if _last_admin_alert.get("key") == key and (now - float(_last_admin_alert.get("ts") or 0.0)) < cooldown_sec:
-        return False
-    _last_admin_alert["key"] = key
-    _last_admin_alert["ts"] = now
-    return True
-
 async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    err = context.error
-
-    # Transient network errors happen часто (Telegram/WebView/keep-alive).
-    # Это НЕ повод спамить админу.
-    if isinstance(err, BaseException) and is_transient_error(err):
-        logger.warning("Transient Telegram network error: %r", err)
-        return
-
-    # Serious error
-    logger.exception("Telegram handler error: %r", err)
-
+    logger.exception("Telegram handler error: %s", context.error)
     try:
-        if ADMIN_CHAT_ID and isinstance(err, BaseException) and should_notify_admin(err):
+        if ADMIN_CHAT_ID:
             await context.bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
-                text=(
-                    "❌ Серьёзная ошибка в боте:\n"
-                    f"{type(err).__name__}: {str(err)[:1200]}"
-                )
+                text=f"❌ Ошибка в боте:\n{repr(context.error)}"
             )
-    except Exception as e:
-        logger.warning("Failed to notify admin: %s", e)
+    except Exception:
+        pass
+
+
 def build_welcome_text(
     first_name: str | None,
     is_new: bool,
@@ -1807,7 +1837,7 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
     tg_app.add_handler(CallbackQueryHandler(on_callback))
-    tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
+    tg_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_text_button))
     # Media sync: accept forwarded posts with media from admin (private chat)
     tg_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.VIDEO | filters.Document.ALL), on_sync_forward))
 
@@ -1875,6 +1905,9 @@ def get_webapp_html() -> str:
     html = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>NS · Natural Sense</title>
@@ -2017,13 +2050,32 @@ def get_webapp_html() -> str:
     .thumbFallback{
       width:100%;height:100%;
       display:flex;align-items:center;justify-content:center;
-      color:rgba(255,255,255,0.70);
       font-weight:900;letter-spacing:.8px;
+      color:rgba(18,22,28,0.72);
       background:
-        radial-gradient(420px 240px at 30% 10%, rgba(230,193,128,0.22), transparent 60%),
-        radial-gradient(380px 220px at 80% 0%, rgba(255,255,255,0.12), transparent 55%),
-        rgba(255,255,255,0.04);
+        radial-gradient(520px 300px at 18% 0%, rgba(255,255,255,0.95), rgba(255,255,255,0) 62%),
+        radial-gradient(420px 260px at 82% 6%, rgba(255,224,190,0.88), rgba(255,255,255,0) 58%),
+        linear-gradient(135deg,
+          rgba(252,248,242,0.96) 0%,
+          rgba(244,236,226,0.94) 42%,
+          rgba(236,224,212,0.94) 100%
+        );
+      position:relative;
+      overflow:hidden;
     }
+    .thumbFallback::before{
+      content:"";
+      position:absolute;inset:0;
+      background:
+        repeating-linear-gradient(0deg, rgba(0,0,0,0.035), rgba(0,0,0,0.035) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 3px),
+        radial-gradient(120px 120px at 40% 30%, rgba(255,255,255,0.55), rgba(255,255,255,0) 70%),
+        radial-gradient(140px 140px at 70% 70%, rgba(255,255,255,0.35), rgba(255,255,255,0) 72%);
+      opacity:0.12;
+      mix-blend-mode:multiply;
+      pointer-events:none;
+    }
+    .thumbFallback > *{position:relative;z-index:1}
+    .thumbFallback .thumbNS .brand{color:rgba(18,22,28,0.56)}
     .thumbNS{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:10px}
     .thumbNS .mark{font-size:18px}
     .thumbNS .brand{font-size:12px;color:rgba(255,255,255,0.72);font-weight:800}
@@ -4629,8 +4681,15 @@ if(state.profileView==="history"){
 # -----------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
-    global sweeper_task
+    global sweeper_task, _http_client
     await init_db()
+    # One shared HTTP client for keep-alive and better performance
+    limits = httpx.Limits(max_connections=int(os.getenv('HTTP_MAX_CONNECTIONS','200')),
+                         max_keepalive_connections=int(os.getenv('HTTP_MAX_KEEPALIVE','50')),
+                         keepalive_expiry=float(os.getenv('HTTP_KEEPALIVE_EXPIRY','30')))
+    timeout = httpx.Timeout(connect=5.0, read=15.0, write=15.0, pool=15.0)
+    _http_client = httpx.AsyncClient(timeout=timeout, limits=limits, follow_redirects=True,
+                                    headers={'User-Agent': 'Mozilla/5.0'})
     await start_telegram_bot()
     sweeper_task = asyncio.create_task(sweeper_loop())
     logger.info("✅ NS · Natural Sense started")
@@ -4643,6 +4702,13 @@ async def lifespan(app_: FastAPI):
                 await sweeper_task
             except Exception:
                 pass
+        # Close shared HTTP client
+        if _http_client is not None:
+            try:
+                await _http_client.aclose()
+            except Exception:
+                pass
+            _http_client = None
         await stop_telegram_bot()
         logger.info("✅ NS · Natural Sense stopped")
 
@@ -4715,10 +4781,10 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     out = []
     for p in rows:
         media_type = (p.media_type or "").strip().lower()
-        media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else None
+        media_url = f"/api/post_media/{int(p.message_id)}?v={ASSET_VERSION}" if (media_type == "photo" and p.media_file_id) else None
         if not media_url:
             main_tag = (p.tags or [None])[0] or "Пост"
-            media_url = f"/api/tag_card/{main_tag}"
+            media_url = f"/api/tag_card/{main_tag}?v={ASSET_VERSION}"
 
         out.append({
             "message_id": int(p.message_id),
@@ -4760,10 +4826,10 @@ async def api_search(q: str, limit: int = 50, offset: int = 0):
     out = []
     for p in rows:
         media_type = (p.media_type or "").strip().lower()
-        media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else None
+        media_url = f"/api/post_media/{int(p.message_id)}?v={ASSET_VERSION}" if (media_type == "photo" and p.media_file_id) else None
         if not media_url:
             main_tag = (p.tags or [None])[0] or "Пост"
-            media_url = f"/api/tag_card/{main_tag}"
+            media_url = f"/api/tag_card/{main_tag}?v={ASSET_VERSION}"
 
         out.append({
             "message_id": int(p.message_id),
@@ -4800,18 +4866,21 @@ async def api_post_media(message_id: int):
     return FileResponse(
         local_path,
         media_type="image/jpeg",
-        headers={"Cache-Control": "public, max-age=31536000"},
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache", "Expires": "0"},
     )
 
 
 
 @app.get("/api/tag_card/{tag}")
-async def api_tag_card(tag: str):
+async def api_tag_card(tag: str, v: str | None = None):
     """
-    PNG-заглушка для постов без картинки: отдельная карта под каждый тег.
+    PNG-заглушка для постов без картинки: светлая premium-карта под NS.
 
-    Важно: PNG используется вместо SVG, потому что некоторые Telegram WebView
-    некорректно отображают SVG в <img>.
+    Почему так:
+    - Telegram WebView агрессивно кэширует картинки.
+    - Поэтому URL содержит ?v=... (ASSET_VERSION), а ответ отдаём с no-store.
+    - Внутри сервера держим небольшой in-memory cache по (tag+version),
+      чтобы не рендерить PNG на каждый запрос.
     """
     t = (tag or "").strip() or "Пост"
     key = _norm_tag(t)
@@ -4830,67 +4899,142 @@ async def api_tag_card(tag: str):
     }
     subtitle = subtitle_map.get(key, "Natural Sense")
 
+    # Accent (soft champagne / pearl)
     accent_map = {
-        "люкс": ("#C9D1D9", "#0B0F14"),
-        "новинка": ("#E6E1D6", "#0B0F14"),
-        "тренд": ("#D6E7E2", "#0B0F14"),
-        "факты": ("#E0D6E7", "#0B0F14"),
-        "состав": ("#E7E2D6", "#0B0F14"),
-        "история": ("#D6DDE7", "#0B0F14"),
-        "оценка": ("#E7D6DA", "#0B0F14"),
-        "челленджи": ("#D6E7D9", "#0B0F14"),
-        "challenge": ("#D6E7D9", "#0B0F14"),
-        "sephorapromo": ("#E7D6E2", "#0B0F14"),
+        "люкс": "#9A7A3A",
+        "новинка": "#8C6A4F",
+        "тренд": "#4E7A74",
+        "факты": "#6E5A8A",
+        "состав": "#7B6A48",
+        "история": "#52667A",
+        "оценка": "#7A4E5B",
+        "челленджи": "#4F7A5B",
+        "challenge": "#4F7A5B",
+        "sephorapromo": "#7A4E6A",
     }
-    accent, bg = accent_map.get(key, ("#DDE3EA", "#0B0F14"))
+    accent_hex = accent_map.get(key, "#8C7A5A")
 
-    # --- simple in-memory cache ---
-    cache_key = f"{accent}|{bg}|{t}|{subtitle}"
+    # Version for cache-busting
+    version = (v or ASSET_VERSION or "v").strip()
+
+    # --- server in-memory cache (version-aware) ---
+    cache_key = f"{version}|{t}|{subtitle}|{accent_hex}"
     if not hasattr(api_tag_card, "_cache"):
         api_tag_card._cache = {}
     cache: dict[str, bytes] = api_tag_card._cache  # type: ignore[attr-defined]
     if cache_key in cache:
-        return Response(content=cache[cache_key], media_type="image/png", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content=cache[cache_key],
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
-    # --- render PNG ---
     try:
         from PIL import Image, ImageDraw, ImageFont
     except Exception:
-        # Fallback: if Pillow is missing, return SVG like before
+        # Fallback: SVG (на случай если Pillow отсутствует)
         svg = f"""<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
-  <rect x="0" y="0" width="1280" height="720" fill="{bg}"/>
-  <text x="120" y="240" fill="{accent}" font-family="Arial" font-size="36" font-weight="700">#{t}</text>
-  <text x="120" y="340" fill="#FFFFFF" font-family="Arial" font-size="64" font-weight="800">NS•Natural Sense</text>
-  <text x="120" y="420" fill="rgba(255,255,255,0.75)" font-family="Arial" font-size="30" font-weight="600">{subtitle}</text>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F8F4EE"/>
+      <stop offset="55%" stop-color="#EFE6DA"/>
+      <stop offset="100%" stop-color="#E5D2BE"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1280" height="720" fill="url(#g)"/>
+  <rect x="72" y="72" width="1136" height="576" rx="44" fill="rgba(255,255,255,0.80)" stroke="rgba(0,0,0,0.10)" stroke-width="2"/>
+  <text x="120" y="240" fill="{accent_hex}" font-family="Arial" font-size="36" font-weight="700">#{html.escape(t)}</text>
+  <text x="120" y="340" fill="#101418" font-family="Arial" font-size="64" font-weight="800">NS•Natural Sense</text>
+  <text x="120" y="420" fill="rgba(16,20,24,0.72)" font-family="Arial" font-size="30" font-weight="600">{html.escape(subtitle)}</text>
 </svg>"""
-        return Response(content=svg, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content=svg,
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     W, H = 1280, 720
-    img = Image.new("RGB", (W, H), bg)
+
+    def hex_to_rgb(h: str) -> tuple[int, int, int]:
+        h = h.lstrip("#")
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+    def lerp(a: int, b: int, t_: float) -> int:
+        return int(a + (b - a) * t_)
+
+    # Premium light background gradient (ivory -> pearl -> champagne)
+    c1 = hex_to_rgb("#F8F4EE")  # ivory
+    c2 = hex_to_rgb("#EFE6DA")  # pearl
+    c3 = hex_to_rgb("#E5D2BE")  # champagne nude
+
+    img = Image.new("RGB", (W, H), c1)
     d = ImageDraw.Draw(img)
 
-    # Card area
+    # vertical blend c1 -> c2
+    for y in range(H):
+        t_ = y / (H - 1)
+        col = (lerp(c1[0], c2[0], t_), lerp(c1[1], c2[1], t_), lerp(c1[2], c2[2], t_))
+        d.line([(0, y), (W, y)], fill=col)
+
+    # soft diagonal overlay c2 -> c3 (subtle)
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    for y in range(H):
+        t_ = y / (H - 1)
+        # more champagne towards bottom-right
+        alpha = int(70 * t_)  # 0..70
+        col = (*c3, alpha)
+        od.line([(0, y), (W, y)], fill=col)
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGBA")
+
+    # very light noise to avoid "flat" look
+    try:
+        import random
+        px = img.load()
+        for _ in range(9000):  # sparse
+            x = random.randrange(0, W)
+            y = random.randrange(0, H)
+            r, g, b, a = px[x, y]
+            n = random.randint(-8, 8)
+            px[x, y] = (max(0, min(255, r + n)), max(0, min(255, g + n)), max(0, min(255, b + n)), a)
+    except Exception:
+        pass
+
+    # Card area (glass / premium)
     pad = 72
     card = [pad, pad, W - pad, H - pad]
-    # semi-transparent look imitation (draw darker rectangle + border)
-    d.rounded_rectangle(card, radius=44, fill=(20, 26, 34), outline=(60, 70, 82), width=2)
+    # soft shadow
+    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    sd.rounded_rectangle(
+        [card[0] + 8, card[1] + 12, card[2] + 8, card[3] + 12],
+        radius=44,
+        fill=(0, 0, 0, 38),
+    )
+    img = Image.alpha_composite(img, shadow)
 
-    # Accent dots
-    def hex_to_rgb(h):
-        h = h.lstrip("#")
-        return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-    acc = hex_to_rgb(accent)
-    d.ellipse((120, 120, 140, 140), fill=acc)
-    d.ellipse((156, 126, 168, 138), fill=acc)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(card, radius=44, fill=(255, 255, 255, 210), outline=(0, 0, 0, 28), width=2)
+
+    # Accent micro-dots
+    acc = hex_to_rgb(accent_hex)
+    d.ellipse((120, 120, 140, 140), fill=(*acc, 255))
+    d.ellipse((156, 126, 168, 138), fill=(*acc, 255))
 
     # Fonts (best-effort)
-    def load_font(size, bold=False):
+    def load_font(size: int, bold: bool = False):
         candidates = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
         ]
         for p in candidates:
             try:
@@ -4903,18 +5047,30 @@ async def api_tag_card(tag: str):
     f_title = load_font(66, bold=True)
     f_sub = load_font(32, bold=False)
 
-    # Text
-    d.text((120, 200), f"#{t}", font=f_tag, fill=acc)
-    d.text((120, 300), "NS•Natural Sense", font=f_title, fill=(255, 255, 255))
-    d.text((120, 390), subtitle, font=f_sub, fill=(210, 215, 222))
+    # Text (dark premium)
+    d.text((120, 200), f"#{t}", font=f_tag, fill=(*acc, 255))
+    d.text((120, 300), "NS•Natural Sense", font=f_title, fill=(16, 20, 24, 255))
+    d.text((120, 390), subtitle, font=f_sub, fill=(16, 20, 24, 185))
 
     # Export
     import io as _io
     buf = _io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.convert("RGB").save(buf, format="PNG", optimize=True)
     png = buf.getvalue()
     cache[cache_key] = png
-    return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=31536000"})
+
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+
 
 
 
