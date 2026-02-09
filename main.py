@@ -1733,7 +1733,7 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
 
     tg_app.add_handler(CallbackQueryHandler(on_callback))
-    tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_button))
+    tg_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_text_button))
     # Media sync: accept forwarded posts with media from admin (private chat)
     tg_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.VIDEO | filters.Document.ALL), on_sync_forward))
 
@@ -1943,20 +1943,16 @@ def get_webapp_html() -> str:
     .thumbFallback{
       width:100%;height:100%;
       display:flex;align-items:center;justify-content:center;
-      /* Пастельный градиент как фон приложения (без чёрного) */
-      background:
-        radial-gradient(420px 240px at 25% 10%, rgba(255,255,255,0.55), transparent 62%),
-        radial-gradient(380px 260px at 85% 0%, rgba(255,255,255,0.35), transparent 60%),
-        linear-gradient(135deg,
-          rgba(255,236,247,0.92) 0%,
-          rgba(232,246,255,0.90) 45%,
-          rgba(255,248,228,0.90) 100%);
-      color:rgba(20,20,20,0.70);
+      color:rgba(255,255,255,0.70);
       font-weight:900;letter-spacing:.8px;
+      background:
+        radial-gradient(420px 240px at 30% 10%, rgba(230,193,128,0.22), transparent 60%),
+        radial-gradient(380px 220px at 80% 0%, rgba(255,255,255,0.12), transparent 55%),
+        rgba(255,255,255,0.04);
     }
     .thumbNS{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:10px}
     .thumbNS .mark{font-size:18px}
-    .thumbNS .brand{font-size:12px;color:rgba(20,20,20,0.65);font-weight:800}
+    .thumbNS .brand{font-size:12px;color:rgba(255,255,255,0.72);font-weight:800}
 
     /* Bottom nav */
     .bottomNav{
@@ -2468,7 +2464,6 @@ def get_webapp_html() -> str:
     }
 
     let postsRefreshTimer = null;
-    let journalRefreshTimer = null;
     const state = {
       tab: "journal",
       user: null,
@@ -2718,39 +2713,14 @@ def get_webapp_html() -> str:
     }
 
     async function loadЖурналBlocks(){
-      // Загружаем превью постов для блоков журнала.
-      // Возвращаем true если данные реально изменились (чтобы не рендерить лишний раз).
-      let changed = false;
       for(const b of JOURNAL_BLOCKS){
         try{
           const arr = await apiGet("/api/posts?tag="+encodeURIComponent(b.tag));
-          const next = Array.isArray(arr) ? arr.slice(0,8) : [];
-          const prev = journalCache[b.tag] || [];
-
-          // сравним по message_id (достаточно, чтобы поймать новый/удаленный/переставленный пост)
-          const prevIds = prev.map(p=>p && p.message_id).filter(Boolean);
-          const nextIds = next.map(p=>p && p.message_id).filter(Boolean);
-
-          if(prevIds.length !== nextIds.length){
-            changed = true;
-          }else{
-            for(let i=0;i<prevIds.length;i++){
-              if(prevIds[i] !== nextIds[i]){ changed = true; break; }
-            }
-          }
-
-          // если IDs те же, но мог быть edit текста — проверим preview первого поста (быстро и дёшево)
-          if(!changed && prev[0] && next[0]){
-            if(String(prev[0].preview||"") !== String(next[0].preview||"")) changed = true;
-          }
-
-          journalCache[b.tag] = next;
+          journalCache[b.tag] = Array.isArray(arr) ? arr.slice(0,8) : [];
         }catch(e){
-          if((journalCache[b.tag]||[]).length) changed = true;
           journalCache[b.tag] = [];
         }
       }
-      return changed;
     }
 
     async function openPosts(tag, title){
@@ -2760,7 +2730,7 @@ def get_webapp_html() -> str:
       state.posts = [];
       state.loadingPosts = true;
 
-      // автообновление каждые 5 секунд (редактирование/удаление)
+      // автообновление каждые 30 секунд (редактирование/удаление)
       if(postsRefreshTimer) { try{ clearInterval(postsRefreshTimer); }catch(e){} postsRefreshTimer=null; }
 
       render();
@@ -2778,7 +2748,7 @@ def get_webapp_html() -> str:
       }
 
       await loadOnce();
-      postsRefreshTimer = setInterval(()=>{ if(state.postsSheet.open && state.postsSheet.tag===tag){ loadOnce(); } }, 5000);
+      postsRefreshTimer = setInterval(()=>{ if(state.postsSheet.open && state.postsSheet.tag===tag){ loadOnce(); } }, 30000);
     }
 
     function closePosts(){
@@ -4565,20 +4535,6 @@ if(state.profileView==="history"){
       await Promise.all([refreshUser(), loadBotUsername()]);
       await loadЖурналBlocks();
       render();
-
-      // Быстрый авто-рефреш превью журнала (новые/удалённые/отредактированные посты)
-      if(journalRefreshTimer) { try{ clearInterval(journalRefreshTimer); }catch(e){} journalRefreshTimer=null; }
-      journalRefreshTimer = setInterval(async ()=>{
-        try{
-          if(document.hidden) return;
-          const ch = await loadЖурналBlocks();
-          // Рендерим только если реально есть изменения
-          if(ch && state.tab === "journal" && !state.postsSheet.open){
-            render();
-          }
-        }catch(e){}
-      }, 5000);
-
       hideSplash();
     }
 
