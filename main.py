@@ -1943,14 +1943,32 @@ def get_webapp_html() -> str:
     .thumbFallback{
       width:100%;height:100%;
       display:flex;align-items:center;justify-content:center;
-      color:rgba(255,255,255,0.88);
       font-weight:900;letter-spacing:.8px;
+      color:rgba(18,22,28,0.72);
       background:
-        radial-gradient(520px 280px at 20% 0%, rgba(255,232,200,0.34), transparent 62%),
-        radial-gradient(420px 260px at 90% 10%, rgba(255,255,255,0.18), transparent 58%),
-        linear-gradient(135deg, rgba(230,193,128,0.22) 0%, rgba(255,255,255,0.10) 45%, rgba(255,255,255,0.06) 100%),
-        rgba(255,255,255,0.06);
+        radial-gradient(520px 300px at 18% 0%, rgba(255,255,255,0.95), rgba(255,255,255,0) 62%),
+        radial-gradient(420px 260px at 82% 6%, rgba(255,224,190,0.88), rgba(255,255,255,0) 58%),
+        linear-gradient(135deg,
+          rgba(252,248,242,0.96) 0%,
+          rgba(244,236,226,0.94) 42%,
+          rgba(236,224,212,0.94) 100%
+        );
+      position:relative;
+      overflow:hidden;
     }
+    .thumbFallback::before{
+      content:"";
+      position:absolute;inset:0;
+      background:
+        repeating-linear-gradient(0deg, rgba(0,0,0,0.035), rgba(0,0,0,0.035) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 3px),
+        radial-gradient(120px 120px at 40% 30%, rgba(255,255,255,0.55), rgba(255,255,255,0) 70%),
+        radial-gradient(140px 140px at 70% 70%, rgba(255,255,255,0.35), rgba(255,255,255,0) 72%);
+      opacity:0.12;
+      mix-blend-mode:multiply;
+      pointer-events:none;
+    }
+    .thumbFallback > *{position:relative;z-index:1}
+    .thumbFallback .thumbNS .brand{color:rgba(18,22,28,0.56)}
     .thumbNS{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:10px}
     .thumbNS .mark{font-size:18px}
     .thumbNS .brand{font-size:12px;color:rgba(255,255,255,0.72);font-weight:800}
