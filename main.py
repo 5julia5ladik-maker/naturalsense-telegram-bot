@@ -104,15 +104,17 @@ BLOCKED_TAGS = {"SephoraTR", "SephoraGuide"}
 # -----------------------------------------------------------------------------
 # GAMIFICATION CONFIG
 # -----------------------------------------------------------------------------
-DAILY_BONUS_POINTS = 5
-REGISTER_BONUS_POINTS = 10
-REFERRAL_BONUS_POINTS = 20
+DAILY_BONUS_POINTS = 100
+REGISTER_BONUS_POINTS = 100
+# Рефералка платится только за активного (см. add_daily_bonus_and_update_streak)
+REFERRAL_ACTIVE_BONUS_POINTS = 600
+REFERRAL_WEEK_BONUS_POINTS = 300
 
 STREAK_MILESTONES = {
-    3: 10,
-    7: 30,
-    14: 80,
-    30: 250,
+    3: 100,
+    7: 250,
+    14: 600,
+    30: 1500,
 }
 
 RAFFLE_TICKET_COST = 500
@@ -169,7 +171,8 @@ class User(Base):
 
     referred_by = Column(BigInteger, nullable=True)
     referral_count = Column(Integer, default=0)
-    ref_bonus_paid = Column(Boolean, default=False, nullable=False)
+    ref_bonus_paid = Column(Boolean, default=False, nullable=False)  # реф-бонус за 3 дня активности invitee
+    ref_week_bonus_paid = Column(Boolean, default=False, nullable=False)  # доп. реф-бонус за 7 дней активности invitee
 
 
 class Post(Base):
@@ -329,6 +332,7 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT NULL;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_count INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
+        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_week_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
 
         # ✅ Postgres: int32 -> bigint
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;")
@@ -421,21 +425,10 @@ async def create_user_with_referral(
         session.add(user)
         await session.flush()
 
-        if inviter and not user.ref_bonus_paid:
-            inviter.points = (inviter.points or 0) + REFERRAL_BONUS_POINTS
+        if inviter:
+            # Рефералка начисляется только за "активного" приглашённого (см. add_daily_bonus_and_update_streak).
             inviter.referral_count = (inviter.referral_count or 0) + 1
             _recalc_tier(inviter)
-            user.ref_bonus_paid = True
-            referral_paid = True
-
-            session.add(
-                PointTransaction(
-                    telegram_id=int(inviter.telegram_id),
-                    type="referral",
-                    delta=REFERRAL_BONUS_POINTS,
-                    meta={"invited": telegram_id},
-                )
-            )
 
         session.add(
             PointTransaction(
@@ -500,6 +493,35 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
             streak_bonus = STREAK_MILESTONES[user.daily_streak]
             user.points = (user.points or 0) + streak_bonus
 
+
+        # ------------------ REFERRAL: pay only for active invitee ------------------
+        # 3 days streak => +REFERRAL_ACTIVE_BONUS_POINTS to inviter (once)
+        # 7 days streak => +REFERRAL_WEEK_BONUS_POINTS to inviter (once)
+        if user.referred_by:
+            inviter = (await session.execute(select(User).where(User.telegram_id == int(user.referred_by)))).scalar_one_or_none()
+            if inviter:
+                # Active bonus (3 days)
+                if (not user.ref_bonus_paid) and (user.daily_streak or 0) >= 3:
+                    inviter.points = (inviter.points or 0) + int(REFERRAL_ACTIVE_BONUS_POINTS)
+                    _recalc_tier(inviter)
+                    user.ref_bonus_paid = True
+                    session.add(PointTransaction(
+                        telegram_id=int(inviter.telegram_id),
+                        type="referral_active",
+                        delta=int(REFERRAL_ACTIVE_BONUS_POINTS),
+                        meta={"invited": int(user.telegram_id), "streak": int(user.daily_streak or 0)},
+                    ))
+                # Week bonus (7 days)
+                if (not user.ref_week_bonus_paid) and (user.daily_streak or 0) >= 7:
+                    inviter.points = (inviter.points or 0) + int(REFERRAL_WEEK_BONUS_POINTS)
+                    _recalc_tier(inviter)
+                    user.ref_week_bonus_paid = True
+                    session.add(PointTransaction(
+                        telegram_id=int(inviter.telegram_id),
+                        type="referral_week",
+                        delta=int(REFERRAL_WEEK_BONUS_POINTS),
+                        meta={"invited": int(user.telegram_id), "streak": int(user.daily_streak or 0)},
+                    ))
         _recalc_tier(user)
 
         session.add(PointTransaction(telegram_id=telegram_id, type="daily", delta=DAILY_BONUS_POINTS, meta={}))
@@ -946,20 +968,31 @@ def build_help_text() -> str:
 3) *👤 Профиль* — баллы, уровень, стрик.
 4) *↩️ В канал* — кнопка под сообщением /start.
 
-💎 *Баллы и антифарм*
-• Первый /start: +10 за регистрацию
-• Далее: +5 за визит, строго 1 раз в 24 часа
+💎 *Баллы*
+• Первый /start: +{REGISTER_BONUS_POINTS} за регистрацию
+• Ежедневный бонус: +{DAILY_BONUS_POINTS} (1 раз в 24 часа)
 
-🔥 *Стрик (серия дней)*
-• 3 дня: +10
-• 7 дней: +30
-• 14 дней: +80
-• 30 дней: +250
+🔥 *Стрик (серия дней — доп. бонус к дневному)*
+• 3 дня: +100
+• 7 дней: +250
+• 14 дней: +600
+• 30 дней: +1500
 
-🎟 *Рефералка*
-Команда /invite даёт твою ссылку.
-За каждого нового пользователя по ссылке: +20 (1 раз за каждого).
-"""
+🎟 *Рефералка (за активного)*
+/invite — твоя ссылка.
+• На 3‑й день активности приглашённого: +{REFERRAL_ACTIVE_BONUS_POINTS}
+• На 7‑й день активности приглашённого: +{REFERRAL_WEEK_BONUS_POINTS}
+
+🎰 *Рулетка*
+Стоимость 1 спина: {ROULETTE_SPIN_COST} 💎
+Крутить можно сколько угодно — пока хватает баллов.
+""".format(
+        REGISTER_BONUS_POINTS=REGISTER_BONUS_POINTS,
+        DAILY_BONUS_POINTS=DAILY_BONUS_POINTS,
+        REFERRAL_ACTIVE_BONUS_POINTS=REFERRAL_ACTIVE_BONUS_POINTS,
+        REFERRAL_WEEK_BONUS_POINTS=REFERRAL_WEEK_BONUS_POINTS,
+        ROULETTE_SPIN_COST=ROULETTE_SPIN_COST,
+    )
 
 
 async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -999,7 +1032,7 @@ def build_welcome_text(
 
     ref_line = ""
     if referral_paid:
-        ref_line = f"\n🎁 Тебя пригласили — твой друг получил +{REFERRAL_BONUS_POINTS} баллов."
+        ref_line = f"\n🎁 Тебя пригласили — твой друг получил +{REFERRAL_ACTIVE_BONUS_POINTS} баллов."
 
     return f"""\
 Привет, {name}! 🖤
@@ -1145,7 +1178,9 @@ async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 {link}
 
-За каждого нового пользователя по этой ссылке: +{REFERRAL_BONUS_POINTS} баллов (1 раз за каждого).
+Реф-бонус начисляется только за активного приглашённого:
+• на 3-й день: +{REFERRAL_ACTIVE_BONUS_POINTS}
+• на 7-й день: +{REFERRAL_WEEK_BONUS_POINTS}
 """
     await update.message.reply_text(text, reply_markup=get_main_keyboard())
 
@@ -2504,7 +2539,7 @@ def get_webapp_html() -> str:
 
       rouletteRecent: [],
       rouletteWheel: {angle:0, spinning:false, mode:"idle", lastTick:-1, startedAt:0, targetKey:null, spinId:null, prize:null, overlay:false},
-      rouletteStatus: {can_spin:true, seconds_left:0, enough_points:true, points:0, spin_cost:2000},
+      rouletteStatus: {can_spin:true, seconds_left:0, enough_points:true, points:0, spin_cost:300},
       rouletteCooldownTick: 0,
       claim: {open:false, claim_id:null, claim_code:null, status:null, prize_label:null, data:null, step:1, form:{full_name:"", phone:"", country:"", city:"", address_line:"", postal_code:"", comment:""}},
       inventoryOpen:false,
@@ -3711,7 +3746,7 @@ function renderБонусы(main){
       const t1 = el("div","tile");
       t1.addEventListener("click", ()=>{ haptic(); openПрофиль("roulette"); });
       t1.appendChild(el("div","tileTitle","🎡 Рулетка"));
-      t1.appendChild(el("div","tileSub","Испытать удачу (2000)"));
+      t1.appendChild(el("div","tileSub",`Испытать удачу (${state.rouletteStatus.spin_cost||0})`));
       const t2 = el("div","tile");
       t2.addEventListener("click", ()=>{ haptic(); openПрофиль("raffle"); });
       t2.appendChild(el("div","tileTitle","🎁 Розыгрыши"));
@@ -4127,7 +4162,7 @@ if(state.profileView==="roulette"){
           title.style.marginTop="12px";
           title.innerHTML =
             '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
-            '<div class="sub" style="margin-top:6px">Крутить = 300 баллов.</div>';
+            '<div class="sub" style="margin-top:6px">Крутить = '+String((state.rouletteStatus?.spin_cost)||0)+' баллов.</div>';
           wrap.appendChild(title);
 
           const stage = el("div","wheelStage");
@@ -4148,7 +4183,7 @@ if(state.profileView==="roulette"){
           stage.appendChild(wheelBox);
 
           const micro = el("div","microHud",
-            "Баланс: "+esc(String(state.user?.points||0))+" 💎   •   Стоимость: 300 💎"
+            "Баланс: "+esc(String(state.user?.points||0))+" 💎   •   Стоимость: "+esc(String((state.rouletteStatus?.spin_cost)||0))+" 💎"
           );
           stage.appendChild(micro);
 
@@ -4184,7 +4219,7 @@ if(state.profileView==="roulette"){
           b.style.cursor = (can && !state.busy) ? "pointer" : "not-allowed";
           b.innerHTML =
             '<div><div class="btnTitle">'+(state.busy?"Крутим…":"Крутить")+
-            '</div><div class="btnSub">'+(state.busy?"":"−2000 💎")+'</div></div><div style="opacity:0.85">›</div>';
+            '</div><div class="btnSub">'+(state.busy?"":`−${state.rouletteStatus.spin_cost||0} 💎`)+'</div></div><div style="opacity:0.85">›</div>';
           b.addEventListener("click", ()=>{ if(can && !state.busy){ spinRouletteLux(); } });
           wrap.appendChild(b);
 
