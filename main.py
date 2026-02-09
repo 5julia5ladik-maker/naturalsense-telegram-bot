@@ -1943,12 +1943,13 @@ def get_webapp_html() -> str:
     .thumbFallback{
       width:100%;height:100%;
       display:flex;align-items:center;justify-content:center;
-      color:rgba(255,255,255,0.70);
+      color:rgba(255,255,255,0.88);
       font-weight:900;letter-spacing:.8px;
       background:
-        radial-gradient(420px 240px at 30% 10%, rgba(230,193,128,0.22), transparent 60%),
-        radial-gradient(380px 220px at 80% 0%, rgba(255,255,255,0.12), transparent 55%),
-        rgba(255,255,255,0.04);
+        radial-gradient(520px 280px at 20% 0%, rgba(255,232,200,0.34), transparent 62%),
+        radial-gradient(420px 260px at 90% 10%, rgba(255,255,255,0.18), transparent 58%),
+        linear-gradient(135deg, rgba(230,193,128,0.22) 0%, rgba(255,255,255,0.10) 45%, rgba(255,255,255,0.06) 100%),
+        rgba(255,255,255,0.06);
     }
     .thumbNS{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:10px}
     .thumbNS .mark{font-size:18px}
