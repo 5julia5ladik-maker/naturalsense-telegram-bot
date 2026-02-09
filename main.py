@@ -71,6 +71,9 @@ CHANNEL_USERNAME = env_get("CHANNEL_USERNAME", "NaturalSense") or "NaturalSense"
 DATABASE_URL = env_get("DATABASE_URL", "sqlite+aiosqlite:///./ns.db") or "sqlite+aiosqlite:///./ns.db"
 ADMIN_CHAT_ID = int(env_get("ADMIN_CHAT_ID", "5443870760") or "5443870760")
 
+APP_VERSION = (env_get("APP_VERSION", "1.0.4") or "1.0.4").strip()
+ASSET_VERSION = (env_get("ASSET_VERSION", APP_VERSION) or APP_VERSION).strip()
+
 # Fix Railway postgres schemes for async SQLAlchemy
 if DATABASE_URL:
     if DATABASE_URL.startswith("postgres://"):
@@ -1801,6 +1804,9 @@ def get_webapp_html() -> str:
     html = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>NS · Natural Sense</title>
@@ -4660,10 +4666,10 @@ async def api_posts(tag: str | None = None, limit: int = 50, offset: int = 0):
     out = []
     for p in rows:
         media_type = (p.media_type or "").strip().lower()
-        media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else None
+        media_url = f"/api/post_media/{int(p.message_id)}?v={ASSET_VERSION}" if (media_type == "photo" and p.media_file_id) else None
         if not media_url:
             main_tag = (p.tags or [None])[0] or "Пост"
-            media_url = f"/api/tag_card/{main_tag}"
+            media_url = f"/api/tag_card/{main_tag}?v={ASSET_VERSION}"
 
         out.append({
             "message_id": int(p.message_id),
@@ -4705,10 +4711,10 @@ async def api_search(q: str, limit: int = 50, offset: int = 0):
     out = []
     for p in rows:
         media_type = (p.media_type or "").strip().lower()
-        media_url = f"/api/post_media/{int(p.message_id)}" if (media_type == "photo" and p.media_file_id) else None
+        media_url = f"/api/post_media/{int(p.message_id)}?v={ASSET_VERSION}" if (media_type == "photo" and p.media_file_id) else None
         if not media_url:
             main_tag = (p.tags or [None])[0] or "Пост"
-            media_url = f"/api/tag_card/{main_tag}"
+            media_url = f"/api/tag_card/{main_tag}?v={ASSET_VERSION}"
 
         out.append({
             "message_id": int(p.message_id),
@@ -4745,18 +4751,21 @@ async def api_post_media(message_id: int):
     return FileResponse(
         local_path,
         media_type="image/jpeg",
-        headers={"Cache-Control": "public, max-age=31536000"},
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache", "Expires": "0"},
     )
 
 
 
 @app.get("/api/tag_card/{tag}")
-async def api_tag_card(tag: str):
+async def api_tag_card(tag: str, v: str | None = None):
     """
-    PNG-заглушка для постов без картинки: отдельная карта под каждый тег.
+    PNG-заглушка для постов без картинки: светлая premium-карта под NS.
 
-    Важно: PNG используется вместо SVG, потому что некоторые Telegram WebView
-    некорректно отображают SVG в <img>.
+    Почему так:
+    - Telegram WebView агрессивно кэширует картинки.
+    - Поэтому URL содержит ?v=... (ASSET_VERSION), а ответ отдаём с no-store.
+    - Внутри сервера держим небольшой in-memory cache по (tag+version),
+      чтобы не рендерить PNG на каждый запрос.
     """
     t = (tag or "").strip() or "Пост"
     key = _norm_tag(t)
@@ -4775,67 +4784,142 @@ async def api_tag_card(tag: str):
     }
     subtitle = subtitle_map.get(key, "Natural Sense")
 
+    # Accent (soft champagne / pearl)
     accent_map = {
-        "люкс": ("#C9D1D9", "#0B0F14"),
-        "новинка": ("#E6E1D6", "#0B0F14"),
-        "тренд": ("#D6E7E2", "#0B0F14"),
-        "факты": ("#E0D6E7", "#0B0F14"),
-        "состав": ("#E7E2D6", "#0B0F14"),
-        "история": ("#D6DDE7", "#0B0F14"),
-        "оценка": ("#E7D6DA", "#0B0F14"),
-        "челленджи": ("#D6E7D9", "#0B0F14"),
-        "challenge": ("#D6E7D9", "#0B0F14"),
-        "sephorapromo": ("#E7D6E2", "#0B0F14"),
+        "люкс": "#9A7A3A",
+        "новинка": "#8C6A4F",
+        "тренд": "#4E7A74",
+        "факты": "#6E5A8A",
+        "состав": "#7B6A48",
+        "история": "#52667A",
+        "оценка": "#7A4E5B",
+        "челленджи": "#4F7A5B",
+        "challenge": "#4F7A5B",
+        "sephorapromo": "#7A4E6A",
     }
-    accent, bg = accent_map.get(key, ("#DDE3EA", "#0B0F14"))
+    accent_hex = accent_map.get(key, "#8C7A5A")
 
-    # --- simple in-memory cache ---
-    cache_key = f"{accent}|{bg}|{t}|{subtitle}"
+    # Version for cache-busting
+    version = (v or ASSET_VERSION or "v").strip()
+
+    # --- server in-memory cache (version-aware) ---
+    cache_key = f"{version}|{t}|{subtitle}|{accent_hex}"
     if not hasattr(api_tag_card, "_cache"):
         api_tag_card._cache = {}
     cache: dict[str, bytes] = api_tag_card._cache  # type: ignore[attr-defined]
     if cache_key in cache:
-        return Response(content=cache[cache_key], media_type="image/png", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content=cache[cache_key],
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
-    # --- render PNG ---
     try:
         from PIL import Image, ImageDraw, ImageFont
     except Exception:
-        # Fallback: if Pillow is missing, return SVG like before
+        # Fallback: SVG (на случай если Pillow отсутствует)
         svg = f"""<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
-  <rect x="0" y="0" width="1280" height="720" fill="{bg}"/>
-  <text x="120" y="240" fill="{accent}" font-family="Arial" font-size="36" font-weight="700">#{t}</text>
-  <text x="120" y="340" fill="#FFFFFF" font-family="Arial" font-size="64" font-weight="800">NS•Natural Sense</text>
-  <text x="120" y="420" fill="rgba(255,255,255,0.75)" font-family="Arial" font-size="30" font-weight="600">{subtitle}</text>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F8F4EE"/>
+      <stop offset="55%" stop-color="#EFE6DA"/>
+      <stop offset="100%" stop-color="#E5D2BE"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1280" height="720" fill="url(#g)"/>
+  <rect x="72" y="72" width="1136" height="576" rx="44" fill="rgba(255,255,255,0.80)" stroke="rgba(0,0,0,0.10)" stroke-width="2"/>
+  <text x="120" y="240" fill="{accent_hex}" font-family="Arial" font-size="36" font-weight="700">#{html.escape(t)}</text>
+  <text x="120" y="340" fill="#101418" font-family="Arial" font-size="64" font-weight="800">NS•Natural Sense</text>
+  <text x="120" y="420" fill="rgba(16,20,24,0.72)" font-family="Arial" font-size="30" font-weight="600">{html.escape(subtitle)}</text>
 </svg>"""
-        return Response(content=svg, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content=svg,
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     W, H = 1280, 720
-    img = Image.new("RGB", (W, H), bg)
+
+    def hex_to_rgb(h: str) -> tuple[int, int, int]:
+        h = h.lstrip("#")
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+    def lerp(a: int, b: int, t_: float) -> int:
+        return int(a + (b - a) * t_)
+
+    # Premium light background gradient (ivory -> pearl -> champagne)
+    c1 = hex_to_rgb("#F8F4EE")  # ivory
+    c2 = hex_to_rgb("#EFE6DA")  # pearl
+    c3 = hex_to_rgb("#E5D2BE")  # champagne nude
+
+    img = Image.new("RGB", (W, H), c1)
     d = ImageDraw.Draw(img)
 
-    # Card area
+    # vertical blend c1 -> c2
+    for y in range(H):
+        t_ = y / (H - 1)
+        col = (lerp(c1[0], c2[0], t_), lerp(c1[1], c2[1], t_), lerp(c1[2], c2[2], t_))
+        d.line([(0, y), (W, y)], fill=col)
+
+    # soft diagonal overlay c2 -> c3 (subtle)
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    for y in range(H):
+        t_ = y / (H - 1)
+        # more champagne towards bottom-right
+        alpha = int(70 * t_)  # 0..70
+        col = (*c3, alpha)
+        od.line([(0, y), (W, y)], fill=col)
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGBA")
+
+    # very light noise to avoid "flat" look
+    try:
+        import random
+        px = img.load()
+        for _ in range(9000):  # sparse
+            x = random.randrange(0, W)
+            y = random.randrange(0, H)
+            r, g, b, a = px[x, y]
+            n = random.randint(-8, 8)
+            px[x, y] = (max(0, min(255, r + n)), max(0, min(255, g + n)), max(0, min(255, b + n)), a)
+    except Exception:
+        pass
+
+    # Card area (glass / premium)
     pad = 72
     card = [pad, pad, W - pad, H - pad]
-    # semi-transparent look imitation (draw darker rectangle + border)
-    d.rounded_rectangle(card, radius=44, fill=(20, 26, 34), outline=(60, 70, 82), width=2)
+    # soft shadow
+    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    sd.rounded_rectangle(
+        [card[0] + 8, card[1] + 12, card[2] + 8, card[3] + 12],
+        radius=44,
+        fill=(0, 0, 0, 38),
+    )
+    img = Image.alpha_composite(img, shadow)
 
-    # Accent dots
-    def hex_to_rgb(h):
-        h = h.lstrip("#")
-        return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-    acc = hex_to_rgb(accent)
-    d.ellipse((120, 120, 140, 140), fill=acc)
-    d.ellipse((156, 126, 168, 138), fill=acc)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(card, radius=44, fill=(255, 255, 255, 210), outline=(0, 0, 0, 28), width=2)
+
+    # Accent micro-dots
+    acc = hex_to_rgb(accent_hex)
+    d.ellipse((120, 120, 140, 140), fill=(*acc, 255))
+    d.ellipse((156, 126, 168, 138), fill=(*acc, 255))
 
     # Fonts (best-effort)
-    def load_font(size, bold=False):
+    def load_font(size: int, bold: bool = False):
         candidates = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
         ]
         for p in candidates:
             try:
@@ -4848,18 +4932,30 @@ async def api_tag_card(tag: str):
     f_title = load_font(66, bold=True)
     f_sub = load_font(32, bold=False)
 
-    # Text
-    d.text((120, 200), f"#{t}", font=f_tag, fill=acc)
-    d.text((120, 300), "NS•Natural Sense", font=f_title, fill=(255, 255, 255))
-    d.text((120, 390), subtitle, font=f_sub, fill=(210, 215, 222))
+    # Text (dark premium)
+    d.text((120, 200), f"#{t}", font=f_tag, fill=(*acc, 255))
+    d.text((120, 300), "NS•Natural Sense", font=f_title, fill=(16, 20, 24, 255))
+    d.text((120, 390), subtitle, font=f_sub, fill=(16, 20, 24, 185))
 
     # Export
     import io as _io
     buf = _io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.convert("RGB").save(buf, format="PNG", optimize=True)
     png = buf.getvalue()
     cache[cache_key] = png
-    return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=31536000"})
+
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+
 
 
 
