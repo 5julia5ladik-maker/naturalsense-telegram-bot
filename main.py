@@ -55,27 +55,6 @@ from sqlalchemy.orm import declarative_base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
 
-# -----------------------------------------------------------------------------
-# GLOBAL HTTP CLIENT (KEEP-ALIVE) + LIMITS
-# -----------------------------------------------------------------------------
-_http_client: httpx.AsyncClient | None = None
-
-def get_http_client() -> httpx.AsyncClient:
-    if _http_client is None:
-        # Should be initialized in lifespan; fallback for safety.
-        limits = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=30.0)
-        timeout = httpx.Timeout(connect=5.0, read=15.0, write=15.0, pool=15.0)
-        return httpx.AsyncClient(timeout=timeout, limits=limits, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
-    return _http_client
-
-# -----------------------------------------------------------------------------
-# MEDIA CACHE: PER-FILE LOCKS (avoid global bottleneck)
-# -----------------------------------------------------------------------------
-_media_locks: dict[str, asyncio.Lock] = {}
-_media_locks_guard = asyncio.Lock()
-_MAX_MEDIA_LOCKS = int(os.getenv("MAX_MEDIA_LOCKS", "2048"))
-MAX_MEDIA_BYTES = int(os.getenv("MAX_MEDIA_BYTES", str(40 * 1024 * 1024)))  # hard safety cap
-
 
 # -----------------------------------------------------------------------------
 # CONFIG (ENV)
@@ -617,57 +596,28 @@ async def _tg_get_file_path(file_id: str) -> str:
     if not BOT_TOKEN:
         raise HTTPException(status_code=500, detail="BOT_TOKEN is not set")
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile"
-    client = get_http_client()
-    r = await client.get(url, params={"file_id": file_id})
-    r.raise_for_status()
-    data = r.json()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(url, params={"file_id": file_id})
+        r.raise_for_status()
+        data = r.json()
     if not data.get("ok") or not data.get("result") or not data["result"].get("file_path"):
         raise HTTPException(status_code=404, detail="Telegram file not found")
     return str(data["result"]["file_path"])
 
 
-
-async def _get_media_lock(file_id: str) -> asyncio.Lock:
-    # Per-file locks prevent a single global bottleneck under load.
-    async with _media_locks_guard:
-        lock = _media_locks.get(file_id)
-        if lock is None:
-            if len(_media_locks) >= _MAX_MEDIA_LOCKS:
-                # best-effort eviction of an arbitrary item (keeps memory bounded)
-                try:
-                    _media_locks.pop(next(iter(_media_locks)))
-                except Exception:
-                    _media_locks.clear()
-            lock = asyncio.Lock()
-            _media_locks[file_id] = lock
-        return lock
-
-
 async def get_cached_media_file(file_id: str) -> str:
-    """Downloads media file into MEDIA_CACHE_DIR once and returns local path.
-
-    Key properties (for 100k+ load):
-    - per-file locks (no global lock bottleneck)
-    - keep-alive shared http client
-    - streaming download (no full-file in RAM)
-    - safety cap to avoid disk/memory abuse
-    """
+    """Downloads media file into MEDIA_CACHE_DIR once and returns local path."""
     file_id = (file_id or "").strip()
     if not file_id:
         raise HTTPException(status_code=404, detail="Empty file_id")
 
-    # fast path (no lock)
-    cached = _file_path_cache.get(file_id)
-    if cached and os.path.exists(cached):
-        return cached
-
-    lock = await _get_media_lock(file_id)
-    async with lock:
-        # double-check after acquiring lock
+    async with _media_lock:
+        # fast path
         cached = _file_path_cache.get(file_id)
         if cached and os.path.exists(cached):
             return cached
 
+        # Determine local filename (safe)
         safe = re.sub(r"[^a-zA-Z0-9_\-]", "_", file_id)[:120]
         local_path = os.path.join(MEDIA_CACHE_DIR, safe)
 
@@ -675,6 +625,19 @@ async def get_cached_media_file(file_id: str) -> str:
             _file_path_cache[file_id] = local_path
             return local_path
 
+        file_path = await _tg_get_file_path(file_id)
+        dl_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            r = await client.get(dl_url)
+            r.raise_for_status()
+            content = r.content
+
+        with open(local_path, "wb") as f:
+            f.write(content)
+
+        _file_path_cache[file_id] = local_path
+        return local_path
 
 
 def make_permalink(message_id: int) -> str:
@@ -706,8 +669,11 @@ async def upsert_post_from_channel(
         if p:
             p.date = date_naive
             p.text = text_
-            p.media_type = media_type
-            p.media_file_id = media_file_id
+            # Preserve media on caption/text edits where Telegram may omit media fields
+            if media_type is not None:
+                p.media_type = media_type
+            if media_file_id is not None:
+                p.media_file_id = media_file_id
             p.permalink = permalink
             p.tags = tags
             p.is_deleted = False
@@ -734,85 +700,66 @@ async def upsert_post_from_channel(
         return p
 
 
-
 async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
-    # NOTE: under high load we must avoid fetching thousands of rows and filtering in Python.
-    # We filter by tag directly in SQL for Postgres (JSONB containment).
     if tag and tag in BLOCKED_TAGS:
         return []
 
     tag = (tag or "").strip() if tag else None
-
-    tag_canon: str | None = None
+    want_norm = None
     if tag:
+        # Канонизируем запрос тега (например, 'люкс' -> 'Люкс'), сравниваем без учета регистра
         tag_canon = CANON_TAGS.get(_norm_tag(tag), tag)
+        want_norm = _norm_tag(tag_canon)
+
+    # ВАЖНО: чтобы старые посты с тегом не пропадали, сначала берем расширенное окно,
+    # затем фильтруем по тегу и только потом применяем offset/limit к отфильтрованному списку.
+    # Это не меняет логику приложения — только позволяет видеть посты с тегом за пределами последних N.
+    window = max(1000, (offset + limit) * 40)
+    window = min(window, 5000)
 
     async with async_session_maker() as session:
         q = (
             select(Post)
             .where(Post.is_deleted == False)  # noqa: E712
-        )
-
-        if tag_canon:
-            # Post.tags is JSON array; on Postgres we can use JSONB containment with a cast.
-            # This keeps logic identical but removes Python-side filtering and huge windows.
-            try:
-                from sqlalchemy.dialects.postgresql import JSONB
-                from sqlalchemy import cast
-                q = q.where(cast(Post.tags, JSONB).contains([tag_canon]))
-            except Exception:
-                # Fallback for non-Postgres DBs
-                pass
-
-        q = (
-            q.order_by(Post.message_id.desc())
-            .offset(offset)
-            .limit(limit)
+            .order_by(Post.message_id.desc())
+            .limit(window)
         )
         rows = (await session.execute(q)).scalars().all()
 
-    # Fallback tag filtering (for non-Postgres DBs where JSONB containment is unavailable)
-    if tag_canon and rows:
-        want_norm = _norm_tag(tag_canon)
-
+    if want_norm:
         def _canon_norm(x: str) -> str:
             return _norm_tag(CANON_TAGS.get(_norm_tag(x), x))
 
         rows = [p for p in rows if any(_canon_norm(x) == want_norm for x in (p.tags or []))]
 
-    return rows
-
+    return rows[offset: offset + limit]
 
 
 # -----------------------------------------------------------------------------
 # DELETE SWEEPER (AUTO CHECK)
 # -----------------------------------------------------------------------------
-
 async def message_exists_public(message_id: int) -> bool:
     url = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
     try:
-        client = get_http_client()
-        r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code == 404:
-            return False
-        if r.status_code != 200:
-            return True
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code == 404:
+                return False
+            if r.status_code != 200:
+                return True
 
-        html_ = (r.text or "").lower()
-        if "message not found" in html_ or "post not found" in html_:
-            return False
-        if "join channel" in html_ or "this channel is private" in html_:
+            html = (r.text or "").lower()
+            if "message not found" in html or "post not found" in html:
+                return False
+            if "join channel" in html or "this channel is private" in html:
+                return True
             return True
-        return True
     except Exception as e:
         logger.warning("Sweeper check failed for %s: %s", message_id, e)
         return True
 
 
-
-
-async def sweep_deleted_posts(batch: int = 30, concurrency: int | None = None):
-    concurrency = int(concurrency or os.getenv("SWEEPER_CONCURRENCY", "10"))
+async def sweep_deleted_posts(batch: int = 30):
     async with async_session_maker() as session:
         posts = (
             await session.execute(
@@ -826,22 +773,11 @@ async def sweep_deleted_posts(batch: int = 30, concurrency: int | None = None):
     if not posts:
         return []
 
-    sem = asyncio.Semaphore(max(1, concurrency))
-
-    async def _check(mid: int) -> tuple[int, bool]:
-        async with sem:
-            ok = await message_exists_public(mid)
-            return (mid, ok)
-
-    results = await asyncio.gather(*(_check(int(p.message_id)) for p in posts), return_exceptions=True)
-
     to_mark: list[int] = []
-    for item in results:
-        if isinstance(item, Exception):
-            continue
-        mid, ok = item
+    for p in posts:
+        ok = await message_exists_public(int(p.message_id))
         if not ok:
-            to_mark.append(mid)
+            to_mark.append(int(p.message_id))
 
     if not to_mark:
         return []
@@ -859,16 +795,13 @@ async def sweep_deleted_posts(batch: int = 30, concurrency: int | None = None):
     return to_mark
 
 
-
 async def sweeper_loop():
-    interval = float(os.getenv('SWEEPER_INTERVAL_SEC', '30'))
-    batch = int(os.getenv('SWEEPER_BATCH', '30'))
     while True:
         try:
-            await sweep_deleted_posts(batch=batch)
+            await sweep_deleted_posts(batch=30)
         except Exception as e:
             logger.error("Sweeper error: %s", e)
-        await asyncio.sleep(interval)
+        await asyncio.sleep(30)  
 # -----------------------------------------------------------------------------
 # PUBLIC RECONCILE (AUTO DISCOVER NEW POSTS)
 # -----------------------------------------------------------------------------
@@ -876,13 +809,13 @@ async def fetch_public_post_text(message_id: int) -> str | None:
     """Fetches public embed HTML and extracts visible text. Returns None if not accessible or not found."""
     url = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
     try:
-        client = get_http_client()
-        r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code == 404:
-            return None
-        if r.status_code != 200:
-            return None
-        html_text = r.text or ""
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code == 404:
+                return None
+            if r.status_code != 200:
+                return None
+            html_text = r.text or ""
     except Exception:
         return None
 
@@ -908,15 +841,9 @@ async def fetch_public_post_text(message_id: int) -> str | None:
     # If extraction failed, return empty string to still allow tagging from raw.
     return txt if txt else ""
 
-
 async def reconcile_recent_public_posts(max_probe: int = 60):
     """Best-effort: probe message_id gaps after the newest known id and index what exists.
-    This makes the bot resilient if it missed channel_post updates.
-
-    High-load safe:
-    - bounded concurrency
-    - early-stop on long consecutive misses
-    """
+    This makes the bot resilient if it missed channel_post updates."""
     try:
         async with async_session() as session:
             res = await session.execute(select(func.max(Post.message_id)))
@@ -927,68 +854,43 @@ async def reconcile_recent_public_posts(max_probe: int = 60):
     start_id = int(last_id) + 1
     end_id = start_id + int(max_probe) - 1
 
-    concurrency = int(os.getenv("RECONCILE_CONCURRENCY", "8"))
-    sem = asyncio.Semaphore(max(1, concurrency))
-    miss_stop = int(os.getenv("RECONCILE_CONSEC_MISS_STOP", "20"))
+    for mid in range(start_id, end_id + 1):
+        txt = await fetch_public_post_text(mid)
+        if txt is None:
+            continue
 
-    # We'll schedule checks in small waves to allow early-stop on misses.
-    pending: list[int] = list(range(start_id, end_id + 1))
-    consecutive_miss = 0
+        # Avoid indexing duplicates if concurrent runner
+        try:
+            async with async_session() as session:
+                exists = await session.execute(select(Post).where(Post.message_id == mid))
+                if exists.scalar_one_or_none():
+                    continue
+        except Exception:
+            pass
 
-    async def _fetch(mid: int) -> tuple[int, str | None]:
-        async with sem:
-            txt = await fetch_public_post_text(mid)
-            return (mid, txt)
+        # Extract tags from the visible text (works for both text posts and captions)
+        tags = extract_tags(txt)
 
-    while pending:
-        # wave size ~2x concurrency for better pipeline
-        wave = pending[: max(1, concurrency * 2)]
-        pending = pending[len(wave):]
-
-        results = await asyncio.gather(*(_fetch(mid) for mid in wave), return_exceptions=True)
-
-        for item in results:
-            if isinstance(item, Exception):
-                continue
-            mid, txt = item
-            if txt is None:
-                consecutive_miss += 1
-                if consecutive_miss >= miss_stop:
-                    return
-                continue
-
-            consecutive_miss = 0
-
-            # Avoid indexing duplicates if concurrent runner
+        # Use the extracted text as post text; date is unknown from public embed reliably
+        await upsert_post_from_channel(
+            message_id=mid,
+            date=datetime.now(timezone.utc),
+            text_=txt,
+            media_type=None,
+            media_file_id=None,
+        )
+        # Ensure tags are persisted even if text got truncated upstream
+        if tags:
             try:
                 async with async_session() as session:
-                    exists = await session.execute(select(Post).where(Post.message_id == mid))
-                    if exists.scalar_one_or_none():
-                        continue
+                    await session.execute(
+                        update(Post).where(Post.message_id == mid).values(tags=tags)
+                    )
+                    await session.commit()
             except Exception:
                 pass
 
-            tags = extract_tags(txt)
-
-            await upsert_post_from_channel(
-                message_id=mid,
-                date=datetime.now(timezone.utc),
-                text_=txt,
-                media_type=None,
-                media_file_id=None,
-            )
-            if tags:
-                try:
-                    async with async_session() as session:
-                        await session.execute(
-                            update(Post).where(Post.message_id == mid).values(tags=tags)
-                        )
-                        await session.commit()
-                except Exception:
-                    pass
-
-            logger.info("🔎 Reconciled public post id=%s tags=%s", mid, tags)
-
+        logger.info("🔎 Reconciled public post id=%s tags=%s", mid, tags)
 
 # 30 секунд
 
@@ -4681,15 +4583,8 @@ if(state.profileView==="history"){
 # -----------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
-    global sweeper_task, _http_client
+    global sweeper_task
     await init_db()
-    # One shared HTTP client for keep-alive and better performance
-    limits = httpx.Limits(max_connections=int(os.getenv('HTTP_MAX_CONNECTIONS','200')),
-                         max_keepalive_connections=int(os.getenv('HTTP_MAX_KEEPALIVE','50')),
-                         keepalive_expiry=float(os.getenv('HTTP_KEEPALIVE_EXPIRY','30')))
-    timeout = httpx.Timeout(connect=5.0, read=15.0, write=15.0, pool=15.0)
-    _http_client = httpx.AsyncClient(timeout=timeout, limits=limits, follow_redirects=True,
-                                    headers={'User-Agent': 'Mozilla/5.0'})
     await start_telegram_bot()
     sweeper_task = asyncio.create_task(sweeper_loop())
     logger.info("✅ NS · Natural Sense started")
@@ -4702,13 +4597,6 @@ async def lifespan(app_: FastAPI):
                 await sweeper_task
             except Exception:
                 pass
-        # Close shared HTTP client
-        if _http_client is not None:
-            try:
-                await _http_client.aclose()
-            except Exception:
-                pass
-            _http_client = None
         await stop_telegram_bot()
         logger.info("✅ NS · Natural Sense stopped")
 
