@@ -3424,6 +3424,8 @@ function esc(s){
       state.busy = true; state.msg = ""; render();
       try{
         const d = await apiPost("/api/roulette/spin", {telegram_id: tgUserId});
+        try{ await dailyEvent('spin_roulette'); }catch(e){}
+
         state.msg = "🎡 Выпало: "+d.prize_label;
         try{
           if(tg && tg.showPopup){
@@ -4344,8 +4346,31 @@ async function dailyEvent(event, data){
   }
 }
 
+
+function _startDailyPoll(){
+  try{
+    if(state.__dailyPoll) return;
+    state.__dailyPoll = setInterval(async ()=>{
+      try{
+        if(!state.dailyOpen || !tgUserId) return;
+        state.daily = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
+        render();
+      }catch(e){}
+    }, 5000);
+  }catch(e){}
+}
+function _stopDailyPoll(){
+  try{
+    if(state.__dailyPoll){
+      clearInterval(state.__dailyPoll);
+      state.__dailyPoll = null;
+    }
+  }catch(e){}
+}
+
 async function openDaily(){
   state.dailyOpen = true;
+  _startDailyPoll();
   state.dailyMsg = "";
   render();
   try{
@@ -4361,6 +4386,7 @@ async function openDaily(){
 }
 function closeDaily(){
   state.dailyOpen = false;
+  _stopDailyPoll();
   state.dailyMsg = "";
   render();
 }
