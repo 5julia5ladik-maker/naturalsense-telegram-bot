@@ -4343,7 +4343,7 @@ async function dailyEvent(event, data){
     // silent (must never break main UI)
   }
 }
-
+\n// Auto-track Mini App open once per session (does not affect UI)\ntry{\n  if(typeof window !== 'undefined'){\n    if(!window.__nsDailyOpenPinged){\n      window.__nsDailyOpenPinged = true;\n      if(tgUserId){ dailyEvent('open_miniapp'); }\n    }\n  }\n}catch(e){}\n\n
 async function openDaily(){
   state.dailyOpen = true;
   state.dailyMsg = "";
@@ -6242,6 +6242,13 @@ async def inventory_api(telegram_id: int):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        # Daily tracking: open inventory (cosmetic bag)
+        try:
+            await _mark_daily_done(session, tid, _today_key(), "open_inventory")
+            await session.commit()
+        except Exception:
+            await session.rollback()
+
         raffle = (await session.execute(select(Raffle).where(Raffle.id == DEFAULT_RAFFLE_ID))).scalar_one()
         t = (
             await session.execute(
@@ -6305,6 +6312,11 @@ async def daily_tasks_api(telegram_id: int):
             user = User(telegram_id=tid, points=10)
             session.add(user)
             await session.commit()
+
+        # Auto-mark 'open_miniapp' when tasks are requested (guaranteed tracking)
+        await _mark_daily_done(session, tid, day, "open_miniapp")
+        # IMPORTANT: ensure the new log is visible to the SELECT below (autoflush can be off in async sessions)
+        await session.flush()
 
         logs = await _get_daily_logs(session, tid, day)
 
@@ -6538,6 +6550,14 @@ async def inventory_convert_ticket(req: ConvertTicketsReq):
             points_now = int(user.points or 0)
             tickets_now = int(ticket_row.count or 0)
 
+    # Daily tracking: any conversion counts as 'convert_prize'
+    try:
+        async with async_session_maker() as s:
+            await _mark_daily_done(s, tid, _today_key(), "convert_prize")
+            await s.commit()
+    except Exception:
+        pass
+
     return {
         "telegram_id": tid,
         "points": points_now,
@@ -6610,6 +6630,14 @@ async def inventory_convert_prize(req: ConvertPrizeReq):
             )
 
             points_now = int(user.points or 0)
+
+    # Daily tracking: any conversion counts as 'convert_prize'
+    try:
+        async with async_session_maker() as s:
+            await _mark_daily_done(s, tid, _today_key(), "convert_prize")
+            await s.commit()
+    except Exception:
+        pass
 
     return {"telegram_id": tid, "points": points_now, "claim_code": code, "added_points": int(DIOR_PALETTE_CONVERT_VALUE)}
 
@@ -6917,6 +6945,14 @@ async def roulette_spin(req: SpinReq):
 
         await session.refresh(user)
 
+    # Daily tracking: roulette spun successfully
+    try:
+        async with async_session_maker() as s:
+            await _mark_daily_done(s, tid, _today_key(), "spin_roulette")
+            await s.commit()
+    except Exception:
+        pass
+
     return {
         "telegram_id": tid,
         "spin_id": spin_id,
@@ -6994,6 +7030,14 @@ async def roulette_convert(req: ConvertReq):
             _recalc_tier(user)
 
         await session.refresh(user)
+
+    # Daily tracking: any conversion counts as 'convert_prize'
+    try:
+        async with async_session_maker() as s:
+            await _mark_daily_done(s, tid, _today_key(), "convert_prize")
+            await s.commit()
+    except Exception:
+        pass
 
     return {"ok": True, "balance_after": int(user.points or 0), "converted_value": int(DIOR_PALETTE_CONVERT_VALUE)}
 
