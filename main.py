@@ -5668,6 +5668,7 @@ async def inventory_convert_prize(req: ConvertPrizeReq):
             points_now = int(user.points or 0)
 
     return {"telegram_id": tid, "points": points_now, "claim_code": code, "added_points": int(DIOR_PALETTE_CONVERT_VALUE)}
+
 @app.get("/api/roulette/history")
 async def roulette_history(telegram_id: int, limit: int = 5):
     limit = max(1, min(int(limit), 20))
@@ -5874,75 +5875,75 @@ async def roulette_spin(req: SpinReq):
             spin_id = int(spin_row.id)
 
 
-# ------------------ REF REVSHARE: 10% from invitee bonus wins ------------------
-# Pay to inviter ONLY if invitee is ACTIVE (3 days logins + >=1 spin) and not inactive (7 days)
-if prize_type == "points" and prize_value > 0 and user.referred_by:
-    st_code, _, _ = _referral_status(user, now)
-    if st_code == "active":
-        inviter_id = int(user.referred_by)
-        raw_share = int(prize_value * REF_REVSHARE_PCT)
-        if raw_share > 0:
-            # caps
-            day_start = _utc_day_start(now)
-            per_user_today = int(
-                (await session.execute(
-                    select(func.coalesce(func.sum(ReferralEarning.amount), 0))
-                    .where(ReferralEarning.inviter_id == inviter_id)
-                    .where(ReferralEarning.referred_id == tid)
-                    .where(ReferralEarning.created_at >= day_start)
-                )).scalar_one() or 0
-            )
-            inviter_today = int(
-                (await session.execute(
-                    select(func.coalesce(func.sum(ReferralEarning.amount), 0))
-                    .where(ReferralEarning.inviter_id == inviter_id)
-                    .where(ReferralEarning.created_at >= day_start)
-                )).scalar_one() or 0
-            )
-            remaining = min(
-                max(0, REF_REVSHARE_PER_REFERRED_DAY_CAP - per_user_today),
-                max(0, REF_REVSHARE_PER_INVITER_DAY_CAP - inviter_today),
-            )
-            pay = min(raw_share, remaining)
-            if pay > 0:
-                inviter = (
-                    await session.execute(
-                        select(User).where(User.telegram_id == inviter_id).with_for_update()
-                    )
-                ).scalar_one_or_none()
-                if inviter:
-                    inviter.points = (inviter.points or 0) + int(pay)
-                    _recalc_tier(inviter)
-                    session.add(
-                        ReferralEarning(
-                            inviter_id=inviter_id,
-                            referred_id=tid,
-                            amount=int(pay),
-                            created_at=now,
-                            source="roulette_win",
-                            meta={
-                                "spin_id": spin_id,
-                                "invitee_win": int(prize_value),
-                                "pct": int(REF_REVSHARE_PCT * 100),
-                                "prize": prize_label,
-                            },
+            # ------------------ REF REVSHARE: 10% from invitee bonus wins ------------------
+            # Pay to inviter ONLY if invitee is ACTIVE (3 days logins + >=1 spin) and not inactive (7 days)
+            if prize_type == "points" and prize_value > 0 and user.referred_by:
+                st_code, _, _ = _referral_status(user, now)
+                if st_code == "active":
+                    inviter_id = int(user.referred_by)
+                    raw_share = int(prize_value * REF_REVSHARE_PCT)
+                    if raw_share > 0:
+                        # caps
+                        day_start = _utc_day_start(now)
+                        per_user_today = int(
+                            (await session.execute(
+                                select(func.coalesce(func.sum(ReferralEarning.amount), 0))
+                                .where(ReferralEarning.inviter_id == inviter_id)
+                                .where(ReferralEarning.referred_id == tid)
+                                .where(ReferralEarning.created_at >= day_start)
+                            )).scalar_one() or 0
                         )
-                    )
-                    session.add(
-                        PointTransaction(
-                            telegram_id=inviter_id,
-                            type="ref_revshare",
-                            delta=int(pay),
-                            meta={
-                                "from": tid,
-                                "spin_id": spin_id,
-                                "invitee_win": int(prize_value),
-                                "pct": int(REF_REVSHARE_PCT * 100),
-                            },
+                        inviter_today = int(
+                            (await session.execute(
+                                select(func.coalesce(func.sum(ReferralEarning.amount), 0))
+                                .where(ReferralEarning.inviter_id == inviter_id)
+                                .where(ReferralEarning.created_at >= day_start)
+                            )).scalar_one() or 0
                         )
-                    )
+                        remaining = min(
+                            max(0, REF_REVSHARE_PER_REFERRED_DAY_CAP - per_user_today),
+                            max(0, REF_REVSHARE_PER_INVITER_DAY_CAP - inviter_today),
+                        )
+                        pay = min(raw_share, remaining)
+                        if pay > 0:
+                            inviter = (
+                                await session.execute(
+                                    select(User).where(User.telegram_id == inviter_id).with_for_update()
+                                )
+                            ).scalar_one_or_none()
+                            if inviter:
+                                inviter.points = (inviter.points or 0) + int(pay)
+                                _recalc_tier(inviter)
+                                session.add(
+                                    ReferralEarning(
+                                        inviter_id=inviter_id,
+                                        referred_id=tid,
+                                        amount=int(pay),
+                                        created_at=now,
+                                        source="roulette_win",
+                                        meta={
+                                            "spin_id": spin_id,
+                                            "invitee_win": int(prize_value),
+                                            "pct": int(REF_REVSHARE_PCT * 100),
+                                            "prize": prize_label,
+                                        },
+                                    )
+                                )
+                                session.add(
+                                    PointTransaction(
+                                        telegram_id=inviter_id,
+                                        type="ref_revshare",
+                                        delta=int(pay),
+                                        meta={
+                                            "from": tid,
+                                            "spin_id": spin_id,
+                                            "invitee_win": int(prize_value),
+                                            "pct": int(REF_REVSHARE_PCT * 100),
+                                        },
+                                    )
+                                )
 
-# -----------------------------------------------------------------------------
+            # -----------------------------------------------------------------------------
 
             # Auto-create inventory item for Dior (physical prize) so it appears in Cosmetics Bag immediately.
             if prize_type == "physical_dior_palette":
