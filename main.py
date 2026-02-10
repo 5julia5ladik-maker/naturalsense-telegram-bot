@@ -67,6 +67,7 @@ def env_get(name: str, default: str | None = None) -> str | None:
 
 BOT_TOKEN = env_get("BOT_TOKEN")
 BOT_USERNAME = (env_get("BOT_USERNAME", "") or "").strip().lstrip("@")
+COOP_BOT_USERNAME = (env_get("COOP_BOT_USERNAME", "") or env_get("ENV_BOT_USERNAME", "") or "").strip().lstrip("@")
 PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
 CHANNEL_USERNAME = env_get("CHANNEL_USERNAME", "NaturalSense") or "NaturalSense"
 CHANNEL_CHAT_ID = (env_get("CHANNEL_CHAT_ID", "") or "").strip()  # optional: -100... or @channelusername
@@ -2025,9 +2026,11 @@ async def cmd_pin_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     channel_chat_id = get_channel_chat_id()
 
-    coop_username = (os.getenv("BOT_USERNAME") or "").strip().lstrip("@")
+    coop_username = (COOP_BOT_USERNAME or "").strip().lstrip("@")
     if not coop_username:
-        await update.message.reply_text("❌ Не задан BOT_USERNAME. Добавь ENV BOT_USERNAME (без @), чтобы создать кнопку '🤝 Сотрудничество'.")
+        await update.message.reply_text(
+            "❌ Не задан ENV_BOT_USERNAME (или COOP_BOT_USERNAME). Добавь username бота сотрудничества (без @), чтобы создать кнопку \"🤝 Сотрудничество\"."
+        )
         return
     coop_url = f"https://t.me/{coop_username}"
 
