@@ -204,6 +204,9 @@ class DailyTaskLog(Base):
     is_claimed = Column(Boolean, default=False, nullable=False)
     claimed_at = Column(DateTime, nullable=True)   # naive UTC
 
+    points = Column(Integer, default=0, nullable=False)
+    points_claimed = Column(Integer, default=0, nullable=False)
+
     meta = Column(JSON, default=dict)
 
 
@@ -387,6 +390,12 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_login_total INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS roulette_spins_total INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_active_at TIMESTAMP NULL;")
+
+
+        # daily_task_logs
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS points_claimed INTEGER NOT NULL DEFAULT 0;")
+        await _safe_exec(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_task_logs_tid_day_key ON daily_task_logs (telegram_id, day, task_key);")
 
         # referral earnings (revshare 10% from invitee roulette wins)
         await _safe_exec(
@@ -576,29 +585,19 @@ async def _get_daily_log(session: AsyncSession, telegram_id: int, day: str, task
     return log
 
 async def _daily_claimed_total(session: AsyncSession, telegram_id: int, day: str) -> int:
+    # Fast and DB-safe total (no JSON operators needed)
     res = await session.execute(
-        select(func.coalesce(func.sum(DailyTaskLog.meta["points_claimed"].as_integer()), 0))
-        .where(
+        select(func.coalesce(func.sum(DailyTaskLog.points_claimed), 0)).where(
             DailyTaskLog.telegram_id == telegram_id,
             DailyTaskLog.day == day,
             DailyTaskLog.is_claimed == True,
         )
     )
-    # Some DBs may not support json access; fallback below.
     try:
         return int(res.scalar_one() or 0)
     except Exception:
-        res2 = await session.execute(
-            select(DailyTaskLog).where(
-                DailyTaskLog.telegram_id == telegram_id,
-                DailyTaskLog.day == day,
-                DailyTaskLog.is_claimed == True,
-            )
-        )
-        total = 0
-        for row in res2.scalars().all():
-            total += int((row.meta or {}).get("points_claimed", 0) or 0)
-        return total
+        return int(res.scalar() or 0)
+
 
 async def daily_apply_event(session: AsyncSession, telegram_id: int, event: str, payload: dict[str, Any] | None = None) -> None:
     """Mark tasks as done based on events (server-side validated)."""
@@ -712,7 +711,7 @@ async def daily_get_tasks(session: AsyncSession, telegram_id: int) -> dict[str, 
     claimed_total = 0
     for l in logs.values():
         if l.is_claimed:
-            claimed_total += int((l.meta or {}).get("points_claimed", 0) or 0)
+            claimed_total += int(getattr(l, "points_claimed", 0) or 0) or int((l.meta or {}).get("points_claimed", 0) or 0)
 
     # remaining until cap
     cap = 400
@@ -767,16 +766,7 @@ async def daily_claim_task(session: AsyncSession, telegram_id: int, task_key: st
         raise HTTPException(status_code=400, detail="already_claimed")
 
     # cap check
-    total = 0
-    res = await session.execute(
-        select(DailyTaskLog).where(
-            DailyTaskLog.telegram_id == telegram_id,
-            DailyTaskLog.day == day,
-            DailyTaskLog.is_claimed == True,
-        )
-    )
-    for l in res.scalars().all():
-        total += int((l.meta or {}).get("points_claimed", 0) or 0)
+    total = await _daily_claimed_total(session, telegram_id, day)
     if total >= 400:
         raise HTTPException(status_code=400, detail="daily_cap_reached")
 
@@ -794,8 +784,11 @@ async def daily_claim_task(session: AsyncSession, telegram_id: int, task_key: st
 
     log.is_claimed = True
     log.claimed_at = datetime.utcnow()
+    log.points = int(DAILY_TASK_DEFS[task_key]["points"])
+    log.points_claimed = int(pts)
+    # keep meta for backward compatibility/analytics
     meta = log.meta or {}
-    meta["points_claimed"] = pts
+    meta["points_claimed"] = int(pts)
     log.meta = meta
 
     await session.commit()
