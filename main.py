@@ -2662,56 +2662,51 @@ def get_webapp_html() -> str:
     .sparkle{position:absolute; inset:0; pointer-events:none}
 
 
-    /* ---------------------------------------------------------
-       PREMIUM LIGHT BACKGROUND (ONLY WHEN tg.colorScheme=light)
-       Dark theme remains unchanged.
-    --------------------------------------------------------- */
-    [data-scheme="light"] body{
-      background: var(--bgSolid);
-      color: var(--text);
-    }
-    [data-scheme="light"] body::before{
-      content:"";
-      position:fixed;
-      inset:0;
-      z-index:-2;
-      background: var(--bgGrad);
-      opacity:1;
-      pointer-events:none;
-    }
-    [data-scheme="light"] body::after{
-      content:"";
-      position:fixed;
-      inset:-10%;
-      z-index:-1;
-      pointer-events:none;
-      background: radial-gradient(60% 45% at 50% 10%, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.00) 70%);
-      opacity:1;
-    }
+/* =========================
+   PURE WHITE PREMIUM — LIGHT ONLY
+   ========================= */
+html[data-scheme="light"]{
+  --bg:#F6F4F1;
+  --card:rgba(255,255,255,0.94);
+  --card2:rgba(255,255,255,0.96);
+  --text:#2C2A28;
+  --muted:#6F6A64;
+  --stroke:rgba(0,0,0,0.06);
+  --sheetOverlay:rgba(255,255,255,0.55);
+  --sheetCardBg:rgba(255,255,255,0.96);
+  --glassStroke:rgba(0,0,0,0.08);
+  --glassShadow:rgba(0,0,0,0.12);
+}
 
-    [data-scheme="light"] .card,
-    [data-scheme="light"] .sheetCard,
-    [data-scheme="light"] .navBar,
-    [data-scheme="light"] .btn,
-    [data-scheme="light"] .postCard,
-    [data-scheme="light"] .miniCard{
-      box-shadow: 0 10px 26px rgba(90,70,50,0.16), 0 2px 8px rgba(90,70,50,0.10);
-      border-color: rgba(255,255,255,0.35);
-    }
-    [data-scheme="light"] .navBar{
-      background: rgba(255,255,255,0.58);
-      backdrop-filter: blur(22px) saturate(140%);
-    }
-    [data-scheme="light"] .sheetCard{
-      background: var(--sheetCardBg);
-      backdrop-filter: blur(24px) saturate(140%);
-    }
-    [data-scheme="light"] .btn,
-    [data-scheme="light"] .miniCard,
-    [data-scheme="light"] .postCard{
-      background: var(--card);
-      backdrop-filter: blur(18px) saturate(140%);
-    }
+html[data-scheme="light"] body{
+  background:
+    radial-gradient(1200px 800px at 20% 0%, rgba(255,255,255,0.9), transparent 60%),
+    linear-gradient(180deg,#F6F4F1,#EFEAE3);
+  color:var(--text);
+}
+
+html[data-scheme="light"] .card,
+html[data-scheme="light"] .card2,
+html[data-scheme="light"] .tile,
+html[data-scheme="light"] .miniCard{
+  background:rgba(255,255,255,0.96);
+  box-shadow:0 8px 22px rgba(0,0,0,0.08);
+}
+
+html[data-scheme="light"] .bottomNavInner{
+  background:rgba(255,255,255,0.94);
+  backdrop-filter:blur(14px);
+}
+
+html[data-scheme="light"] .wheelBox{
+  background:#FFFFFF;
+  border:1px solid rgba(0,0,0,0.08);
+}
+
+html[data-scheme="light"] .wheelCenter{
+  background:#FFFFFF;
+  color:#3A3734;
+}
 
 </style>
 </head>
@@ -2761,71 +2756,31 @@ def get_webapp_html() -> str:
     function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
 
     function applyTelegramTheme(){
-  const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
-  const p = tg && tg.themeParams ? tg.themeParams : {};
+      const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
+      const p = tg && tg.themeParams ? tg.themeParams : {};
+      const bg = p.bg_color || DEFAULT_BG;
+      const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
+      const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
 
-  // expose scheme for CSS overrides
-  try{ document.documentElement.dataset.scheme = scheme; }catch(e){}
+      setVar("--bg", bg);
+      setVar("--text", text);
+      setVar("--muted", muted);
+      setVar("--stroke", scheme==="dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
+      setVar("--card", scheme==="dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
+      setVar("--card2", scheme==="dark" ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)");
 
-  const tgBg = p.bg_color || DEFAULT_BG;
+      setVar("--sheetOverlay", scheme==="dark" ? hexToRgba(bg,0.55) : hexToRgba(bg,0.45));
+      setVar("--sheetCardBg", scheme==="dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.86)");
+      setVar("--glassStroke", scheme==="dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
+      setVar("--glassShadow", scheme==="dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
 
-  if(scheme === "dark"){
-    const bg = tgBg;
-    const text = p.text_color || "rgba(255,255,255,0.92)";
-    const muted = p.hint_color || "rgba(255,255,255,0.60)";
-
-    setVar("--bg", bg);
-    setVar("--bgSolid", bg);
-    setVar("--bgGrad", "");
-    setVar("--text", text);
-    setVar("--muted", muted);
-
-    setVar("--stroke", "rgba(255,255,255,0.12)");
-    setVar("--card", "rgba(255,255,255,0.08)");
-    setVar("--card2", "rgba(255,255,255,0.06)");
-
-    setVar("--sheetOverlay", hexToRgba(bg,0.55));
-    setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
-    setVar("--glassStroke", "rgba(255,255,255,0.18)");
-    setVar("--glassShadow", "rgba(0,0,0,0.45)");
-
-    try{
-      if(tg){
-        tg.setHeaderColor(bg);
-        tg.setBackgroundColor(bg);
-      }
-    }catch(e){}
-    return;
-  }
-
-  // PREMIUM LIGHT (day): glass like dark, but readable on light background
-  const bgSolid = "#F6F1EB";
-  const text = p.text_color || "rgba(18,18,18,0.92)";
-  const muted = p.hint_color || "rgba(0,0,0,0.52)";
-
-  setVar("--bg", bgSolid);
-  setVar("--bgSolid", bgSolid);
-  setVar("--bgGrad", "linear-gradient(135deg,#F7F2EC 0%,#F0E7DD 45%,#E9DDD2 100%)");
-  setVar("--text", text);
-  setVar("--muted", muted);
-
-  setVar("--stroke", "rgba(0,0,0,0.10)");
-  setVar("--card", "rgba(255,255,255,0.62)");
-  setVar("--card2", "rgba(255,255,255,0.72)");
-
-  setVar("--sheetOverlay", "rgba(0,0,0,0.22)");
-  setVar("--sheetCardBg", "rgba(255,255,255,0.74)");
-  setVar("--glassStroke", "rgba(255,255,255,0.55)");
-  setVar("--glassShadow", "rgba(20,15,10,0.16)");
-
-  try{
-    if(tg){
-      tg.setHeaderColor(bgSolid);
-      tg.setBackgroundColor(bgSolid);
+      try{
+        if(tg){
+          tg.setHeaderColor(bg);
+          tg.setBackgroundColor(bg);
+        }
+      }catch(e){}
     }
-  }catch(e){}
-}
-
 
     function haptic(kind){
       try{ tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred && tg.HapticFeedback.impactOccurred(kind||"light"); }catch(e){}
