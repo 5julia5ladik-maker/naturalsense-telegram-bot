@@ -5463,7 +5463,42 @@ dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
       hideSplash();
     }
 
-    document.addEventListener("DOMContentLoaded", boot);
+
+
+    // Fail-safe: if any JS error happens, hide splash and show a minimal message (must not break the app)
+    function failSafe(msg){
+      try{ hideSplash(); }catch(e){}
+      try{
+        const root = document.getElementById("root");
+        if(root && !root.__nsFailed){
+          root.__nsFailed = true;
+          root.innerHTML = '';
+          const box = document.createElement('div');
+          box.style.padding = '16px';
+          box.style.maxWidth = '560px';
+          box.style.margin = '0 auto';
+          box.style.color = 'var(--text)';
+          box.innerHTML = '<div style="font-weight:800;font-size:16px">Ошибка загрузки</div>' +
+                          '<div style="margin-top:8px;opacity:.8;font-size:13px">' + (msg||'Перезайди в Mini App или попробуй позже.') + '</div>' +
+                          '<div style="margin-top:10px;opacity:.6;font-size:12px">Если ошибка повторяется — проверь Railway Logs (webapp JS crash / API 500).</div>';
+          root.appendChild(box);
+        }
+      }catch(e){}
+    }
+    try{
+      window.addEventListener('error', (e)=>{ failSafe(e && e.message ? e.message : 'JS error'); });
+      window.addEventListener('unhandledrejection', (e)=>{ failSafe((e && e.reason && e.reason.message) ? e.reason.message : 'Promise error'); });
+    }catch(e){}
+
+    // IMPORTANT: in Telegram WebView DOMContentLoaded can fire before this script attaches listener.
+    // So we start boot immediately if the document is already ready.
+    try{
+      if(document.readyState === 'loading') document.addEventListener("DOMContentLoaded", boot);
+      else boot();
+    }catch(e){
+      failSafe(e && e.message ? e.message : 'boot failed');
+    }
+
   })();
   </script>
 </body>
