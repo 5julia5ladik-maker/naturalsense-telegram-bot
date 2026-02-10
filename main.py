@@ -5264,6 +5264,7 @@ dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
       renderPostsSheet();
       renderInventorySheet();
       renderПрофильSheet();
+      renderDailySheet();
     }
 
     showSplash();
