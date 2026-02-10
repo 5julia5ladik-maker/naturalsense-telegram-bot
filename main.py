@@ -2034,8 +2034,17 @@ async def cmd_pin_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     coop_url = f"https://t.me/{coop_username}"
 
-    # Текст поста можно передать аргументами: /pin_post ваш текст...
-    custom = " ".join(context.args).strip() if context.args else ""
+    # Текст поста можно передать после команды /pin_post (с переносами строк).
+    # ВАЖНО: context.args "склеивает" текст, поэтому берём сырой текст сообщения и вырезаем команду.
+    raw_msg_text = (update.message.text or "") if update.message else ""
+    custom = ""
+    if update.message and update.message.reply_to_message:
+        # Если админ ответил на сообщение и вызвал /pin_post — берём текст/подпись из реплая.
+        rt = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
+        custom = rt
+    if not custom:
+        custom = re.sub(r"^/pin_post(@\w+)?\s*", "", raw_msg_text, flags=re.IGNORECASE | re.DOTALL)
+    custom = custom.strip()
     post_text = custom or (
         "📰 Natural Sense — журнал косметических новинок\n\n"
         "• Смотри посты прямо в канале\n"
