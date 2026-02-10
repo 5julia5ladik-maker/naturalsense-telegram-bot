@@ -425,6 +425,27 @@ async def init_db():
         await _safe_exec(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_task_logs_tid_day_key ON daily_task_logs (telegram_id, day, task_key);")
         await _safe_exec(conn, "CREATE INDEX IF NOT EXISTS ix_daily_task_logs_tid_day ON daily_task_logs (telegram_id, day);")
 
+        # daily_task_logs schema migration (existing DBs may lack columns)
+        # We add columns in a safe, idempotent way, then normalize NULLs.
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS status VARCHAR;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS done_at TIMESTAMP NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS points INTEGER;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS meta JSON;")
+
+        # normalize legacy rows (NULLs)
+        await _safe_exec(conn, "UPDATE daily_task_logs SET status = COALESCE(status, 'done');")
+        await _safe_exec(conn, "UPDATE daily_task_logs SET points = COALESCE(points, 0);")
+        await _safe_exec(conn, "UPDATE daily_task_logs SET meta = COALESCE(meta, '{}'::json);")
+
+        # enforce defaults / constraints (best-effort)
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN status SET DEFAULT 'done';")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN points SET DEFAULT 0;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN meta SET DEFAULT '{}'::json;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN status SET NOT NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN points SET NOT NULL;")
+
+
         # posts
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;")
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;")
