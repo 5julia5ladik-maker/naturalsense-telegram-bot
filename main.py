@@ -2020,11 +2020,16 @@ async def cmd_pin_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bot_link = await get_bot_deeplink_runtime(context)
     if not bot_link:
-        await update.message.reply_text("❌ Не могу определить username бота для кнопки 'Войти в бот'. Укажи ENV BOT_USERNAME (без @) или проверь что бот доступен (getMe).")
+        await update.message.reply_text("❌ Не могу определить username этого бота для кнопки 'Войти в Журнал'. Проверь что бот доступен (getMe) и что он не заблокирован.")
         return
 
     channel_chat_id = get_channel_chat_id()
-    channel_url = get_channel_url()
+
+    coop_username = (os.getenv("BOT_USERNAME") or "").strip().lstrip("@")
+    if not coop_username:
+        await update.message.reply_text("❌ Не задан BOT_USERNAME. Добавь ENV BOT_USERNAME (без @), чтобы создать кнопку '🤝 Сотрудничество'.")
+        return
+    coop_url = f"https://t.me/{coop_username}"
 
     # Текст поста можно передать аргументами: /pin_post ваш текст...
     custom = " ".join(context.args).strip() if context.args else ""
@@ -2037,8 +2042,8 @@ async def cmd_pin_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     kb = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🚀 Войти в бот", url=bot_link)],
-            [InlineKeyboardButton("↩️ Войти в канал", url=channel_url)],
+            [InlineKeyboardButton("📲 Войти в Журнал", url=bot_link)],
+            [InlineKeyboardButton("🤝 Сотрудничество", url=coop_url)],
         ]
     )
 
