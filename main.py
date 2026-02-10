@@ -2709,8 +2709,7 @@ def get_webapp_html() -> str:
     function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
 
     function applyTelegramTheme(){
-      // FORCE DARK: pixel-perfect identical UI regardless of Telegram light/dark.
-      // We intentionally ignore tg.colorScheme and tg.themeParams because they differ per user theme.
+      // FORCE DARK LOOK: always render identical to dark theme (pixel-perfect)
       const bg = DEFAULT_BG;
       const text = "rgba(255,255,255,0.92)";
       const muted = "rgba(255,255,255,0.60)";
@@ -2732,8 +2731,8 @@ def get_webapp_html() -> str:
 
       try{
         if(tg){
-          tg.setHeaderColor(bg);
-          tg.setBackgroundColor(bg);
+          try{ tg.setHeaderColor && tg.setHeaderColor("bg_color"); }catch(e){}
+          try{ tg.setBackgroundColor && tg.setBackgroundColor(bg); }catch(e){}
         }
       }catch(e){}
     }
@@ -4977,13 +4976,6 @@ if(state.profileView==="history"){
       if(tg){
         try{ tg.expand(); }catch(e){}
         applyTelegramTheme();
-
-    // Final guard: keep forced dark even if Telegram updates theme dynamically.
-    try{
-      document.documentElement.setAttribute("data-scheme","dark");
-      setTimeout(()=>{ try{ document.documentElement.setAttribute("data-scheme","dark"); }catch(e){} }, 0);
-    }catch(e){}
-
         try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
       }
       await Promise.all([refreshUser(), loadBotUsername()]);
@@ -4992,7 +4984,7 @@ if(state.profileView==="history"){
       hideSplash();
     }
 
-    document.addEventListener("DOMContentLoaded", boot);
+    if(document.readyState === "loading"){ document.addEventListener("DOMContentLoaded", boot); } else { boot(); }
   })();
   </script>
 </body>
