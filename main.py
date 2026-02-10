@@ -20,6 +20,7 @@ from telegram import (
     Update,
     ReplyKeyboardMarkup,
     KeyboardButton,
+    WebAppInfo,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
@@ -136,6 +137,33 @@ DEFAULT_RAFFLE_ID = 1
 TICKET_CONVERT_RATE = 300          # 1 raffle ticket -> 300 points
 DIOR_PALETTE_CONVERT_VALUE = 3000  # 1 Dior palette -> 3000 points (главный приз)
 
+
+# -----------------------------------------------------------------------------
+# PUBLIC URL RESOLUTION (for Telegram WebApp button)
+# -----------------------------------------------------------------------------
+def resolve_public_base_url() -> str:
+    base = (PUBLIC_BASE_URL or "").strip().rstrip("/")
+    if base:
+        if base.startswith("http://") or base.startswith("https://"):
+            return base
+        # assume https if scheme missing
+        return "https://" + base.lstrip("/")
+    # Railway commonly provides a public domain when a domain is attached
+    dom = (os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+    if dom:
+        return "https://" + dom.strip().lstrip("https://").lstrip("http://").rstrip("/")
+    # fallback: user may provide full RAILWAY_URL or a custom domain in RAILWAY_STATIC_URL
+    for k in ("RAILWAY_URL", "RAILWAY_STATIC_URL", "RENDER_EXTERNAL_URL"):
+        v = (os.getenv(k) or "").strip().rstrip("/")
+        if v:
+            if v.startswith("http://") or v.startswith("https://"):
+                return v
+            return "https://" + v.lstrip("/")
+    return ""
+
+def get_webapp_url() -> str:
+    base = resolve_public_base_url()
+    return f"{base}/webapp" if base else "/webapp"
 # -----------------------------------------------------------------------------
 # DAILY TASKS CONFIG (max 400/day)
 # -----------------------------------------------------------------------------
@@ -1231,14 +1259,17 @@ def is_admin(user_id: int) -> bool:
 
 
 def get_main_keyboard():
-    # ✅ СНИЗУ: Профиль + Рефералы + Помощь
+    # ✅ Нижняя клавиатура (как было): открыть Mini App + профиль/рефералы/помощь
+    webapp_url = get_webapp_url()
     return ReplyKeyboardMarkup(
         [
+            [KeyboardButton("📲 Открыть журнал", web_app=WebAppInfo(url=webapp_url))],
             [KeyboardButton("👤 Профиль"), KeyboardButton("👥 Рефералы")],
             [KeyboardButton("ℹ️ Помощь")],
         ],
         resize_keyboard=True,
     )
+
 
 
 def build_start_inline_kb() -> InlineKeyboardMarkup:
