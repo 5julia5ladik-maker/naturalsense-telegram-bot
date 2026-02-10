@@ -1273,6 +1273,29 @@ def get_bot_deeplink() -> Optional[str]:
         return None
     return f"https://t.me/{u}?start=channel"
 
+# Cache runtime bot username (fallback when BOT_USERNAME env is not set)
+_BOT_USERNAME_RUNTIME: str | None = None
+
+
+async def get_bot_deeplink_runtime(context: ContextTypes.DEFAULT_TYPE) -> Optional[str]:
+    """Return deeplink to bot. Uses BOT_USERNAME env if set, otherwise resolves via getMe."""
+    global _BOT_USERNAME_RUNTIME
+    u = (BOT_USERNAME or "").strip().lstrip("@")
+    if u:
+        return f"https://t.me/{u}?start=channel"
+    if _BOT_USERNAME_RUNTIME:
+        return f"https://t.me/{_BOT_USERNAME_RUNTIME}?start=channel"
+    try:
+        me = await context.bot.get_me()
+        uname = (me.username or "").strip().lstrip("@")
+        if uname:
+            _BOT_USERNAME_RUNTIME = uname
+            return f"https://t.me/{uname}?start=channel"
+    except Exception:
+        pass
+    return None
+
+
 
 async def set_keyboard_silent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Telegram показывает ReplyKeyboard только через сообщение.
@@ -1995,9 +2018,9 @@ async def cmd_pin_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         return
 
-    bot_link = get_bot_deeplink()
+    bot_link = await get_bot_deeplink_runtime(context)
     if not bot_link:
-        await update.message.reply_text("❌ Не задан BOT_USERNAME. Добавь ENV BOT_USERNAME (без @), иначе кнопку 'Войти в бот' сделать нельзя.")
+        await update.message.reply_text("❌ Не могу определить username бота для кнопки 'Войти в бот'. Укажи ENV BOT_USERNAME (без @) или проверь что бот доступен (getMe).")
         return
 
     channel_chat_id = get_channel_chat_id()
