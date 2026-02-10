@@ -5869,45 +5869,7 @@ def _naive_utc_now() -> datetime:
 def _naive_utc_midnight(dt: datetime) -> datetime:
     return datetime(dt.year, dt.month, dt.day)
 
-# -----------------------------------------------------------------------------
-# DAILY TASKS API
-# -----------------------------------------------------------------------------
-@app.get("/api/daily/tasks", response_model=DailyTasksResp)
-async def api_daily_tasks(telegram_id: int):
-    async with async_session_maker() as session:
-        # Ensure user exists
-        ures = await session.execute(select(User).where(User.telegram_id == telegram_id))
-        user = ures.scalar_one_or_none()
-        if user is None:
-            # create minimal user (first_name/username unknown from WebApp)
-            user = User(telegram_id=telegram_id, points=10)
-            session.add(user)
-            await session.commit()
-        data = await daily_get_tasks(session, telegram_id)
-        return data
 
-
-@app.post("/api/daily/event")
-async def api_daily_event(req: DailyEventReq):
-    async with async_session_maker() as session:
-        # Ensure user exists
-        ures = await session.execute(select(User).where(User.telegram_id == req.telegram_id))
-        user = ures.scalar_one_or_none()
-        if user is None:
-            user = User(telegram_id=req.telegram_id, points=10)
-            session.add(user)
-            await session.commit()
-        # Apply event
-        await daily_apply_event(session, req.telegram_id, req.event, req.payload)
-        await session.commit()
-        return {"ok": True}
-
-
-@app.post("/api/daily/claim")
-async def api_daily_claim(req: DailyClaimReq):
-    async with async_session_maker() as session:
-        res = await daily_claim_task(session, req.telegram_id, req.task_key)
-        return res
 
 
 @app.get("/api/referrals")
@@ -6071,6 +6033,48 @@ class DailyEventReq(BaseModel):
 class DailyClaimReq(BaseModel):
     telegram_id: int = Field(..., ge=1)
     task_key: str = Field(..., min_length=1, max_length=64)
+
+
+
+# -----------------------------------------------------------------------------
+# DAILY TASKS API
+# -----------------------------------------------------------------------------
+@app.get("/api/daily/tasks", response_model=DailyTasksResp)
+async def api_daily_tasks(telegram_id: int):
+    async with async_session_maker() as session:
+        # Ensure user exists
+        ures = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = ures.scalar_one_or_none()
+        if user is None:
+            # create minimal user (first_name/username unknown from WebApp)
+            user = User(telegram_id=telegram_id, points=10)
+            session.add(user)
+            await session.commit()
+        data = await daily_get_tasks(session, telegram_id)
+        return data
+
+
+@app.post("/api/daily/event")
+async def api_daily_event(req: DailyEventReq):
+    async with async_session_maker() as session:
+        # Ensure user exists
+        ures = await session.execute(select(User).where(User.telegram_id == req.telegram_id))
+        user = ures.scalar_one_or_none()
+        if user is None:
+            user = User(telegram_id=req.telegram_id, points=10)
+            session.add(user)
+            await session.commit()
+        # Apply event
+        await daily_apply_event(session, req.telegram_id, req.event, req.payload)
+        await session.commit()
+        return {"ok": True}
+
+
+@app.post("/api/daily/claim")
+async def api_daily_claim(req: DailyClaimReq):
+    async with async_session_maker() as session:
+        res = await daily_claim_task(session, req.telegram_id, req.task_key)
+        return res
 
 
 class RaffleStatusResp(BaseModel):
