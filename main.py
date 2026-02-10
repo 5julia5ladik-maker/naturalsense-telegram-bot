@@ -380,9 +380,25 @@ async_session = async_session_maker
 
 
 async def _safe_exec(conn, sql: str):
+    """Execute a migration statement safely.
+
+    IMPORTANT: We use SAVEPOINTs so that a single failed statement does not
+    abort the whole surrounding transaction (Postgres aborts the transaction
+    after any error until rollback). This is critical for Railway deploys
+    with mixed/legacy schemas.
+    """
+    sp = f"sp_{secrets.token_hex(6)}"
     try:
+        await conn.execute(sql_text(f"SAVEPOINT {sp}"))
         await conn.execute(sql_text(sql))
+        await conn.execute(sql_text(f"RELEASE SAVEPOINT {sp}"))
     except Exception as e:
+        try:
+            await conn.execute(sql_text(f"ROLLBACK TO SAVEPOINT {sp}"))
+            await conn.execute(sql_text(f"RELEASE SAVEPOINT {sp}"))
+        except Exception:
+            # If savepoint commands fail, we just swallow - next deploy will retry.
+            pass
         logger.info("DB migration skipped/failed (ok in some DBs): %s | %s", sql, e)
 
 
@@ -7133,6 +7149,12 @@ async def roulette_spin(req: SpinReq):
                     session.add(claim)
                     await session.flush()
                     claim_id_for_resp = int(claim.id)
+
+            # Server-side guarantee: roulette spin marks daily task as DONE
+            try:
+                await _mark_daily_done(session, tid, _today_key(), "spin_roulette")
+            except Exception as e:
+                logger.info("daily spin_roulette mark failed: %s", e)
 
         await session.refresh(user)
 
