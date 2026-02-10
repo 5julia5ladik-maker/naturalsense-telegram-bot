@@ -2107,37 +2107,17 @@ def get_webapp_html() -> str:
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
-      --bg:#0c0f14;              /* Telegram bg_color fallback */
-      --bgSolid:#0c0f14;         /* solid used for Telegram header/background */
-      /* Background layers (composed) */
-      --bgL1: radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%);
-      --bgL2: radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), transparent 55%);
-      --bgL3: var(--bgSolid);
-
-      /* Surfaces */
+      --bg:#0c0f14;
       --card:rgba(255,255,255,0.08);
       --card2:rgba(255,255,255,0.06);
-
-      --cardGradTop: rgba(255,255,255,0.09);
-      --cardGradBot: rgba(255,255,255,0.05);
-      --cardShadow: 0 10px 30px rgba(0,0,0,0.35);
-
       --text:rgba(255,255,255,0.92);
       --muted:rgba(255,255,255,0.60);
       --gold:rgba(230,193,128,0.90);
-
       --stroke:rgba(255,255,255,0.12);
-
       --sheetOverlay:rgba(12,15,20,0.55);
       --sheetCardBg:rgba(255,255,255,0.10);
-
       --glassStroke:rgba(255,255,255,0.18);
       --glassShadow:rgba(0,0,0,0.45);
-
-      --navBg: rgba(18,22,30,0.55);
-      --navItemBg: rgba(255,255,255,0.05);
-      --sheetHandleBg: rgba(255,255,255,0.22);
-
       --r-lg:22px;
       --r-md:16px;
       --r-sm:14px;
@@ -2145,9 +2125,9 @@ def get_webapp_html() -> str:
     body{
       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
       background:
-        var(--bgL1),
-        var(--bgL2),
-        var(--bgL3);
+        radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%),
+        radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), transparent 55%),
+        var(--bg);
       color:var(--text);
       overflow-x:hidden;
     }
@@ -2162,10 +2142,10 @@ def get_webapp_html() -> str:
 
     .card{
       border:1px solid var(--stroke);
-      background:linear-gradient(180deg, var(--cardGradTop), var(--cardGradBot));
+      background:linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05));
       border-radius:var(--r-lg);
       padding:14px;
-      box-shadow:var(--cardShadow);
+      box-shadow:0 10px 30px rgba(0,0,0,0.35);
       position:relative;
       overflow:hidden;
     }
@@ -2183,7 +2163,10 @@ def get_webapp_html() -> str:
       font-size:12px;font-weight:700;
       user-select:none;
     }
-    \1var(--card2);
+    .btn{
+      width:100%;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.06);
       border-radius:18px;
       padding:14px;
       display:flex;
@@ -2196,7 +2179,9 @@ def get_webapp_html() -> str:
     .btnTitle{font-size:15px;font-weight:750}
     .btnSub{margin-top:4px;font-size:12px;color:var(--muted)}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-    \1var(--card2);
+    .tile{
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.06);
       border-radius:18px;
       padding:12px;
       cursor:pointer;
@@ -2211,7 +2196,10 @@ def get_webapp_html() -> str:
     .hScroll{display:flex;gap:10px;overflow:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch}
     .hScroll::-webkit-scrollbar{display:none}
 
-    \1var(--card2);
+    .miniCard{
+      min-width:220px;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.06);
       border-radius:18px;
       padding:12px;
       cursor:pointer;
@@ -2296,7 +2284,7 @@ def get_webapp_html() -> str:
       width:min(560px, calc(100% - 24px));
       display:flex;gap:10px;padding:10px;
       border-radius:22px;border:1px solid var(--glassStroke);
-      background:var(--navBg);
+      background:rgba(18,22,30,0.55);
       backdrop-filter:blur(22px) saturate(180%);
       -webkit-backdrop-filter:blur(22px) saturate(180%);
       box-shadow:0 12px 40px var(--glassShadow);
@@ -2304,7 +2292,7 @@ def get_webapp_html() -> str:
     .navItem{
       flex:1;border-radius:16px;padding:10px 8px;text-align:center;
       cursor:pointer;user-select:none;border:1px solid transparent;
-      background:var(--navItemBg);
+      background:rgba(255,255,255,0.05);
       display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;
     }
     .navItemActive{border:1px solid rgba(230,193,128,0.35);background:rgba(230,193,128,0.12)}
@@ -2333,13 +2321,16 @@ def get_webapp_html() -> str:
       padding:14px 14px 10px;
       max-height:84vh;overflow:auto;
     }
-    .sheetHandle{width:46px;height:5px;border-radius:999px;background:var(--sheetHandleBg);margin:0 auto 10px}
-    \1var(--card2);
+    .sheetHandle{width:46px;height:5px;border-radius:999px;background:rgba(255,255,255,0.22);margin:0 auto 10px}
+    .input{
+      width:100%;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.06);
       border-radius:16px;
       padding:12px 12px;
       outline:none;color:var(--text);font-size:14px;
     }
-    .seg{display:flex;gap:8px;border:1px solid var(--stroke);background:var(--card);padding:6px;border-radius:18px}
+    .seg{display:flex;gap:8px;border:1px solid var(--stroke);background:rgba(255,255,255,0.05);padding:6px;border-radius:18px}
     .segBtn{
       flex:1;padding:10px;border-radius:14px;text-align:center;
       cursor:pointer;user-select:none;font-size:13px;border:1px solid transparent;
@@ -2670,6 +2661,65 @@ def get_webapp_html() -> str:
     }
     .sparkle{position:absolute; inset:0; pointer-events:none}
 
+
+
+    /* ---------------------------------------------------------
+       PREMIUM LIGHT BACKGROUND (ONLY WHEN tg.colorScheme=light)
+       Dark theme remains unchanged.
+    --------------------------------------------------------- */
+    html,body{height:100%;}
+    body{position:relative;}
+    body::before{
+      content:"";
+      position:fixed;
+      inset:0;
+      z-index:-2;
+      background: var(--bgGrad);
+      /* subtle premium texture */
+      opacity: 1;
+      pointer-events:none;
+    }
+    /* add a soft vignette for depth in light */
+    body::after{
+      content:"";
+      position:fixed;
+      inset:-10%;
+      z-index:-1;
+      pointer-events:none;
+      background: radial-gradient(60% 45% at 50% 10%, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.00) 70%);
+      opacity: 1;
+    }
+
+    /* Light mode: slightly stronger shadows so cards don't "сливаются" */
+    [data-scheme="light"] .card,
+    [data-scheme="light"] .sheetCard,
+    [data-scheme="light"] .navBar,
+    [data-scheme="light"] .btn,
+    [data-scheme="light"] .postCard,
+    [data-scheme="light"] .miniCard{
+      box-shadow: 0 10px 26px rgba(90,70,50,0.16), 0 2px 8px rgba(90,70,50,0.10);
+      border-color: rgba(255,255,255,0.35);
+    }
+    [data-scheme="light"] .navBar{
+      background: rgba(255,255,255,0.58);
+      backdrop-filter: blur(22px) saturate(140%);
+    }
+    [data-scheme="light"] .sheetCard{
+      background: var(--sheetCardBg);
+      backdrop-filter: blur(24px) saturate(140%);
+    }
+    [data-scheme="light"] .btn,
+    [data-scheme="light"] .miniCard,
+    [data-scheme="light"] .postCard{
+      background: var(--card);
+      backdrop-filter: blur(18px) saturate(140%);
+    }
+    [data-scheme="light"] .btn:active,
+    [data-scheme="light"] .miniCard:active,
+    [data-scheme="light"] .postCard:active{
+      transform: translateY(1px);
+    }
+    
 </style>
 </head>
 <body>
@@ -2720,64 +2770,72 @@ def get_webapp_html() -> str:
     function applyTelegramTheme(){
       const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
       const p = tg && tg.themeParams ? tg.themeParams : {};
-      const bg = p.bg_color || DEFAULT_BG;
-      const headerBg = (scheme==="dark") ? bg : "#F6F1EB";
-      const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
-      const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
 
-      setVar("--bg", bg);
-      setVar("--bgSolid", headerBg);
-      setVar("--text", text);
-      setVar("--muted", muted);
+      // Keep Telegram-provided bg as reference, but for Premium Light we use our own solid+gradient.
+      const tgBg = p.bg_color || DEFAULT_BG;
+
+      // mark scheme for CSS
+      try{ document.documentElement.dataset.scheme = scheme; }catch(e){}
 
       if(scheme==="dark"){
+        const bg = tgBg;
+        const text = p.text_color || "rgba(255,255,255,0.92)";
+        const muted = p.hint_color || "rgba(255,255,255,0.60)";
+
+        setVar("--bg", bg);
+        setVar("--bgSolid", bg);
+        setVar("--bgGrad", ""); // no gradient in dark
+        setVar("--text", text);
+        setVar("--muted", muted);
+
         setVar("--stroke", "rgba(255,255,255,0.12)");
         setVar("--card", "rgba(255,255,255,0.08)");
         setVar("--card2", "rgba(255,255,255,0.06)");
-        setVar("--cardGradTop", "rgba(255,255,255,0.09)");
-        setVar("--cardGradBot", "rgba(255,255,255,0.05)");
-        setVar("--cardShadow", "0 10px 30px rgba(0,0,0,0.35)");
-
-        setVar("--bgL1", "radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), rgba(0,0,0,0) 60%)");
-        setVar("--bgL2", "radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), rgba(0,0,0,0) 55%)");
-        setVar("--bgL3", bg);
 
         setVar("--sheetOverlay", hexToRgba(bg,0.55));
         setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
         setVar("--glassStroke", "rgba(255,255,255,0.18)");
         setVar("--glassShadow", "rgba(0,0,0,0.45)");
 
-        setVar("--navBg", "rgba(18,22,30,0.55)");
-        setVar("--navItemBg", "rgba(255,255,255,0.05)");
-        setVar("--sheetHandleBg", "rgba(255,255,255,0.22)");
-      }else{
-        // Premium Light (pastel gradient + readable glass)
-        setVar("--stroke", "rgba(0,0,0,0.08)");
-        setVar("--card", "rgba(255,255,255,0.58)");
-        setVar("--card2", "rgba(255,255,255,0.72)");
-        setVar("--cardGradTop", "rgba(255,255,255,0.72)");
-        setVar("--cardGradBot", "rgba(255,255,255,0.56)");
-        setVar("--cardShadow", "0 10px 30px rgba(120,90,60,0.18), 0 1px 4px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.55)");
-
-        setVar("--bgL1", "repeating-linear-gradient(0deg, rgba(0,0,0,0.028), rgba(0,0,0,0.028) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 3px)");
-        setVar("--bgL2", "radial-gradient(1200px 800px at 18% 8%, rgba(255,255,255,0.78), rgba(255,255,255,0) 62%)");
-        setVar("--bgL3", "linear-gradient(135deg, #F7F2EC 0%, #EFE6DC 48%, #E9DDD2 100%)");
-
-        setVar("--sheetOverlay", hexToRgba(bg,0.40));
-        setVar("--sheetCardBg", "rgba(255,255,255,0.78)");
-        setVar("--glassStroke", "rgba(255,255,255,0.55)");
-        setVar("--glassShadow", "rgba(0,0,0,0.14)");
-
-        setVar("--navBg", "rgba(255,255,255,0.62)");
-        setVar("--navItemBg", "rgba(255,255,255,0.40)");
-        setVar("--sheetHandleBg", "rgba(0,0,0,0.12)");
+        try{
+          if(tg){
+            tg.setHeaderColor(bg);
+            tg.setBackgroundColor(bg);
+          }
+        }catch(e){}
+        return;
       }
+
+      // Premium Light (day) — glass like dark, but readable on light background
+      const bgSolid = "#F6F1EB";
+      const text = p.text_color || "rgba(18,18,18,0.92)";
+      const muted = p.hint_color || "rgba(0,0,0,0.52)";
+
+      setVar("--bg", bgSolid);
+      setVar("--bgSolid", bgSolid);
+      setVar("--bgGrad", "linear-gradient(135deg,#F7F2EC 0%,#F0E7DD 45%,#E9DDD2 100%)");
+      setVar("--text", text);
+      setVar("--muted", muted);
+
+      setVar("--stroke", "rgba(0,0,0,0.10)");
+      // glass surfaces: keep transparency but denser than default light
+      setVar("--card", "rgba(255,255,255,0.62)");
+      setVar("--card2", "rgba(255,255,255,0.72)");
+
+      // sheets/overlays: slightly darker overlay to separate from bright background
+      setVar("--sheetOverlay", "rgba(0,0,0,0.22)");
+      setVar("--sheetCardBg", "rgba(255,255,255,0.74)");
+      setVar("--glassStroke", "rgba(255,255,255,0.55)");
+      setVar("--glassShadow", "rgba(20,15,10,0.16)");
 
       try{
         if(tg){
-          tg.setHeaderColor(headerBg);
-          tg.setBackgroundColor(headerBg);
+          tg.setHeaderColor(bgSolid);
+          tg.setBackgroundColor(bgSolid);
         }
+      }catch(e){}
+    }
+
       }catch(e){}
     }
 
