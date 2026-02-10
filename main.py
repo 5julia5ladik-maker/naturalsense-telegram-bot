@@ -2709,29 +2709,34 @@ def get_webapp_html() -> str:
     function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
 
     function applyTelegramTheme(){
-      const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
-      const p = tg && tg.themeParams ? tg.themeParams : {};
-      const bg = p.bg_color || DEFAULT_BG;
-      const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
-      const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
+      // FORCE DARK: pixel-perfect identical UI regardless of Telegram light/dark.
+      // We intentionally ignore tg.colorScheme and tg.themeParams because they differ per user theme.
+      const bg = DEFAULT_BG;
+      const text = "rgba(255,255,255,0.92)";
+      const muted = "rgba(255,255,255,0.60)";
+
+      try{ document.documentElement.setAttribute("data-scheme","dark"); }catch(e){}
 
       setVar("--bg", bg);
       setVar("--text", text);
       setVar("--muted", muted);
-      setVar("--stroke", scheme==="dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
-      setVar("--card", scheme==="dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
-      setVar("--card2", scheme==="dark" ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)");
 
-      setVar("--sheetOverlay", scheme==="dark" ? hexToRgba(bg,0.55) : hexToRgba(bg,0.45));
-      setVar("--sheetCardBg", scheme==="dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.86)");
-      setVar("--glassStroke", scheme==="dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
-      setVar("--glassShadow", scheme==="dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
+      setVar("--stroke", "rgba(255,255,255,0.12)");
+      setVar("--card", "rgba(255,255,255,0.08)");
+      setVar("--card2", "rgba(255,255,255,0.06)");
+
+      setVar("--sheetOverlay", hexToRgba(bg,0.55));
+      setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
+      setVar("--glassStroke", "rgba(255,255,255,0.18)");
+      setVar("--glassShadow", "rgba(0,0,0,0.45)");
 
       try{
         if(tg){
           tg.setHeaderColor(bg);
           tg.setBackgroundColor(bg);
         }
+      }catch(e){}
+    }
       }catch(e){}
     }
 
@@ -4972,6 +4977,13 @@ if(state.profileView==="history"){
       if(tg){
         try{ tg.expand(); }catch(e){}
         applyTelegramTheme();
+
+    // Final guard: keep forced dark even if Telegram updates theme dynamically.
+    try{
+      document.documentElement.setAttribute("data-scheme","dark");
+      setTimeout(()=>{ try{ document.documentElement.setAttribute("data-scheme","dark"); }catch(e){} }, 0);
+    }catch(e){}
+
         try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
       }
       await Promise.all([refreshUser(), loadBotUsername()]);
@@ -4983,11 +4995,6 @@ if(state.profileView==="history"){
     document.addEventListener("DOMContentLoaded", boot);
   })();
   </script>
-
-<script>
-document.documentElement.setAttribute("data-scheme","dark");
-</script>
-
 </body>
 </html>
 """
