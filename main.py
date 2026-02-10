@@ -2663,89 +2663,85 @@ def get_webapp_html() -> str:
 
 
 /* =========================
-   PURE WHITE EXPRESSIVE — LIGHT ONLY
+   LIGHT THEME — 1:1 DARK SHADOWS
    ========================= */
-html[data-scheme="light"]{
-  --bg:#F5F3EF;
-  --bg-accent:#EDE8E2;
 
-  --card:rgba(255,255,255,0.98);
+/* We reuse ALL shadows from dark.
+   Only colors are inverted for light background.
+*/
+
+html[data-scheme="light"]{
+  --bg:#F4F2EE;
+  --bg2:#ECE8E2;
+
+  --card:#FFFFFF;
   --card2:#FFFFFF;
 
-  --text:#1F1D1B;
-  --text-strong:#141210;
-  --muted:#5F5A55;
+  --text:#1C1A18;
+  --text2:#3A3632;
+  --muted:#6A645E;
 
-  --stroke:rgba(0,0,0,0.12);
-  --stroke-soft:rgba(0,0,0,0.08);
-
-  --shadow-soft:0 6px 18px rgba(0,0,0,0.10);
-  --shadow-strong:0 12px 32px rgba(0,0,0,0.18);
+  /* SHADOWS — IDENTICAL TO DARK */
+  --shadow-xs:0 1px 2px rgba(0,0,0,0.10);
+  --shadow-sm:0 4px 10px rgba(0,0,0,0.16);
+  --shadow-md:0 8px 24px rgba(0,0,0,0.22);
+  --shadow-lg:0 14px 40px rgba(0,0,0,0.30);
 }
 
 html[data-scheme="light"] body{
   background:
-    radial-gradient(900px 600px at 10% 0%, #FFFFFF 0%, transparent 60%),
-    linear-gradient(180deg,var(--bg),var(--bg-accent));
+    radial-gradient(1200px 800px at 15% -10%, #FFFFFF 0%, transparent 55%),
+    linear-gradient(180deg,var(--bg),var(--bg2));
   color:var(--text);
 }
 
+/* CARDS / TILES — EXACT DEPTH AS DARK */
 html[data-scheme="light"] .card,
 html[data-scheme="light"] .tile,
 html[data-scheme="light"] .miniCard{
   background:var(--card);
-  border:1px solid var(--stroke);
-  box-shadow:var(--shadow-soft);
+  box-shadow:var(--shadow-md);
+  border:1px solid rgba(0,0,0,0.08);
 }
 
-html[data-scheme="light"] .card strong,
-html[data-scheme="light"] h1,
-html[data-scheme="light"] h2{
-  color:var(--text-strong);
+/* BUTTONS */
+html[data-scheme="light"] .btn,
+html[data-scheme="light"] .button{
+  background:linear-gradient(180deg,#FFFFFF,#F0ECE6);
+  box-shadow:var(--shadow-sm);
+  color:var(--text);
 }
 
+/* BOTTOM NAV — SAME SHADOW AS DARK */
 html[data-scheme="light"] .bottomNavInner{
   background:rgba(255,255,255,0.96);
-  border-top:1px solid var(--stroke-soft);
-  box-shadow:0 -10px 26px rgba(0,0,0,0.18);
+  box-shadow:0 -12px 32px rgba(0,0,0,0.28);
+  border-top:1px solid rgba(0,0,0,0.08);
 }
 
+/* ROULETTE — 1:1 DARK DEPTH */
 html[data-scheme="light"] .wheelBox{
   background:#FFFFFF;
-  border-radius:50%;
-  border:2px solid rgba(0,0,0,0.18);
   box-shadow:
-    0 18px 40px rgba(0,0,0,0.25),
-    inset 0 2px 0 rgba(255,255,255,0.9);
-}
-
-html[data-scheme="light"] .wheelSector{
-  filter:brightness(0.92);
+    0 18px 42px rgba(0,0,0,0.30),
+    inset 0 2px 0 rgba(255,255,255,0.95);
+  border:2px solid rgba(0,0,0,0.12);
 }
 
 html[data-scheme="light"] .wheelText,
 html[data-scheme="light"] .wheelLabel{
-  color:#1F1D1B;
+  color:var(--text);
   text-shadow:
-    0 1px 0 rgba(255,255,255,0.8),
-    0 2px 6px rgba(0,0,0,0.35);
+    0 1px 0 rgba(255,255,255,0.9),
+    0 3px 8px rgba(0,0,0,0.45);
 }
 
 html[data-scheme="light"] .wheelCenter{
   background:#FFFFFF;
-  color:#1F1D1B;
-  font-weight:700;
+  color:var(--text);
   box-shadow:
-    inset 0 0 0 2px rgba(0,0,0,0.12),
-    0 4px 12px rgba(0,0,0,0.25);
-}
-
-html[data-scheme="light"] .button,
-html[data-scheme="light"] .btn{
-  background:linear-gradient(180deg,#FFFFFF,#F1ECE6);
-  border:1px solid var(--stroke);
-  box-shadow:var(--shadow-soft);
-  color:var(--text-strong);
+    inset 0 0 0 2px rgba(0,0,0,0.14),
+    0 6px 18px rgba(0,0,0,0.35);
 }
 
 </style>
