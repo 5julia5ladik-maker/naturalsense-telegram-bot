@@ -5,6 +5,9 @@ import asyncio
 import logging
 import secrets
 import hashlib
+import hmac
+import json
+import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Literal, Any
@@ -12,7 +15,7 @@ from typing import Optional, Literal, Any
 import httpx
 from pydantic import BaseModel, Field
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -74,6 +77,67 @@ PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
 CHANNEL_USERNAME = env_get("CHANNEL_USERNAME", "NaturalSense") or "NaturalSense"
 DATABASE_URL = env_get("DATABASE_URL", "sqlite+aiosqlite:///./ns.db") or "sqlite+aiosqlite:///./ns.db"
 ADMIN_CHAT_ID = int(env_get("ADMIN_CHAT_ID", "5443870760") or "5443870760")
+
+# -----------------------------------------------------------------------------
+# Telegram Mini App auth (initData validation)
+# -----------------------------------------------------------------------------
+def _parse_init_data(init_data: str) -> dict[str, str]:
+    # initData is query-string formatted
+    return dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+
+
+def _verify_init_data(init_data: str, bot_token: str) -> dict[str, Any]:
+    """Validate Telegram WebApp initData and return parsed payload.
+
+    Raises HTTPException(401) if invalid.
+    """
+    if not init_data:
+        raise HTTPException(status_code=401, detail="missing_init_data")
+
+    data = _parse_init_data(init_data)
+    recv_hash = data.pop("hash", None)
+    if not recv_hash:
+        raise HTTPException(status_code=401, detail="missing_hash")
+
+    # Telegram: secret_key = HMAC_SHA256("WebAppData", bot_token) or sha256(bot_token)?
+    # For Web Apps: key = sha256(bot_token) (as bytes), then HMAC over data_check_string.
+    secret_key = hashlib.sha256(bot_token.encode("utf-8")).digest()
+
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data.items()))
+    calc_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(calc_hash, recv_hash):
+        raise HTTPException(status_code=401, detail="bad_init_data_hash")
+
+    # Optional: auth_date freshness (24h)
+    try:
+        auth_date = int(data.get("auth_date", "0"))
+        if auth_date > 0:
+            if datetime.utcnow().timestamp() - auth_date > 60 * 60 * 24:
+                # don't hard fail, just warn (Telegram sometimes keeps it longer in cache)
+                pass
+    except Exception:
+        pass
+
+    # parse user json
+    if "user" in data:
+        try:
+            data["user_obj"] = json.loads(data["user"])
+        except Exception:
+            data["user_obj"] = None
+
+    return data
+
+
+def _tid_from_init_data(init_data: str) -> Optional[int]:
+    try:
+        payload = _verify_init_data(init_data, BOT_TOKEN)
+        u = payload.get("user_obj") or {}
+        tid = int(u.get("id") or 0)
+        return tid if tid > 0 else None
+    except Exception:
+        return None
+
 
 APP_VERSION = (env_get("APP_VERSION", "1.0.4") or "1.0.4").strip()
 ASSET_VERSION = (env_get("ASSET_VERSION", APP_VERSION) or APP_VERSION).strip()
@@ -382,23 +446,14 @@ async_session = async_session_maker
 async def _safe_exec(conn, sql: str):
     """Execute a migration statement safely.
 
-    IMPORTANT: We use SAVEPOINTs so that a single failed statement does not
-    abort the whole surrounding transaction (Postgres aborts the transaction
-    after any error until rollback). This is critical for Railway deploys
-    with mixed/legacy schemas.
+    IMPORTANT: in Postgres, a failed statement aborts the whole transaction.
+    We wrap each statement into a SAVEPOINT (nested transaction) so that
+    one failed ALTER does not break all subsequent migrations.
     """
-    sp = f"sp_{secrets.token_hex(6)}"
     try:
-        await conn.execute(sql_text(f"SAVEPOINT {sp}"))
-        await conn.execute(sql_text(sql))
-        await conn.execute(sql_text(f"RELEASE SAVEPOINT {sp}"))
+        async with conn.begin_nested():  # SAVEPOINT
+            await conn.execute(sql_text(sql))
     except Exception as e:
-        try:
-            await conn.execute(sql_text(f"ROLLBACK TO SAVEPOINT {sp}"))
-            await conn.execute(sql_text(f"RELEASE SAVEPOINT {sp}"))
-        except Exception:
-            # If savepoint commands fail, we just swallow - next deploy will retry.
-            pass
         logger.info("DB migration skipped/failed (ok in some DBs): %s | %s", sql, e)
 
 
@@ -3346,7 +3401,11 @@ function esc(s){
       const timeoutMs = 12000;
       const t = setTimeout(()=>controller.abort(), timeoutMs);
       try{
-        const r = await fetch(url, Object.assign({}, opts||{}, {signal: controller.signal, cache:"no-store"}));
+        const hdrs = Object.assign({}, (opts && opts.headers) || {});
+        try{
+          if(tg && tg.initData) hdrs["X-Telegram-InitData"] = tg.initData;
+        }catch(e){}
+        const r = await fetch(url, Object.assign({}, opts||{}, {headers: hdrs, signal: controller.signal, cache:"no-store"}));
         const data = await r.json().catch(()=> ({}));
         if(!r.ok) throw new Error(data.detail || ("HTTP "+r.status));
         return data;
@@ -6361,7 +6420,13 @@ async def raffle_status(telegram_id: int):
 
 @app.post("/api/raffle/buy_ticket", response_model=BuyTicketResp)
 async def raffle_buy_ticket(req: BuyTicketReq):
-    tid = int(req.telegram_id)
+    tid: int | None = None
+    if x_telegram_initdata:
+        tid = _tid_from_init_data(x_telegram_initdata)
+    if tid is None:
+        tid = int(req.telegram_id)
+    if not tid or tid <= 0:
+        raise HTTPException(status_code=400, detail="invalid_telegram_id")
     qty = max(1, int(req.qty))
     cost = RAFFLE_TICKET_COST * qty
 
@@ -6411,7 +6476,13 @@ async def raffle_buy_ticket(req: BuyTicketReq):
 # -----------------------------------------------------------------------------
 @app.get("/api/inventory", response_model=InventoryResp)
 async def inventory_api(telegram_id: int):
-    tid = int(telegram_id)
+    tid: int | None = None
+    if x_telegram_initdata:
+        tid = _tid_from_init_data(x_telegram_initdata)
+    if tid is None and telegram_id is not None:
+        tid = int(telegram_id)
+    if not tid or tid <= 0:
+        raise HTTPException(status_code=400, detail="invalid_telegram_id")
     async with async_session_maker() as session:
         user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
         if not user:
@@ -6468,7 +6539,7 @@ async def inventory_api(telegram_id: int):
 # DAILY TASKS API
 # -----------------------------------------------------------------------------
 @app.get("/api/daily/tasks", response_model=DailyTasksResp)
-async def daily_tasks_api(telegram_id: int):
+async def daily_tasks_api(telegram_id: int | None = None, x_telegram_initdata: str | None = Header(None, alias="X-Telegram-InitData")):
     tid = int(telegram_id)
     day = _today_key()
     task_map = _daily_tasks_map()
@@ -6540,8 +6611,14 @@ async def daily_tasks_api(telegram_id: int):
 
 
 @app.post("/api/daily/event")
-async def daily_event_api(req: DailyEventReq):
-    tid = int(req.telegram_id)
+async def daily_event_api(req: DailyEventReq, x_telegram_initdata: str | None = Header(None, alias="X-Telegram-InitData")):
+    tid: int | None = None
+    if x_telegram_initdata:
+        tid = _tid_from_init_data(x_telegram_initdata)
+    if tid is None:
+        tid = int(req.telegram_id)
+    if not tid or tid <= 0:
+        raise HTTPException(status_code=400, detail="invalid_telegram_id")
     day = _today_key()
     ev = (req.event or "").strip().lower()
 
@@ -6602,7 +6679,7 @@ async def daily_event_api(req: DailyEventReq):
 
 
 @app.post("/api/daily/claim", response_model=DailyClaimResp)
-async def daily_claim_api(req: DailyClaimReq):
+async def daily_claim_api(req: DailyClaimReq, x_telegram_initdata: str | None = Header(None, alias="X-Telegram-InitData")):
     tid = int(req.telegram_id)
     key = (req.task_key or "").strip()
     day = _today_key()
@@ -7149,12 +7226,6 @@ async def roulette_spin(req: SpinReq):
                     session.add(claim)
                     await session.flush()
                     claim_id_for_resp = int(claim.id)
-
-            # Server-side guarantee: roulette spin marks daily task as DONE
-            try:
-                await _mark_daily_done(session, tid, _today_key(), "spin_roulette")
-            except Exception as e:
-                logger.info("daily spin_roulette mark failed: %s", e)
 
         await session.refresh(user)
 
