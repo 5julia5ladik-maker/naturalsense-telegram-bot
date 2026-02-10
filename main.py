@@ -5418,6 +5418,7 @@ async def api_referrals(telegram_id: int):
     Returns inviter referrals list with clear status/progress and earnings.
     Used by Mini App profile -> referrals view.
     """
+    try:
     async with SessionLocal() as session:
         inviter = await get_or_create_user(session, telegram_id=telegram_id)
         await session.commit()
@@ -5494,7 +5495,7 @@ async def api_referrals(telegram_id: int):
 
             items.append({
                 "telegram_id": int(u.telegram_id),
-                "name": u.full_name or "",
+                "name": (u.first_name or (u.username or "") or f"ID {u.telegram_id}"),
                 "username": (u.username or "").lstrip("@"),
                 "status": status,  # pending / active / inactive
                 "last_seen_at": last_seen_iso,
@@ -5524,6 +5525,10 @@ async def api_referrals(telegram_id: int):
             }
         }
 
+
+    except Exception as e:
+        logger.exception("/api/referrals failed: %s", e)
+        raise HTTPException(status_code=500, detail="referrals_error")
 
 @app.get("/health")
 async def health():
