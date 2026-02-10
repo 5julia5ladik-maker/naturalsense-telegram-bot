@@ -2489,10 +2489,13 @@ def get_webapp_html() -> str:
     <meta http-equiv="Expires" content="0" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0c0f14" />
   <title>NS · Natural Sense</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
+    html{color-scheme:dark}
     :root{
       --bg:#0c0f14;
       --card:rgba(255,255,255,0.08);
@@ -3096,25 +3099,21 @@ def get_webapp_html() -> str:
     function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
 
     function applyTelegramTheme(){
-      const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
-      const p = tg && tg.themeParams ? tg.themeParams : {};
-      const bg = p.bg_color || DEFAULT_BG;
-      const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
-      const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
-
+      // FORCE DARK THEME: ignore Telegram light/day theme completely (pixel-to-pixel).
+      const bg = DEFAULT_BG;
       setVar("--bg", bg);
-      setVar("--text", text);
-      setVar("--muted", muted);
-      setVar("--stroke", scheme==="dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
-      setVar("--card", scheme==="dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
-      setVar("--card2", scheme==="dark" ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)");
-
-      setVar("--sheetOverlay", scheme==="dark" ? hexToRgba(bg,0.55) : hexToRgba(bg,0.45));
-      setVar("--sheetCardBg", scheme==="dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.86)");
-      setVar("--glassStroke", scheme==="dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
-      setVar("--glassShadow", scheme==="dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
+      setVar("--text", "rgba(255,255,255,0.92)");
+      setVar("--muted", "rgba(255,255,255,0.60)");
+      setVar("--stroke", "rgba(255,255,255,0.12)");
+      setVar("--card", "rgba(255,255,255,0.08)");
+      setVar("--card2", "rgba(255,255,255,0.06)");
+      setVar("--sheetOverlay", hexToRgba(bg,0.55));
+      setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
+      setVar("--glassStroke", "rgba(255,255,255,0.18)");
+      setVar("--glassShadow", "rgba(0,0,0,0.45)");
 
       try{
+        document.documentElement.style.colorScheme = "dark";
         if(tg){
           tg.setHeaderColor(bg);
           tg.setBackgroundColor(bg);
