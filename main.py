@@ -394,6 +394,26 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+        # daily_task_logs (for old DBs where create_all could be skipped/fail)
+        await _safe_exec(
+            conn,
+            """
+            CREATE TABLE IF NOT EXISTS daily_task_logs (
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT NOT NULL,
+                day VARCHAR NOT NULL,
+                task_key VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'done',
+                done_at TIMESTAMP NULL,
+                claimed_at TIMESTAMP NULL,
+                points INTEGER NOT NULL DEFAULT 0,
+                meta JSON DEFAULT '{}'::json
+            );
+            """,
+        )
+        await _safe_exec(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_task_logs_tid_day_key ON daily_task_logs (telegram_id, day, task_key);")
+        await _safe_exec(conn, "CREATE INDEX IF NOT EXISTS ix_daily_task_logs_tid_day ON daily_task_logs (telegram_id, day);")
+
         # posts
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;")
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;")
@@ -507,20 +527,31 @@ def _daily_tasks_map() -> dict[str, dict[str, Any]]:
 
 
 async def _daily_points_claimed(session: AsyncSession, telegram_id: int, day: str) -> int:
-    q = select(func.coalesce(func.sum(DailyTaskLog.points), 0)).where(
-        DailyTaskLog.telegram_id == telegram_id,
-        DailyTaskLog.day == day,
-        DailyTaskLog.status == "claimed",
-    )
-    return int((await session.execute(q)).scalar_one() or 0)
+    try:
+        q = select(func.coalesce(func.sum(DailyTaskLog.points), 0)).where(
+            DailyTaskLog.telegram_id == telegram_id,
+            DailyTaskLog.day == day,
+            DailyTaskLog.status == "claimed",
+        )
+        return int((await session.execute(q)).scalar_one() or 0)
+    except Exception as e:
+        # If the table is not created yet (old DB) or any transient DB error happens,
+        # do not break the Mini App — just return 0.
+        logger.info("daily_points_claimed fallback: %s", e)
+        return 0
 
 
 async def _get_daily_logs(session: AsyncSession, telegram_id: int, day: str) -> dict[str, DailyTaskLog]:
-    res = await session.execute(
-        select(DailyTaskLog).where(DailyTaskLog.telegram_id == telegram_id, DailyTaskLog.day == day)
-    )
-    rows = res.scalars().all()
-    return {r.task_key: r for r in rows}
+    try:
+        res = await session.execute(
+            select(DailyTaskLog).where(DailyTaskLog.telegram_id == telegram_id, DailyTaskLog.day == day)
+        )
+        rows = res.scalars().all()
+        return {r.task_key: r for r in rows}
+    except Exception as e:
+        # If the table is missing or DB temporarily unavailable — return empty logs.
+        logger.info("daily_logs fallback: %s", e)
+        return {}
 
 
 async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, task_key: str, meta: dict | None = None) -> None:
@@ -6169,7 +6200,10 @@ async def daily_tasks_api(telegram_id: int):
     async with async_session_maker() as session:
         user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
         if not user:
-            raise HTTPException(status_code=404, detail="user_not_found")
+            # Mini App can be opened before /start in bot -> create minimal user
+            user = User(telegram_id=tid, points=10)
+            session.add(user)
+            await session.commit()
 
         logs = await _get_daily_logs(session, tid, day)
 
@@ -6226,7 +6260,10 @@ async def daily_event_api(req: DailyEventReq):
     async with async_session_maker() as session:
         user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
         if not user:
-            raise HTTPException(status_code=404, detail="user_not_found")
+            # Mini App can be opened before /start in bot -> create minimal user
+            user = User(telegram_id=tid, points=10)
+            session.add(user)
+            await session.commit()
 
         # NOTE: client events are best-effort; we still cap rewards on claim.
         if ev == "open_miniapp":
@@ -6271,7 +6308,10 @@ async def daily_claim_api(req: DailyClaimReq):
     async with async_session_maker() as session:
         user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
         if not user:
-            raise HTTPException(status_code=404, detail="user_not_found")
+            # Mini App can be opened before /start in bot -> create minimal user
+            user = User(telegram_id=tid, points=10)
+            session.add(user)
+            await session.commit()
 
         logs = await _get_daily_logs(session, tid, day)
         lg = logs.get(key)
