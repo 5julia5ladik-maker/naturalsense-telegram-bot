@@ -149,11 +149,19 @@ DAILY_TASKS: list[dict[str, Any]] = [
     {"key": "open_post", "title": "Открыть 3 поста", "points": 60, "icon": "📰", "need": 3},
     {"key": "open_inventory", "title": "Открыть Косметичку", "points": 20, "icon": "👜"},
     {"key": "open_profile", "title": "Открыть Профиль", "points": 20, "icon": "👤"},
+
+    # Социальные (обязательные базовые daily)
+    {"key": "comment_post", "title": "Написать комментарий", "points": 50, "icon": "💬"},
+    {"key": "reply_comment", "title": "Ответить на комментарий", "points": 50, "icon": "↩️💬"},
+
+    # Игровые
     {"key": "spin_roulette", "title": "Крутить рулетку 1 раз", "points": 50, "icon": "🎡"},
     {"key": "convert_prize", "title": "Конвертировать приз/билет", "points": 40, "icon": "🔁"},
-    {"key": "bonus_day", "title": "Собрать все задания дня", "points": 130, "icon": "🎁", "special": True},
+
+    # Бонус дня (чтобы добить ровно до 400)
+    {"key": "bonus_day", "title": "Собрать все задания дня", "points": 30, "icon": "🎁", "special": True},
 ]
-# Total base (excluding bonus_day) = 270; with bonus_day = 400
+# Total base (excluding bonus_day) = 370; with bonus_day = 400
 
 
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
@@ -2050,6 +2058,83 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_help(update, context)
         return
 
+
+async def on_discussion_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Tracks comments in the linked discussion group to unlock Daily tasks:
+    - comment_post: reply to the forwarded channel post (sender_chat == channel)
+    - reply_comment: reply to another user's comment
+    NOTE: Telegram does not provide a perfect "comment vs reply" signal in all cases,
+    but this logic is reliable for linked discussions.
+    """
+    msg = update.message
+    if not msg or not msg.text:
+        return
+    if not update.effective_user:
+        return
+
+    uid = int(update.effective_user.id)
+    text_ = (msg.text or "").strip()
+
+    # basic anti-spam for daily tasks: ignore very short messages
+    if len(text_) < 10:
+        return
+
+    # update last seen (best-effort)
+    try:
+        await touch_user_seen(uid, update.effective_user.username, update.effective_user.first_name)
+    except Exception:
+        pass
+
+    # We only care about replies (comments)
+    if not msg.reply_to_message:
+        return
+
+    rt = msg.reply_to_message
+
+    # Determine if it's a comment to the channel post (reply to forwarded channel message)
+    is_reply_to_channel_post = False
+    try:
+        if getattr(rt, "sender_chat", None) and getattr(rt.sender_chat, "type", None) == "channel":
+            is_reply_to_channel_post = True
+    except Exception:
+        is_reply_to_channel_post = False
+
+    # Determine if it's a reply to another user's comment
+    is_reply_to_user_comment = False
+    try:
+        if (not is_reply_to_channel_post) and getattr(rt, "from_user", None) and int(rt.from_user.id) != uid:
+            is_reply_to_user_comment = True
+    except Exception:
+        is_reply_to_user_comment = False
+
+    if not (is_reply_to_channel_post or is_reply_to_user_comment):
+        return
+
+    task_key = "comment_post" if is_reply_to_channel_post else "reply_comment"
+    day = _today_key()
+
+    async with async_session_maker() as session:
+        # ensure user exists (Mini App может быть открыт до /start)
+        user = (await session.execute(select(User).where(User.telegram_id == uid))).scalar_one_or_none()
+        if not user:
+            user = User(telegram_id=uid, points=10)
+            session.add(user)
+            await session.commit()
+
+        await _mark_daily_done(
+            session,
+            uid,
+            day,
+            task_key,
+            meta={
+                "chat_id": int(msg.chat_id),
+                "message_id": int(msg.message_id),
+            },
+        )
+        await session.commit()
+
+
 # -----------------------------------------------------------------------------
 # CHANNEL INDEXING
 # -----------------------------------------------------------------------------
@@ -2202,6 +2287,9 @@ async def start_telegram_bot():
     tg_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_text_button))
     # Media sync: accept forwarded posts with media from admin (private chat)
     tg_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.VIDEO | filters.Document.ALL), on_sync_forward))
+
+    # Discussion comments (linked group) -> unlock Daily tasks (comment/reply)
+    tg_app.add_handler(MessageHandler((filters.ChatType.GROUP | filters.ChatType.SUPERGROUP) & filters.TEXT & ~filters.COMMAND, on_discussion_message))
 
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
@@ -6276,6 +6364,10 @@ async def daily_event_api(req: DailyEventReq):
             await _mark_daily_done(session, tid, day, "open_inventory")
         elif ev == "open_profile":
             await _mark_daily_done(session, tid, day, "open_profile")
+        elif ev == "comment_post":
+            await _mark_daily_done(session, tid, day, "comment_post")
+        elif ev == "reply_comment":
+            await _mark_daily_done(session, tid, day, "reply_comment")
         elif ev == "spin_roulette":
             await _mark_daily_done(session, tid, day, "spin_roulette")
         elif ev == "convert_prize":
