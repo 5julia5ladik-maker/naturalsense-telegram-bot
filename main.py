@@ -4410,6 +4410,61 @@ async function claimDaily(taskKey){
   }
 }
 
+function _dailyCanPerform(key){
+  return ['open_miniapp','open_channel','use_search','open_post','open_inventory','open_profile','spin_roulette','convert_prize'].includes(key);
+}
+
+async function performDailyTask(taskKey){
+  try{
+    if(!taskKey) return;
+    // Navigate to the right place. IMPORTANT: do not auto-charge user for spins.
+    if(taskKey === 'open_miniapp'){
+      try{ await dailyEvent('open_miniapp'); }catch(e){}
+      return;
+    }
+    if(taskKey === 'open_channel'){
+      try{ dailyEvent('open_channel'); }catch(e){}
+      openLink('https://t.me/'+CHANNEL);
+      return;
+    }
+    if(taskKey === 'use_search'){
+      // completion will be recorded when user actually searches (runSearch triggers dailyEvent).
+      state.tab = 'discover';
+      render();
+      setTimeout(()=>{ try{ if(searchInputEl){ searchInputEl.focus(); } }catch(e){} }, 80);
+      return;
+    }
+    if(taskKey === 'open_post'){
+      // completion will be recorded when user taps any post card (postCard triggers dailyEvent).
+      state.tab = 'journal';
+      render();
+      return;
+    }
+    if(taskKey === 'open_inventory'){
+      await openInventory();
+      return;
+    }
+    if(taskKey === 'open_profile'){
+      await openПрофиль('menu');
+      return;
+    }
+    if(taskKey === 'spin_roulette'){
+      // just take user to Rewards screen (spin happens there).
+      state.tab = 'rewards';
+      render();
+      return;
+    }
+    if(taskKey === 'convert_prize'){
+      // conversion happens in Inventory
+      await openInventory();
+      return;
+    }
+  }catch(e){
+    // silent
+  }
+}
+
+
 function renderDailySheet(){
   const overlay = document.getElementById("dailyOverlay");
   if(!overlay) return;
@@ -4476,15 +4531,60 @@ function renderDailySheet(){
     btnRow.style.display="grid";
     btnRow.style.gridTemplateColumns="1fr";
     btnRow.style.gap="8px";
-
     const btn = el("div","btn");
     const canClaim = !!t.done && !t.claimed;
-    btn.style.opacity = canClaim ? "1" : "0.55";
-    btn.style.pointerEvents = canClaim ? "auto" : "none";
-    btn.addEventListener("click", ()=>{ haptic(); claimDaily(t.key); });
-    btn.appendChild(el("div",null,'<div class="btnTitle">'+(t.claimed ? "✅ Получено" : (t.done ? "🎁 Забрать" : "🔒 Выполни чтобы забрать"))+'</div><div class="btnSub">'+(t.claimed ? "Награда уже начислена" : (t.done ? "Нажми, чтобы получить бонусы" : "Сначала выполни задание"))+'</div>'));
+    const canPerform = !t.done && !t.claimed && _dailyCanPerform(t.key);
+
+    // States:
+    // - claimed: disabled
+    // - done + not claimed: show "Забрать" and allow claim
+    // - not done but performable: allow "Выполнить" (navigate), then user completes and comes back to claim
+    // - not done and not performable: locked
+
+    const isDisabled = !!t.claimed || (!canClaim && !canPerform);
+    btn.style.opacity = isDisabled ? "0.55" : "1";
+    btn.style.pointerEvents = isDisabled ? "none" : "auto";
+
+    let title = "";
+    let sub2 = "";
+    if(t.claimed){
+      title = "✅ Получено";
+      sub2 = "Награда уже начислена";
+    }else if(canClaim){
+      title = "🎁 Забрать";
+      sub2 = "Нажми, чтобы получить бонусы";
+    }else if(canPerform){
+      title = "▶️ Выполнить";
+      if(t.key === 'open_channel') sub2 = "Откроем канал и отметим выполнение";
+      else if(t.key === 'use_search') sub2 = "Откроем поиск — введи запрос";
+      else if(t.key === 'open_post') sub2 = "Откроем журнал — открой 3 поста";
+      else if(t.key === 'spin_roulette') sub2 = "Откроем рулетку — крути 1 раз";
+      else if(t.key === 'convert_prize') sub2 = "Откроем косметичку — конвертируй";
+      else sub2 = "Откроем нужный экран";
+    }else{
+      title = "🔒 Выполни чтобы забрать";
+      sub2 = "Сначала выполни задание";
+    }
+
+    btn.addEventListener("click", async ()=>{
+      haptic();
+      if(t.claimed) return;
+      if(canClaim){
+        await claimDaily(t.key);
+        return;
+      }
+      if(canPerform){
+        await performDailyTask(t.key);
+        // refresh list so user immediately sees updated status if completion happens instantly
+        try{ state.daily = await apiGet('/api/daily/tasks?telegram_id='+encodeURIComponent(tgUserId)); }catch(e){}
+        render();
+      }
+    });
+
+    btn.appendChild(el("div",null,'<div class="btnTitle">'+esc(title)+'</div><div class="btnSub">'+esc(sub2)+'</div>'));
     btn.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
     btnRow.appendChild(btn);
+
 
     card.appendChild(btnRow);
 
