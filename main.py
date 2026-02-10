@@ -2662,35 +2662,33 @@ def get_webapp_html() -> str:
     .sparkle{position:absolute; inset:0; pointer-events:none}
 
 
-
     /* ---------------------------------------------------------
        PREMIUM LIGHT BACKGROUND (ONLY WHEN tg.colorScheme=light)
        Dark theme remains unchanged.
     --------------------------------------------------------- */
-    html,body{height:100%;}
-    body{position:relative;}
-    body::before{
+    [data-scheme="light"] body{
+      background: var(--bgSolid);
+      color: var(--text);
+    }
+    [data-scheme="light"] body::before{
       content:"";
       position:fixed;
       inset:0;
       z-index:-2;
       background: var(--bgGrad);
-      /* subtle premium texture */
-      opacity: 1;
+      opacity:1;
       pointer-events:none;
     }
-    /* add a soft vignette for depth in light */
-    body::after{
+    [data-scheme="light"] body::after{
       content:"";
       position:fixed;
       inset:-10%;
       z-index:-1;
       pointer-events:none;
       background: radial-gradient(60% 45% at 50% 10%, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.00) 70%);
-      opacity: 1;
+      opacity:1;
     }
 
-    /* Light mode: slightly stronger shadows so cards don't "сливаются" */
     [data-scheme="light"] .card,
     [data-scheme="light"] .sheetCard,
     [data-scheme="light"] .navBar,
@@ -2714,12 +2712,7 @@ def get_webapp_html() -> str:
       background: var(--card);
       backdrop-filter: blur(18px) saturate(140%);
     }
-    [data-scheme="light"] .btn:active,
-    [data-scheme="light"] .miniCard:active,
-    [data-scheme="light"] .postCard:active{
-      transform: translateY(1px);
-    }
-    
+
 </style>
 </head>
 <body>
@@ -2768,76 +2761,71 @@ def get_webapp_html() -> str:
     function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
 
     function applyTelegramTheme(){
-      const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
-      const p = tg && tg.themeParams ? tg.themeParams : {};
+  const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
+  const p = tg && tg.themeParams ? tg.themeParams : {};
 
-      // Keep Telegram-provided bg as reference, but for Premium Light we use our own solid+gradient.
-      const tgBg = p.bg_color || DEFAULT_BG;
+  // expose scheme for CSS overrides
+  try{ document.documentElement.dataset.scheme = scheme; }catch(e){}
 
-      // mark scheme for CSS
-      try{ document.documentElement.dataset.scheme = scheme; }catch(e){}
+  const tgBg = p.bg_color || DEFAULT_BG;
 
-      if(scheme==="dark"){
-        const bg = tgBg;
-        const text = p.text_color || "rgba(255,255,255,0.92)";
-        const muted = p.hint_color || "rgba(255,255,255,0.60)";
+  if(scheme === "dark"){
+    const bg = tgBg;
+    const text = p.text_color || "rgba(255,255,255,0.92)";
+    const muted = p.hint_color || "rgba(255,255,255,0.60)";
 
-        setVar("--bg", bg);
-        setVar("--bgSolid", bg);
-        setVar("--bgGrad", ""); // no gradient in dark
-        setVar("--text", text);
-        setVar("--muted", muted);
+    setVar("--bg", bg);
+    setVar("--bgSolid", bg);
+    setVar("--bgGrad", "");
+    setVar("--text", text);
+    setVar("--muted", muted);
 
-        setVar("--stroke", "rgba(255,255,255,0.12)");
-        setVar("--card", "rgba(255,255,255,0.08)");
-        setVar("--card2", "rgba(255,255,255,0.06)");
+    setVar("--stroke", "rgba(255,255,255,0.12)");
+    setVar("--card", "rgba(255,255,255,0.08)");
+    setVar("--card2", "rgba(255,255,255,0.06)");
 
-        setVar("--sheetOverlay", hexToRgba(bg,0.55));
-        setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
-        setVar("--glassStroke", "rgba(255,255,255,0.18)");
-        setVar("--glassShadow", "rgba(0,0,0,0.45)");
+    setVar("--sheetOverlay", hexToRgba(bg,0.55));
+    setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
+    setVar("--glassStroke", "rgba(255,255,255,0.18)");
+    setVar("--glassShadow", "rgba(0,0,0,0.45)");
 
-        try{
-          if(tg){
-            tg.setHeaderColor(bg);
-            tg.setBackgroundColor(bg);
-          }
-        }catch(e){}
-        return;
+    try{
+      if(tg){
+        tg.setHeaderColor(bg);
+        tg.setBackgroundColor(bg);
       }
+    }catch(e){}
+    return;
+  }
 
-      // Premium Light (day) — glass like dark, but readable on light background
-      const bgSolid = "#F6F1EB";
-      const text = p.text_color || "rgba(18,18,18,0.92)";
-      const muted = p.hint_color || "rgba(0,0,0,0.52)";
+  // PREMIUM LIGHT (day): glass like dark, but readable on light background
+  const bgSolid = "#F6F1EB";
+  const text = p.text_color || "rgba(18,18,18,0.92)";
+  const muted = p.hint_color || "rgba(0,0,0,0.52)";
 
-      setVar("--bg", bgSolid);
-      setVar("--bgSolid", bgSolid);
-      setVar("--bgGrad", "linear-gradient(135deg,#F7F2EC 0%,#F0E7DD 45%,#E9DDD2 100%)");
-      setVar("--text", text);
-      setVar("--muted", muted);
+  setVar("--bg", bgSolid);
+  setVar("--bgSolid", bgSolid);
+  setVar("--bgGrad", "linear-gradient(135deg,#F7F2EC 0%,#F0E7DD 45%,#E9DDD2 100%)");
+  setVar("--text", text);
+  setVar("--muted", muted);
 
-      setVar("--stroke", "rgba(0,0,0,0.10)");
-      // glass surfaces: keep transparency but denser than default light
-      setVar("--card", "rgba(255,255,255,0.62)");
-      setVar("--card2", "rgba(255,255,255,0.72)");
+  setVar("--stroke", "rgba(0,0,0,0.10)");
+  setVar("--card", "rgba(255,255,255,0.62)");
+  setVar("--card2", "rgba(255,255,255,0.72)");
 
-      // sheets/overlays: slightly darker overlay to separate from bright background
-      setVar("--sheetOverlay", "rgba(0,0,0,0.22)");
-      setVar("--sheetCardBg", "rgba(255,255,255,0.74)");
-      setVar("--glassStroke", "rgba(255,255,255,0.55)");
-      setVar("--glassShadow", "rgba(20,15,10,0.16)");
+  setVar("--sheetOverlay", "rgba(0,0,0,0.22)");
+  setVar("--sheetCardBg", "rgba(255,255,255,0.74)");
+  setVar("--glassStroke", "rgba(255,255,255,0.55)");
+  setVar("--glassShadow", "rgba(20,15,10,0.16)");
 
-      try{
-        if(tg){
-          tg.setHeaderColor(bgSolid);
-          tg.setBackgroundColor(bgSolid);
-        }
-      }catch(e){}
+  try{
+    if(tg){
+      tg.setHeaderColor(bgSolid);
+      tg.setBackgroundColor(bgSolid);
     }
+  }catch(e){}
+}
 
-      }catch(e){}
-    }
 
     function haptic(kind){
       try{ tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred && tg.HapticFeedback.impactOccurred(kind||"light"); }catch(e){}
