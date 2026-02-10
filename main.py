@@ -136,6 +136,26 @@ DEFAULT_RAFFLE_ID = 1
 TICKET_CONVERT_RATE = 300          # 1 raffle ticket -> 300 points
 DIOR_PALETTE_CONVERT_VALUE = 3000  # 1 Dior palette -> 3000 points (главный приз)
 
+# -----------------------------------------------------------------------------
+# DAILY TASKS CONFIG (max 400/day)
+# -----------------------------------------------------------------------------
+DAILY_MAX_POINTS_PER_DAY = 400
+
+# Important: tasks are claimed manually ("Забрать"). Client only sends events; server validates and caps.
+DAILY_TASKS: list[dict[str, Any]] = [
+    {"key": "open_miniapp", "title": "Зайти в Mini App", "points": 20, "icon": "✨"},
+    {"key": "open_channel", "title": "Перейти в канал", "points": 30, "icon": "↩️"},
+    {"key": "use_search", "title": "Использовать поиск", "points": 30, "icon": "🔍"},
+    {"key": "open_post", "title": "Открыть 3 поста", "points": 60, "icon": "📰", "need": 3},
+    {"key": "open_inventory", "title": "Открыть Косметичку", "points": 20, "icon": "👜"},
+    {"key": "open_profile", "title": "Открыть Профиль", "points": 20, "icon": "👤"},
+    {"key": "spin_roulette", "title": "Крутить рулетку 1 раз", "points": 50, "icon": "🎡"},
+    {"key": "convert_prize", "title": "Конвертировать приз/билет", "points": 40, "icon": "🔁"},
+    {"key": "bonus_day", "title": "Собрать все задания дня", "points": 130, "icon": "🎁", "special": True},
+]
+# Total base (excluding bonus_day) = 270; with bonus_day = 400
+
+
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
 
 # per 1_000_000
@@ -189,28 +209,6 @@ class User(Base):
     ref_active_at = Column(DateTime, nullable=True)  # when user became "active referral" (for inviter revshare)
 
 
-
-
-class DailyTaskLog(Base):
-    __tablename__ = "daily_task_logs"
-
-    id = Column(Integer, primary_key=True)
-    telegram_id = Column(BigInteger, index=True, nullable=False)
-    day = Column(String, index=True, nullable=False)  # local day key, e.g. "2026-02-10" (Europe/Istanbul)
-    task_key = Column(String, index=True, nullable=False)
-
-    is_done = Column(Boolean, default=False, nullable=False)
-    done_at = Column(DateTime, nullable=True)      # naive UTC
-    is_claimed = Column(Boolean, default=False, nullable=False)
-    claimed_at = Column(DateTime, nullable=True)   # naive UTC
-
-    points = Column(Integer, default=0, nullable=False)
-    points_claimed = Column(Integer, default=0, nullable=False)
-
-    meta = Column(JSON, default=dict)
-
-
-
 class Post(Base):
     __tablename__ = "posts"
 
@@ -242,6 +240,29 @@ class PointTransaction(Base):
 
 
 Index("ix_point_transactions_tid_created", PointTransaction.telegram_id, PointTransaction.created_at)
+
+# -----------------------------------------------------------------------------
+# DAILY TASKS (Mini App)
+# -----------------------------------------------------------------------------
+class DailyTaskLog(Base):
+    __tablename__ = "daily_task_logs"
+
+    id = Column(Integer, primary_key=True)
+    telegram_id = Column(BigInteger, index=True, nullable=False)
+    day = Column(String, index=True, nullable=False)  # YYYY-MM-DD (UTC)
+    task_key = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="done")  # done | claimed
+
+    done_at = Column(DateTime, nullable=True)     # naive UTC
+    claimed_at = Column(DateTime, nullable=True)  # naive UTC
+    points = Column(Integer, nullable=False, default=0)
+    meta = Column(JSON, default=dict)
+
+    __table_args__ = (
+        Index("ux_daily_task_logs_tid_day_key", "telegram_id", "day", "task_key", unique=True),
+        Index("ix_daily_task_logs_tid_day", "telegram_id", "day"),
+    )
+
 
 
 class Raffle(Base):
@@ -391,12 +412,6 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS roulette_spins_total INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_active_at TIMESTAMP NULL;")
 
-
-        # daily_task_logs
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0;")
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS points_claimed INTEGER NOT NULL DEFAULT 0;")
-        await _safe_exec(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_task_logs_tid_day_key ON daily_task_logs (telegram_id, day, task_key);")
-
         # referral earnings (revshare 10% from invitee roulette wins)
         await _safe_exec(
             conn,
@@ -414,6 +429,27 @@ async def init_db():
         )
         await _safe_exec(conn, "CREATE INDEX IF NOT EXISTS ix_ref_earnings_inviter_created ON ref_earnings (inviter_id, created_at);")
         await _safe_exec(conn, "CREATE INDEX IF NOT EXISTS ix_ref_earnings_ref_created ON ref_earnings (referred_id, created_at);")
+
+        # daily tasks (Mini App)
+        await _safe_exec(
+            conn,
+    """
+    CREATE TABLE IF NOT EXISTS daily_task_logs (
+        id SERIAL PRIMARY KEY,
+        telegram_id BIGINT NOT NULL,
+        day VARCHAR NOT NULL,
+        task_key VARCHAR NOT NULL,
+        status VARCHAR NOT NULL DEFAULT 'done',
+        done_at TIMESTAMP NULL,
+        claimed_at TIMESTAMP NULL,
+        points INTEGER NOT NULL DEFAULT 0,
+        meta JSON NULL
+    );
+    """,
+)
+        await _safe_exec(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_task_logs_tid_day_key ON daily_task_logs (telegram_id, day, task_key);")
+        await _safe_exec(conn, "CREATE INDEX IF NOT EXISTS ix_daily_task_logs_tid_day ON daily_task_logs (telegram_id, day);")
+
 
         # ✅ Postgres: int32 -> bigint
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;")
@@ -457,6 +493,81 @@ def _recalc_tier(user: User):
 def _utc_day_start(dt: datetime) -> datetime:
     """Naive UTC start of day for dt (dt must be naive UTC)."""
     return datetime(dt.year, dt.month, dt.day)
+
+# -----------------------------------------------------------------------------
+# DAILY TASKS HELPERS
+# -----------------------------------------------------------------------------
+def _today_key(now: datetime | None = None) -> str:
+    n = now or datetime.utcnow()
+    return f"{n.year:04d}-{n.month:02d}-{n.day:02d}"
+
+
+def _daily_tasks_map() -> dict[str, dict[str, Any]]:
+    return {t["key"]: t for t in DAILY_TASKS}
+
+
+async def _daily_points_claimed(session: AsyncSession, telegram_id: int, day: str) -> int:
+    q = select(func.coalesce(func.sum(DailyTaskLog.points), 0)).where(
+        DailyTaskLog.telegram_id == telegram_id,
+        DailyTaskLog.day == day,
+        DailyTaskLog.status == "claimed",
+    )
+    return int((await session.execute(q)).scalar_one() or 0)
+
+
+async def _get_daily_logs(session: AsyncSession, telegram_id: int, day: str) -> dict[str, DailyTaskLog]:
+    res = await session.execute(
+        select(DailyTaskLog).where(DailyTaskLog.telegram_id == telegram_id, DailyTaskLog.day == day)
+    )
+    rows = res.scalars().all()
+    return {r.task_key: r for r in rows}
+
+
+async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, task_key: str, meta: dict | None = None) -> None:
+    existing = (await session.execute(
+        select(DailyTaskLog).where(
+            DailyTaskLog.telegram_id == telegram_id,
+            DailyTaskLog.day == day,
+            DailyTaskLog.task_key == task_key,
+        )
+    )).scalar_one_or_none()
+
+    now = datetime.utcnow()
+    if existing:
+        # do not downgrade claimed
+        if existing.status != "claimed":
+            existing.status = "done"
+            existing.done_at = existing.done_at or now
+            if meta:
+                m = dict(existing.meta or {})
+                m.update(meta)
+                existing.meta = m
+            session.add(existing)
+        return
+
+    session.add(
+        DailyTaskLog(
+            telegram_id=telegram_id,
+            day=day,
+            task_key=task_key,
+            status="done",
+            done_at=now,
+            points=0,
+            meta=meta or {},
+        )
+    )
+
+
+async def _can_unlock_bonus_day(task_map: dict[str, dict[str, Any]], logs: dict[str, DailyTaskLog]) -> bool:
+    # All non-special tasks must be claimed (or at least done?) -> to avoid abuse, require claimed.
+    for k, t in task_map.items():
+        if t.get("special"):
+            continue
+        lg = logs.get(k)
+        if not lg or lg.status != "claimed":
+            return False
+    return True
+
 
 
 def _days_ago(dt: Optional[datetime], now: datetime) -> Optional[int]:
@@ -526,280 +637,6 @@ async def find_user_by_username(username: str) -> Optional[User]:
         return res.scalar_one_or_none()
 
 
-
-# -----------------------------------------------------------------------------
-# DAILY TASKS (in-app bonuses)
-# -----------------------------------------------------------------------------
-ISTANBUL_OFFSET = timedelta(hours=3)  # Europe/Istanbul (no DST since 2016)
-
-def istanbul_day_key(dt_utc: datetime | None = None) -> str:
-    """Return local day key (YYYY-MM-DD) for Europe/Istanbul, based on UTC datetime."""
-    dt = dt_utc or datetime.utcnow()
-    local = dt + ISTANBUL_OFFSET
-    return local.date().isoformat()
-
-DAILY_TASK_DEFS: dict[str, dict[str, Any]] = {
-    # base day total (excluding bonus_complete) = 350, with bonus_complete = 400
-    "open_app": {"title": "Открыть Mini App", "points": 20, "type": "base"},
-    "open_rewards": {"title": "Зайти в «Бонусы»", "points": 15, "type": "base"},
-    "open_profile": {"title": "Открыть профиль", "points": 15, "type": "base"},
-    "open_channel": {"title": "Перейти в канал", "points": 30, "type": "base"},
-    "use_search": {"title": "Использовать поиск", "points": 30, "type": "content"},
-    "open_post": {"title": "Открыть любой пост", "points": 20, "type": "content"},
-    "open_3_posts": {"title": "Открыть 3 поста", "points": 60, "type": "content"},
-    "open_brand_tag": {"title": "Открыть бренд/тег", "points": 20, "type": "content"},
-    "open_inventory": {"title": "Открыть косметичку", "points": 35, "type": "base"},
-    "spin_roulette": {"title": "Крутить рулетку", "points": 50, "type": "game"},
-    "convert_any": {"title": "Конвертировать приз/билет", "points": 40, "type": "game"},
-    "bonus_complete": {"title": "Бонус дня: собрать всё", "points": 50, "type": "bonus"},
-}
-
-DAILY_ACTIVE_TASK_KEYS: list[str] = [
-    "open_app",
-    "open_rewards",
-    "open_profile",
-    "open_channel",
-    "use_search",
-    "open_post",
-    "open_3_posts",
-    "open_brand_tag",
-    "open_inventory",
-    "spin_roulette",
-    "convert_any",
-    "bonus_complete",
-]
-
-async def _get_daily_log(session: AsyncSession, telegram_id: int, day: str, task_key: str) -> DailyTaskLog:
-    res = await session.execute(
-        select(DailyTaskLog).where(
-            DailyTaskLog.telegram_id == telegram_id,
-            DailyTaskLog.day == day,
-            DailyTaskLog.task_key == task_key,
-        )
-    )
-    log = res.scalar_one_or_none()
-    if log is None:
-        log = DailyTaskLog(telegram_id=telegram_id, day=day, task_key=task_key, meta={})
-        session.add(log)
-        await session.flush()
-    return log
-
-async def _daily_claimed_total(session: AsyncSession, telegram_id: int, day: str) -> int:
-    # Fast and DB-safe total (no JSON operators needed)
-    res = await session.execute(
-        select(func.coalesce(func.sum(DailyTaskLog.points_claimed), 0)).where(
-            DailyTaskLog.telegram_id == telegram_id,
-            DailyTaskLog.day == day,
-            DailyTaskLog.is_claimed == True,
-        )
-    )
-    try:
-        return int(res.scalar_one() or 0)
-    except Exception:
-        return int(res.scalar() or 0)
-
-
-async def daily_apply_event(session: AsyncSession, telegram_id: int, event: str, payload: dict[str, Any] | None = None) -> None:
-    """Mark tasks as done based on events (server-side validated)."""
-    payload = payload or {}
-    day = istanbul_day_key()
-    now = datetime.utcnow()
-
-    def mark_done(log: DailyTaskLog) -> None:
-        if not log.is_done:
-            log.is_done = True
-            log.done_at = now
-
-    if event == "open_app":
-        mark_done(await _get_daily_log(session, telegram_id, day, "open_app"))
-        return
-
-    if event == "open_rewards":
-        mark_done(await _get_daily_log(session, telegram_id, day, "open_rewards"))
-        return
-
-    if event == "open_profile":
-        mark_done(await _get_daily_log(session, telegram_id, day, "open_profile"))
-        return
-
-    if event == "open_channel":
-        mark_done(await _get_daily_log(session, telegram_id, day, "open_channel"))
-        return
-
-    if event == "use_search":
-        mark_done(await _get_daily_log(session, telegram_id, day, "use_search"))
-        return
-
-    if event == "open_brand_tag":
-        mark_done(await _get_daily_log(session, telegram_id, day, "open_brand_tag"))
-        return
-
-    if event == "open_inventory":
-        mark_done(await _get_daily_log(session, telegram_id, day, "open_inventory"))
-        return
-
-    if event == "spin_roulette":
-        mark_done(await _get_daily_log(session, telegram_id, day, "spin_roulette"))
-        return
-
-    if event == "convert_any":
-        mark_done(await _get_daily_log(session, telegram_id, day, "convert_any"))
-        return
-
-    if event == "open_post":
-        log1 = await _get_daily_log(session, telegram_id, day, "open_post")
-        meta = log1.meta or {}
-        cnt = int(meta.get("count", 0) or 0) + 1
-        meta["count"] = cnt
-        log1.meta = meta
-        mark_done(log1)
-
-        log3 = await _get_daily_log(session, telegram_id, day, "open_3_posts")
-        meta3 = log3.meta or {}
-        meta3["count"] = max(int(meta3.get("count", 0) or 0), cnt)
-        log3.meta = meta3
-        if cnt >= 3:
-            mark_done(log3)
-        return
-
-async def daily_refresh_bonus_complete(session: AsyncSession, telegram_id: int, day: str) -> None:
-    """If all non-bonus tasks are claimed, mark bonus_complete as done."""
-    # required tasks: all active except bonus_complete itself
-    required = [k for k in DAILY_ACTIVE_TASK_KEYS if k != "bonus_complete"]
-    res = await session.execute(
-        select(DailyTaskLog).where(
-            DailyTaskLog.telegram_id == telegram_id,
-            DailyTaskLog.day == day,
-            DailyTaskLog.task_key.in_(required),
-        )
-    )
-    logs = {l.task_key: l for l in res.scalars().all()}
-    all_claimed = True
-    for k in required:
-        l = logs.get(k)
-        if not l or not l.is_claimed:
-            all_claimed = False
-            break
-
-    if all_claimed:
-        bonus = await _get_daily_log(session, telegram_id, day, "bonus_complete")
-        if not bonus.is_done:
-            bonus.is_done = True
-            bonus.done_at = datetime.utcnow()
-
-async def daily_get_tasks(session: AsyncSession, telegram_id: int) -> dict[str, Any]:
-    day = istanbul_day_key()
-    # preload logs
-    res = await session.execute(
-        select(DailyTaskLog).where(
-            DailyTaskLog.telegram_id == telegram_id,
-            DailyTaskLog.day == day,
-            DailyTaskLog.task_key.in_(DAILY_ACTIVE_TASK_KEYS),
-        )
-    )
-    logs = {l.task_key: l for l in res.scalars().all()}
-
-    # bonus_complete might become available after claims
-    await daily_refresh_bonus_complete(session, telegram_id, day)
-
-    # reload bonus log if changed
-    bonus_log = logs.get("bonus_complete")
-    if bonus_log is None:
-        bonus_log = await _get_daily_log(session, telegram_id, day, "bonus_complete")
-        logs["bonus_complete"] = bonus_log
-
-    claimed_total = 0
-    for l in logs.values():
-        if l.is_claimed:
-            claimed_total += int(getattr(l, "points_claimed", 0) or 0) or int((l.meta or {}).get("points_claimed", 0) or 0)
-
-    # remaining until cap
-    cap = 400
-    remaining_cap = max(0, cap - claimed_total)
-
-    tasks = []
-    for key in DAILY_ACTIVE_TASK_KEYS:
-        d = DAILY_TASK_DEFS[key]
-        log = logs.get(key) or await _get_daily_log(session, telegram_id, day, key)
-        meta = log.meta or {}
-        tasks.append(
-            {
-                "key": key,
-                "title": d["title"],
-                "type": d["type"],
-                "points": int(d["points"]),
-                "done": bool(log.is_done),
-                "claimed": bool(log.is_claimed),
-                "count": int(meta.get("count", 0) or 0),
-            }
-        )
-
-    # seconds until next reset (Istanbul midnight)
-    now_utc = datetime.utcnow()
-    local = now_utc + ISTANBUL_OFFSET
-    tomorrow = (local.date() + timedelta(days=1))
-    reset_local = datetime.combine(tomorrow, datetime.min.time())
-    reset_utc = reset_local - ISTANBUL_OFFSET
-    seconds_left = int(max(0, (reset_utc - now_utc).total_seconds()))
-
-    return {
-        "day": day,
-        "cap": cap,
-        "claimed_total": claimed_total,
-        "remaining_cap": remaining_cap,
-        "seconds_to_reset": seconds_left,
-        "tasks": tasks,
-    }
-
-async def daily_claim_task(session: AsyncSession, telegram_id: int, task_key: str) -> dict[str, Any]:
-    if task_key not in DAILY_TASK_DEFS:
-        raise HTTPException(status_code=400, detail="unknown_task")
-
-    day = istanbul_day_key()
-    # ensure bonus_complete status up to date
-    await daily_refresh_bonus_complete(session, telegram_id, day)
-
-    log = await _get_daily_log(session, telegram_id, day, task_key)
-    if not log.is_done:
-        raise HTTPException(status_code=400, detail="task_not_done")
-    if log.is_claimed:
-        raise HTTPException(status_code=400, detail="already_claimed")
-
-    # cap check
-    total = await _daily_claimed_total(session, telegram_id, day)
-    if total >= 400:
-        raise HTTPException(status_code=400, detail="daily_cap_reached")
-
-    pts = int(DAILY_TASK_DEFS[task_key]["points"])
-    if total + pts > 400:
-        pts = max(0, 400 - total)
-
-    # add points
-    ures = await session.execute(select(User).where(User.telegram_id == telegram_id))
-    user = ures.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="user_not_found")
-
-    user.points = int(user.points or 0) + pts
-
-    log.is_claimed = True
-    log.claimed_at = datetime.utcnow()
-    log.points = int(DAILY_TASK_DEFS[task_key]["points"])
-    log.points_claimed = int(pts)
-    # keep meta for backward compatibility/analytics
-    meta = log.meta or {}
-    meta["points_claimed"] = int(pts)
-    log.meta = meta
-
-    await session.commit()
-
-    # After claim, bonus_complete may become available
-    await session.begin()
-    await daily_refresh_bonus_complete(session, telegram_id, day)
-    await session.commit()
-
-    return {"ok": True, "task_key": task_key, "points_claimed": pts, "user_points": user.points}
-
 async def create_user_with_referral(
     telegram_id: int,
     username: str | None,
@@ -859,12 +696,6 @@ async def create_user_with_referral(
             )
         )
 
-        await session.commit()
-        # daily tasks: roulette spin
-        await daily_apply_event(session, tid, "spin_roulette")
-        await session.commit()
-        # daily tasks: conversion
-        await daily_apply_event(session, tid, "convert_any")
         await session.commit()
         await session.refresh(user)
         logger.info("✅ New user created: %s", telegram_id)
@@ -2402,8 +2233,7 @@ async def notify_admin(text: str) -> None:
 # MINI APP (WEBAPP HTML)
 # -----------------------------------------------------------------------------
 def get_webapp_html() -> str:
-    html = r"""
-<!DOCTYPE html>
+    html = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
@@ -3119,10 +2949,6 @@ function esc(s){
       rouletteCooldownTick: 0,
       claim: {open:false, claim_id:null, claim_code:null, status:null, prize_label:null, data:null, step:1, form:{full_name:"", phone:"", country:"", city:"", address_line:"", postal_code:"", comment:""}},
       inventoryOpen:false,
-      dailySheet:{open:false},
-      daily:null,
-      dailyLoading:false,
-      dailyMsg:"",
       inventory:null,
       invMsg:"",
       q:"",
@@ -3131,6 +2957,11 @@ function esc(s){
       searchLastQ: "",
       // discoverJump: куда прокрутить на экране "Поиск" (brands/categories/products)
       discoverJump:null,
+      // Daily tasks (isolated; must never break UI)
+      dailyOpen:false,
+      daily:null,
+      dailyMsg:"",
+      dailyBusy:false,
       msg:"",
       busy:false
     };
@@ -3339,58 +3170,6 @@ function esc(s){
       return fetchJson(url + sep + bust, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{})});
     }
 
-async function dailyEvent(event, payload={}){
-  if(!tgUserId) return;
-  try{
-    await apiPost("/api/daily/event", {telegram_id: tgUserId, event, payload});
-  }catch(e){}
-}
-
-async function loadDailyTasks(){
-  if(!tgUserId) return;
-  state.dailyLoading = true; state.dailyMsg = ""; renderDailySheet();
-  try{
-    const d = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
-    state.daily = d;
-  }catch(e){
-    state.dailyMsg = "❌ "+(e.message||"Ошибка");
-  }finally{
-    state.dailyLoading = false;
-    renderDailySheet();
-  }
-}
-
-function openDaily(){
-  state.dailySheet.open = true;
-  render();
-  loadDailyTasks();
-  dailyEvent("open_daily");
-}
-
-function closeDaily(){
-  state.dailySheet.open = false;
-  render();
-}
-
-async function claimDaily(taskKey){
-  if(!tgUserId || state.busy) return;
-  state.busy = true; state.dailyMsg=""; renderDailySheet();
-  try{
-    const r = await apiPost("/api/daily/claim", {telegram_id: tgUserId, task_key: taskKey});
-    // обновим баланс
-    try{ await refreshUser(); }catch(e){}
-    state.dailyMsg = "✅ +" + (r.points_added||0);
-    await loadDailyTasks();
-    render();
-  }catch(e){
-    state.dailyMsg = "❌ "+(e.message||"Ошибка");
-  }finally{
-    state.busy = false;
-    renderDailySheet();
-  }
-}
-
-
     async function refreshUser(){
       if(!tgUserId) return;
       try{
@@ -3454,6 +3233,7 @@ async function claimDaily(taskKey){
 
     async function openInventory(){
       state.inventoryOpen = true;
+      try{ dailyEvent('open_inventory'); }catch(e){}
       state.invMsg = "";
       render();
       if(!tgUserId) return;
@@ -3490,6 +3270,7 @@ async function claimDaily(taskKey){
 
     async function openПрофиль(view){
       state.profileOpen = true;
+      try{ dailyEvent('open_profile'); }catch(e){}
       state.profileView = view || "menu";
       render();
       await Promise.all([loadRaffleStatus(), loadRouletteHistory(), loadRouletteRecent()]);
@@ -3507,6 +3288,7 @@ async function claimDaily(taskKey){
       try{
         const d = await apiPost("/api/raffle/buy_ticket", {telegram_id: tgUserId, qty: 1});
         state.msg = "✅ Билет куплен. Твоих билетов: "+d.ticket_count;
+        try{ dailyEvent('spin_roulette'); }catch(e){}
         await refreshUser();
         await loadRaffleStatus();
         haptic("light");
@@ -3821,7 +3603,6 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
           state.claim.step = 1;
         }catch(e){}
         renderПрофильSheet();
-      renderDailySheet();
       })();
     }
 
@@ -3848,8 +3629,7 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
             state.rouletteStatus.can_spin = state.rouletteStatus.can_spin_time && !!state.rouletteStatus.enough_points;
             state.rouletteCooldownTick = (state.rouletteCooldownTick||0)+1;
             // rerender only if roulette screen visible
-            if(state.profileView==="roulette"){ renderПрофильSheet();
-      renderDailySheet(); }
+            if(state.profileView==="roulette"){ renderПрофильSheet(); }
           }
         }catch(e){}
       }, 1000);
@@ -3859,7 +3639,6 @@ async function spinRouletteLux(){
       if(!tgUserId || state.busy) return;
       state.busy = true; state.msg=""; state.rouletteWheel.overlay=false;
       renderПрофильSheet();
-      renderDailySheet();
 
       // IMPORTANT: no "fake spins"
       // We do NOT start wheel animation until the server confirms the spin.
@@ -3876,7 +3655,6 @@ async function spinRouletteLux(){
         state.msg = "❌ "+(err && err.message ? err.message : "Ошибка");
         await updateRouletteStatus();
         renderПрофильSheet();
-      renderDailySheet();
         return;
       }
 
@@ -3919,7 +3697,6 @@ async function spinRouletteLux(){
         // refresh user / history / recent
         await Promise.all([refreshUser(), loadRaffleStatus(), loadRouletteHistory(), loadRouletteRecent(), updateRouletteStatus()]);
         renderПрофильSheet();
-      renderDailySheet();
         // popup light
         try{
           if(tg && tg.HapticFeedback && key==="dior_palette"){
@@ -3936,7 +3713,6 @@ async function spinRouletteLux(){
       // IMPORTANT: This is the "Забрать" flow.
       // No conversion confirmation here — conversion has its own button and confirmation.
       state.busy = true; renderПрофильSheet();
-      renderDailySheet();
       try{
         const d = await apiPost("/api/roulette/claim/create", {telegram_id: tgUserId, spin_id: resp.spin_id});
         haptic("medium");
@@ -3946,7 +3722,6 @@ async function spinRouletteLux(){
         state.busy = false;
         state.msg = "❌ "+(e.message||"Ошибка");
         renderПрофильSheet();
-      renderDailySheet();
       }
     }
 
@@ -3962,7 +3737,6 @@ async function spinRouletteLux(){
       if(!ok) return;
 
       state.busy = true; renderПрофильSheet();
-      renderDailySheet();
       try{
         const d = await apiPost("/api/roulette/convert", {telegram_id: tgUserId, spin_id: resp.spin_id});
         state.msg = "✅ Конвертировано: +"+d.converted_value;
@@ -3976,7 +3750,6 @@ async function spinRouletteLux(){
         state.rouletteWheel.prize = null;
         state.rouletteWheel.overlay = false;
         renderПрофильSheet();
-      renderDailySheet();
       }
     }
 
@@ -3984,7 +3757,6 @@ async function spinRouletteLux(){
       state.rouletteWheel.prize = null;
       state.rouletteWheel.overlay = false;
       renderПрофильSheet();
-      renderDailySheet();
     }
 
     // Rendering helpers
@@ -3992,7 +3764,7 @@ async function spinRouletteLux(){
       const tagTitle = "#"+((post.tags && post.tags[0]) ? post.tags[0] : "post");
       const wrap = el("div", full ? "card2" : "miniCard");
       wrap.style.cursor = "pointer";
-      wrap.addEventListener("click", ()=>{ haptic(); openLink(post.url); });
+      wrap.addEventListener("click", ()=>{ haptic(); try{ dailyEvent('open_post', {message_id: post.message_id}); }catch(e){} openLink(post.url); });
 
       const tw = el("div","thumbWrap");
       if(full) tw.style.aspectRatio = "16 / 9";
@@ -4078,7 +3850,7 @@ async function spinRouletteLux(){
       actions.style.gap="10px";
 
       const openCh = el("div","btn");
-      openCh.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); openLink("https://t.me/"+CHANNEL); });
+      openCh.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); dailyEvent('open_channel'); openLink("https://t.me/"+CHANNEL); });
       openCh.appendChild(el("div",null,'<div class="btnTitle">↩️ В канал</div><div class="btnSub">Вернуться в ленту Natural Sense</div>'));
       openCh.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
       actions.appendChild(openCh);
@@ -4265,6 +4037,7 @@ function renderПоиск(main){
       try{
         const arr = await apiGet("/api/search?q="+encodeURIComponent(q), { signal: searchAbortController.signal });
         state.searchResults = Array.isArray(arr) ? arr : [];
+        try{ dailyEvent('use_search', {q:q}); }catch(e){}
       }catch(e){
         // если отменили — тихо выходим
         if(e && (e.name === "AbortError" || (""+e).includes("AbortError"))){
@@ -4408,25 +4181,160 @@ function renderБонусы(main){
       t4.appendChild(el("div","tileTitle","💎 Челленджи"));
       t4.appendChild(el("div","tileSub","Ежедневная мотивация"));
 
-      
+
+
       const t5 = el("div","tile");
       t5.addEventListener("click", ()=>{ haptic(); openDaily(); });
       t5.appendChild(el("div","tileTitle","🎯 Daily бонусы"));
-      t5.appendChild(el("div","tileSub","Задания на +400 в день"));
+      t5.appendChild(el("div","tileSub","Задания на +400/день"));
 
-      grid.appendChild(t1);grid.appendChild(t2);grid.appendChild(t3);grid.appendChild(t4);grid.appendChild(t5);
-
+            grid.appendChild(t1);grid.appendChild(t2);grid.appendChild(t3);grid.appendChild(t4);grid.appendChild(t5);
       wrap.appendChild(grid);
 
       wrap.appendChild(el("div","hr"));
       const openCh = el("div","btn");
-      openCh.addEventListener("click", ()=>{ haptic(); openLink("https://t.me/"+CHANNEL); });
+      openCh.addEventListener("click", ()=>{ haptic(); dailyEvent('open_channel'); openLink("https://t.me/"+CHANNEL); });
       openCh.appendChild(el("div",null,'<div class="btnTitle">↩️ В канал</div><div class="btnSub">Natural Sense feed</div>'));
       openCh.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
       wrap.appendChild(openCh);
 
       main.appendChild(wrap);
     }
+
+
+// -----------------------------------------------------------------------
+// DAILY TASKS (isolated module: must not break main UI)
+// -----------------------------------------------------------------------
+async function dailyEvent(event, data){
+  try{
+    if(!tgUserId) return;
+    await apiPost("/api/daily/event", {telegram_id: tgUserId, event: event, data: (data||{})});
+  }catch(e){
+    // silent
+  }
+}
+
+async function openDaily(){
+  state.dailyOpen = true;
+  state.dailyMsg = "";
+  render();
+  try{
+    if(!tgUserId) return;
+    state.daily = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
+  }catch(e){
+    state.daily = null;
+    state.dailyMsg = "❌ Не удалось загрузить задания";
+  }
+  render();
+}
+function closeDaily(){
+  state.dailyOpen = false;
+  state.dailyMsg = "";
+  render();
+}
+
+async function claimDaily(taskKey){
+  if(!tgUserId || state.dailyBusy) return;
+  state.dailyBusy = true;
+  state.dailyMsg = "";
+  render();
+  try{
+    const resp = await apiPost("/api/daily/claim", {telegram_id: tgUserId, task_key: taskKey});
+    await refreshUser();
+    state.daily = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
+    state.dailyMsg = resp.awarded ? ("✅ +" + resp.awarded + " бонусов") : "✅ Уже получено";
+    haptic("light");
+  }catch(e){
+    state.dailyMsg = "❌ "+(e.message||"Ошибка");
+  }finally{
+    state.dailyBusy = false;
+    render();
+  }
+}
+
+function renderDailySheet(){
+  const overlay = document.getElementById("dailyOverlay");
+  if(!overlay) return;
+  overlay.classList.toggle("open", !!state.dailyOpen);
+  const content = document.getElementById("dailyContent");
+  if(!content) return;
+  content.innerHTML = "";
+  if(!state.dailyOpen) return;
+
+  const hdr = el("div","row");
+  hdr.style.alignItems="baseline";
+  hdr.appendChild(el("div","h1","🎯 Daily бонусы"));
+  const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
+  close.addEventListener("click", ()=>{ haptic(); closeDaily(); });
+  hdr.appendChild(close);
+  content.appendChild(hdr);
+
+  if(state.daily && typeof state.daily.claimed_points==="number"){
+    content.appendChild(el("div","sub","Сегодня: "+esc(state.daily.claimed_points)+" / "+esc(state.daily.max_points)+" · осталось "+esc(state.daily.remaining_points)));
+  }else{
+    content.appendChild(el("div","sub","Ежедневные задания, чтобы набрать до 400 бонусов."));
+  }
+
+  if(state.dailyMsg){
+    const m = el("div","sub", esc(state.dailyMsg));
+    m.style.marginTop="10px";
+    content.appendChild(m);
+  }
+
+  if(!state.daily){
+    const b = el("div","sub","Загрузка…");
+    b.style.marginTop="12px";
+    content.appendChild(b);
+    return;
+  }
+
+  const list = el("div");
+  list.style.marginTop="12px";
+  list.style.display="grid";
+  list.style.gap="10px";
+
+  const tasks = Array.isArray(state.daily.tasks) ? state.daily.tasks : [];
+  for(const t of tasks){
+    const card = el("div","card2");
+    const row = el("div","row");
+    const left = el("div");
+    left.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">'+esc(t.icon||"🎯")+' '+esc(t.title)+'</div>'));
+    let sub = "";
+    if((t.need||1) > 1){
+      sub = (t.progress||0) + " / " + t.need;
+    }else{
+      sub = t.claimed ? "Получено" : (t.done ? "Выполнено" : "Не выполнено");
+    }
+    left.appendChild(el("div","sub", esc(sub)));
+    row.appendChild(left);
+
+    const pill = el("div","pill","💎 +"+esc(t.points));
+    row.appendChild(pill);
+
+    card.appendChild(row);
+
+    const btnRow = el("div");
+    btnRow.style.marginTop="10px";
+    btnRow.style.display="grid";
+    btnRow.style.gridTemplateColumns="1fr";
+    btnRow.style.gap="8px";
+
+    const btn = el("div","btn");
+    const canClaim = !!t.done && !t.claimed;
+    btn.style.opacity = canClaim ? "1" : "0.55";
+    btn.style.pointerEvents = canClaim ? "auto" : "none";
+    btn.addEventListener("click", ()=>{ haptic(); claimDaily(t.key); });
+    btn.appendChild(el("div",null,'<div class="btnTitle">'+(t.claimed ? "✅ Получено" : (t.done ? "🎁 Забрать" : "🔒 Выполни чтобы забрать"))+'</div><div class="btnSub">'+(t.claimed ? "Награда уже начислена" : (t.done ? "Нажми, чтобы получить бонусы" : "Сначала выполни задание"))+'</div>'));
+    btn.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
+    btnRow.appendChild(btn);
+
+    card.appendChild(btnRow);
+
+    list.appendChild(card);
+  }
+
+  content.appendChild(list);
+}
 
     function renderPostsSheet(){
       const overlay = document.getElementById("postsOverlay");
@@ -4514,6 +4422,7 @@ function renderБонусы(main){
         try{
           const d = await apiPost("/api/inventory/convert_ticket", {telegram_id: tgUserId, qty: haveTickets});
           state.invMsg = "✅ Обмен выполнен: +"+d.added_points+" баллов";
+          try{ dailyEvent('convert_prize'); }catch(e){}
           await refreshUser();
           state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
           haptic("light");
@@ -4654,78 +4563,6 @@ function renderБонусы(main){
       if(state._cleanup && Array.isArray(state._cleanup)){
         try{ state._cleanup.forEach(fn=>{ try{ fn(); }catch(e){} }); }catch(e){}
       }
-
-
-function renderDailySheet(){
-  const o = document.getElementById("dailyOverlay");
-  const c = document.getElementById("dailyContent");
-  if(!o || !c) return;
-  if(!state.dailySheet.open){
-    o.style.display="none";
-    c.innerHTML="";
-    return;
-  }
-  o.style.display="flex";
-  c.innerHTML="";
-
-  c.appendChild(el("div","sheetTitle","🎯 Daily бонусы"));
-  if(state.dailyLoading){
-    c.appendChild(el("div","muted","Загружаю..."));
-    return;
-  }
-  if(state.dailyMsg){
-    const msg = el("div","muted", state.dailyMsg);
-    msg.style.marginTop="10px";
-    c.appendChild(msg);
-  }
-  const d = state.daily;
-  if(!d || !Array.isArray(d.tasks)){
-    c.appendChild(el("div","muted","Нет данных"));
-    return;
-  }
-
-  // progress
-  const prog = el("div","card");
-  const left = Math.max(0, (d.daily_cap||400) - (d.points_claimed||0));
-  prog.appendChild(el("div","row",
-    `<div><div class="h1">Сегодня</div><div class="sub">Можно ещё: <b>+${left}</b> из ${d.daily_cap||400}</div></div>`));
-  c.appendChild(prog);
-
-  const list = el("div");
-  list.style.marginTop="10px";
-
-  for(const t of d.tasks){
-    const item = el("div","card");
-    item.style.marginTop="10px";
-    const top = el("div","row");
-    const leftCol = el("div");
-    leftCol.innerHTML = `<div class="h1" style="font-size:15px">${t.icon||"🎁"} ${t.title||t.key}</div>
-      <div class="sub">${t.desc||""}</div>`;
-    const rightCol = el("div");
-    rightCol.style.textAlign="right";
-    rightCol.innerHTML = `<div style="font-weight:800">+${t.points||0}</div>`;
-    top.appendChild(leftCol); top.appendChild(rightCol);
-    item.appendChild(top);
-
-    const actions = el("div","row");
-    actions.style.marginTop="10px";
-
-    const status = t.claimed ? "🟢 Забрано" : (t.done ? "✅ Выполнено" : "🔒 Не выполнено");
-    actions.appendChild(el("div","sub", status));
-
-    const btn = el("div","pill", t.claimed ? "🟢 Забрано" : (t.done ? "Забрать" : "🔒"));
-    btn.style.cursor = (t.done && !t.claimed) ? "pointer" : "default";
-    btn.style.opacity = (t.done && !t.claimed) ? "1" : "0.55";
-    if(t.done && !t.claimed){ btn.addEventListener("click", ()=>{ haptic(); claimDaily(t.key); }); }
-    actions.appendChild(btn);
-
-    item.appendChild(actions);
-    list.appendChild(item);
-  }
-
-  c.appendChild(list);
-}
-
       state._cleanup = [];
 
       // Stop roulette animations when profile is closed or when we are not on the roulette view
@@ -4800,23 +4637,18 @@ content.appendChild(info);
           b.addEventListener("click", ()=>{ haptic(); onClick(); });
           return b;
         }
-                list.appendChild(menuBtn("👥 Рефералы","Ссылка и бонус +20", ()=>{ state.profileView="referrals"; state.msg=""; renderПрофильSheet();
-      renderDailySheet(); }));
+                list.appendChild(menuBtn("👥 Рефералы","Ссылка и бонус +20", ()=>{ state.profileView="referrals"; state.msg=""; renderПрофильSheet(); }));
 list.appendChild(menuBtn("👜 Моя косметичка","Призы и билеты", ()=>{ state.profileOpen=false; render(); openInventory(); }));
-        list.appendChild(menuBtn("🎁 Розыгрыши","Купить билеты (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet();
-      renderDailySheet(); }));
-        list.appendChild(menuBtn("🎡 Рулетка","Крутить (300)", ()=>{ state.profileView="roulette"; renderПрофильSheet();
-      renderDailySheet(); }));
-        list.appendChild(menuBtn("🧾 История рулетки","Последние спины", ()=>{ state.profileView="history"; renderПрофильSheet();
-      renderDailySheet(); }));
+        list.appendChild(menuBtn("🎁 Розыгрыши","Купить билеты (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet(); }));
+        list.appendChild(menuBtn("🎡 Рулетка","Крутить (300)", ()=>{ state.profileView="roulette"; renderПрофильSheet(); }));
+        list.appendChild(menuBtn("🧾 История рулетки","Последние спины", ()=>{ state.profileView="history"; renderПрофильSheet(); }));
         content.appendChild(list);
       }else{
         const back = el("div","btn");
         back.style.justifyContent="center";
         back.style.fontWeight="900";
         back.textContent = "← Назад";
-        back.addEventListener("click", ()=>{ haptic(); state.profileView="menu"; state.msg=""; renderПрофильSheet();
-      renderDailySheet(); });
+        back.addEventListener("click", ()=>{ haptic(); state.profileView="menu"; state.msg=""; renderПрофильSheet(); });
         content.appendChild(back);
 
                 if(state.profileView==="referrals"){
@@ -4856,7 +4688,6 @@ list.appendChild(menuBtn("👜 Моя косметичка","Призы и би�
               state.msg = "ℹ️ Не удалось скопировать";
             }
             renderПрофильSheet();
-      renderDailySheet();
           });
           content.appendChild(copy);
 
@@ -5032,8 +4863,7 @@ if(state.profileView==="roulette"){
           // ticker
           const ticker = el("div","ticker");
           ticker.style.cursor = "pointer";
-          ticker.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet();
-      renderDailySheet(); });
+          ticker.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet(); });
           const recent = (state.rouletteRecent||[]).map(x=>x.prize_label).filter(Boolean);
           const tickerText = "Последние выигрыши: "+(recent.length?recent.join(" • "):"—");
           const tt = el("div","tickerText", esc(tickerText));
@@ -5046,8 +4876,7 @@ if(state.profileView==="roulette"){
           (state.rouletteHistory||[]).slice(0,10).forEach(it=>{
             const c = el("div","chip", esc((it.prize_label||"").replace("баллов","").trim() || "приз"));
             c.style.cursor="pointer";
-            c.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet();
-      renderDailySheet(); });
+            c.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet(); });
             chips.appendChild(c);
           });
           stage.appendChild(chips);
@@ -5164,8 +4993,7 @@ content.appendChild(wrap);
             const back = el("div","btn");
             back.style.marginTop="12px";
             back.innerHTML = '<div><div class="btnTitle">Назад</div><div class="btnSub">Вернуться</div></div><div style="opacity:0.85">›</div>';
-            back.addEventListener("click", ()=>{ state.profileView="roulette"; renderПрофильSheet();
-      renderDailySheet(); });
+            back.addEventListener("click", ()=>{ state.profileView="roulette"; renderПрофильSheet(); });
             card.appendChild(back);
             content.appendChild(card);
           }else{
@@ -5246,7 +5074,6 @@ content.appendChild(wrap);
               haptic();
               state.claim.step = step-1;
               renderПрофильSheet();
-      renderDailySheet();
             });
 
             const nextStep = el("div","btn");
@@ -5264,20 +5091,14 @@ content.appendChild(wrap);
 
               // simple validation per step
               if(step===1){
-                if((f.full_name||"").trim().length < 2){ state.msg="❌ Укажи имя и фамилию."; renderПрофильSheet();
-      renderDailySheet(); return; }
-                if((f.phone||"").trim().length < 3){ state.msg="❌ Укажи телефон."; renderПрофильSheet();
-      renderDailySheet(); return; }
-                state.claim.step = 2; haptic("light"); renderПрофильSheet();
-      renderDailySheet(); return;
+                if((f.full_name||"").trim().length < 2){ state.msg="❌ Укажи имя и фамилию."; renderПрофильSheet(); return; }
+                if((f.phone||"").trim().length < 3){ state.msg="❌ Укажи телефон."; renderПрофильSheet(); return; }
+                state.claim.step = 2; haptic("light"); renderПрофильSheet(); return;
               }
               if(step===2){
-                if((f.country||"").trim().length < 2){ state.msg="❌ Укажи страну."; renderПрофильSheet();
-      renderDailySheet(); return; }
-                if((f.city||"").trim().length < 1){ state.msg="❌ Укажи город."; renderПрофильSheet();
-      renderDailySheet(); return; }
-                state.claim.step = 3; haptic("light"); renderПрофильSheet();
-      renderDailySheet(); return;
+                if((f.country||"").trim().length < 2){ state.msg="❌ Укажи страну."; renderПрофильSheet(); return; }
+                if((f.city||"").trim().length < 1){ state.msg="❌ Укажи город."; renderПрофильSheet(); return; }
+                state.claim.step = 3; haptic("light"); renderПрофильSheet(); return;
               }
 
               // step 3 submit
@@ -5285,16 +5106,12 @@ content.appendChild(wrap);
               if(!agreeEl || !agreeEl.checked){
                 state.msg="❌ Подтверди корректность данных.";
                 renderПрофильSheet();
-      renderDailySheet();
                 return;
               }
-              if((f.address_line||"").trim().length < 5){ state.msg="❌ Укажи адрес."; renderПрофильSheet();
-      renderDailySheet(); return; }
-              if((f.postal_code||"").trim().length < 2){ state.msg="❌ Укажи индекс."; renderПрофильSheet();
-      renderDailySheet(); return; }
+              if((f.address_line||"").trim().length < 5){ state.msg="❌ Укажи адрес."; renderПрофильSheet(); return; }
+              if((f.postal_code||"").trim().length < 2){ state.msg="❌ Укажи индекс."; renderПрофильSheet(); return; }
 
               state.busy=true; state.msg=""; renderПрофильSheet();
-      renderDailySheet();
               try{
                 await apiPost("/api/roulette/claim/submit", {
                   telegram_id: tgUserId,
@@ -5317,7 +5134,6 @@ content.appendChild(wrap);
               }finally{
                 state.busy=false;
                 renderПрофильSheet();
-      renderDailySheet();
               }
             });
 
@@ -5413,15 +5229,14 @@ if(state.profileView==="history"){
       prS.appendChild(el("div","sheetHandle"));
       const prC = el("div"); prC.id="profileContent";
       prS.appendChild(prC); prO.appendChild(prS); root.appendChild(prO);
-
-      // Daily
-      const dO = el("div","sheetOverlay"); dO.id="dailyOverlay";
-      dO.addEventListener("click", (e)=>{ if(e.target===dO){ haptic(); closeDaily(); }});
-      const dS = el("div","sheet");
-      dS.addEventListener("click",(e)=>e.stopPropagation());
-      dS.appendChild(el("div","sheetHandle"));
-      const dC = el("div"); dC.id="dailyContent";
-      dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
+// Daily
+const dO = el("div","sheetOverlay"); dO.id="dailyOverlay";
+dO.addEventListener("click", (e)=>{ if(e.target===dO){ haptic(); closeDaily(); }});
+const dS = el("div","sheet");
+dS.addEventListener("click",(e)=>e.stopPropagation());
+dS.appendChild(el("div","sheetHandle"));
+const dC = el("div"); dC.id="dailyContent";
+dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
 
     }
 
@@ -5449,7 +5264,6 @@ if(state.profileView==="history"){
       renderPostsSheet();
       renderInventorySheet();
       renderПрофильSheet();
-      renderDailySheet();
     }
 
     showSplash();
@@ -5462,6 +5276,7 @@ if(state.profileView==="history"){
         try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
       }
       await Promise.all([refreshUser(), loadBotUsername()]);
+      try{ await dailyEvent('open_miniapp'); }catch(e){}
       await loadЖурналBlocks();
       render();
       hideSplash();
@@ -5914,9 +5729,6 @@ def _naive_utc_now() -> datetime:
 def _naive_utc_midnight(dt: datetime) -> datetime:
     return datetime(dt.year, dt.month, dt.day)
 
-
-
-
 @app.get("/api/referrals")
 async def api_referrals(telegram_id: int):
     """
@@ -6060,68 +5872,48 @@ class BuyTicketResp(BaseModel):
     ticket_count: int
 
 
+
+
+# -----------------------------------------------------------------------------
+# DAILY TASKS API (Mini App)
+# -----------------------------------------------------------------------------
+class DailyTaskItem(BaseModel):
+    key: str
+    title: str
+    points: int
+    icon: str = "🎯"
+    need: int = 1
+    progress: int = 0
+    done: bool = False
+    claimed: bool = False
+
+
 class DailyTasksResp(BaseModel):
     day: str
-    cap: int
-    claimed_total: int
-    remaining_cap: int
-    seconds_to_reset: int
-    tasks: list[dict[str, Any]]
+    max_points: int = DAILY_MAX_POINTS_PER_DAY
+    claimed_points: int = 0
+    remaining_points: int = 0
+    tasks: list[DailyTaskItem]
 
 
 class DailyEventReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    event: str = Field(..., min_length=1, max_length=64)
-    payload: dict[str, Any] = Field(default_factory=dict)
+    telegram_id: int
+    event: str
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class DailyClaimReq(BaseModel):
-    telegram_id: int = Field(..., ge=1)
-    task_key: str = Field(..., min_length=1, max_length=64)
+    telegram_id: int
+    task_key: str
 
 
-
-# -----------------------------------------------------------------------------
-# DAILY TASKS API
-# -----------------------------------------------------------------------------
-@app.get("/api/daily/tasks", response_model=DailyTasksResp)
-async def api_daily_tasks(telegram_id: int):
-    async with async_session_maker() as session:
-        # Ensure user exists
-        ures = await session.execute(select(User).where(User.telegram_id == telegram_id))
-        user = ures.scalar_one_or_none()
-        if user is None:
-            # create minimal user (first_name/username unknown from WebApp)
-            user = User(telegram_id=telegram_id, points=10)
-            session.add(user)
-            await session.commit()
-        data = await daily_get_tasks(session, telegram_id)
-        return data
-
-
-@app.post("/api/daily/event")
-async def api_daily_event(req: DailyEventReq):
-    async with async_session_maker() as session:
-        # Ensure user exists
-        ures = await session.execute(select(User).where(User.telegram_id == req.telegram_id))
-        user = ures.scalar_one_or_none()
-        if user is None:
-            user = User(telegram_id=req.telegram_id, points=10)
-            session.add(user)
-            await session.commit()
-        # Apply event
-        await daily_apply_event(session, req.telegram_id, req.event, req.payload)
-        await session.commit()
-        return {"ok": True}
-
-
-@app.post("/api/daily/claim")
-async def api_daily_claim(req: DailyClaimReq):
-    async with async_session_maker() as session:
-        res = await daily_claim_task(session, req.telegram_id, req.task_key)
-        return res
-
-
+class DailyClaimResp(BaseModel):
+    ok: bool = True
+    task_key: str
+    awarded: int = 0
+    claimed_points: int = 0
+    remaining_points: int = 0
+    user_points: int = 0
 class RaffleStatusResp(BaseModel):
     raffle_id: int
     title: str
@@ -6364,6 +6156,202 @@ async def inventory_api(telegram_id: int):
         "prizes": prizes,
     }
 
+# -----------------------------------------------------------------------------
+# DAILY TASKS API
+# -----------------------------------------------------------------------------
+@app.get("/api/daily/tasks", response_model=DailyTasksResp)
+async def daily_tasks_api(telegram_id: int):
+    tid = int(telegram_id)
+    day = _today_key()
+    task_map = _daily_tasks_map()
+
+    async with async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="user_not_found")
+
+        logs = await _get_daily_logs(session, tid, day)
+
+        # progress counters (stored in meta)
+        post_opened = int((logs.get("open_post").meta or {}).get("count", 0) if logs.get("open_post") else 0)
+
+        items: list[DailyTaskItem] = []
+        for cfg in DAILY_TASKS:
+            key = cfg["key"]
+            need = int(cfg.get("need", 1))
+            lg = logs.get(key)
+            done = bool(lg) and (lg.status in ("done", "claimed"))
+            claimed = bool(lg) and (lg.status == "claimed")
+            progress = 0
+            if key == "open_post":
+                progress = min(post_opened, need)
+                done = progress >= need and (lg is not None)
+            if cfg.get("special"):
+                # bonus_day becomes done only if all base tasks claimed
+                done = await _can_unlock_bonus_day(task_map, logs)
+                claimed = bool(lg) and (lg.status == "claimed")
+                progress = 1 if done else 0
+                need = 1
+
+            items.append(
+                DailyTaskItem(
+                    key=key,
+                    title=str(cfg["title"]),
+                    points=int(cfg["points"]),
+                    icon=str(cfg.get("icon") or "🎯"),
+                    need=need,
+                    progress=progress,
+                    done=done,
+                    claimed=claimed,
+                )
+            )
+
+        claimed_points = await _daily_points_claimed(session, tid, day)
+        remaining = max(0, DAILY_MAX_POINTS_PER_DAY - claimed_points)
+        return DailyTasksResp(
+            day=day,
+            claimed_points=claimed_points,
+            remaining_points=remaining,
+            tasks=items,
+        )
+
+
+@app.post("/api/daily/event")
+async def daily_event_api(req: DailyEventReq):
+    tid = int(req.telegram_id)
+    day = _today_key()
+    ev = (req.event or "").strip().lower()
+
+    async with async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="user_not_found")
+
+        # NOTE: client events are best-effort; we still cap rewards on claim.
+        if ev == "open_miniapp":
+            await _mark_daily_done(session, tid, day, "open_miniapp")
+        elif ev == "open_channel":
+            await _mark_daily_done(session, tid, day, "open_channel")
+        elif ev == "use_search":
+            await _mark_daily_done(session, tid, day, "use_search", {"q": (req.data or {}).get("q", "")[:64]})
+        elif ev == "open_inventory":
+            await _mark_daily_done(session, tid, day, "open_inventory")
+        elif ev == "open_profile":
+            await _mark_daily_done(session, tid, day, "open_profile")
+        elif ev == "spin_roulette":
+            await _mark_daily_done(session, tid, day, "spin_roulette")
+        elif ev == "convert_prize":
+            await _mark_daily_done(session, tid, day, "convert_prize")
+        elif ev == "open_post":
+            # count up to need (3)
+            logs = await _get_daily_logs(session, tid, day)
+            lg = logs.get("open_post")
+            cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
+            cnt = min(3, cnt + 1)
+            await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
+        else:
+            # ignore unknown events
+            return {"ok": True, "ignored": True}
+
+        await session.commit()
+        return {"ok": True}
+
+
+@app.post("/api/daily/claim", response_model=DailyClaimResp)
+async def daily_claim_api(req: DailyClaimReq):
+    tid = int(req.telegram_id)
+    key = (req.task_key or "").strip()
+    day = _today_key()
+    task_map = _daily_tasks_map()
+    cfg = task_map.get(key)
+    if not cfg:
+        raise HTTPException(status_code=400, detail="unknown_task")
+
+    async with async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="user_not_found")
+
+        logs = await _get_daily_logs(session, tid, day)
+        lg = logs.get(key)
+
+        # determine if task is done server-side
+        done = False
+        if cfg.get("special"):
+            done = await _can_unlock_bonus_day(task_map, logs)
+        elif key == "open_post":
+            cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
+            done = cnt >= int(cfg.get("need", 1))
+        else:
+            done = lg is not None
+
+        if not done:
+            raise HTTPException(status_code=400, detail="task_not_done")
+        if lg and lg.status == "claimed":
+            claimed_points = await _daily_points_claimed(session, tid, day)
+            remaining = max(0, DAILY_MAX_POINTS_PER_DAY - claimed_points)
+            return DailyClaimResp(
+                ok=True,
+                task_key=key,
+                awarded=0,
+                claimed_points=claimed_points,
+                remaining_points=remaining,
+                user_points=int(user.points or 0),
+            )
+
+        claimed_points = await _daily_points_claimed(session, tid, day)
+        remaining = max(0, DAILY_MAX_POINTS_PER_DAY - claimed_points)
+        award = int(cfg["points"])
+        if award > remaining:
+            award = remaining
+        if award <= 0:
+            raise HTTPException(status_code=400, detail="daily_cap_reached")
+
+        now = datetime.utcnow()
+        if not lg:
+            lg = DailyTaskLog(
+                telegram_id=tid,
+                day=day,
+                task_key=key,
+                status="claimed",
+                done_at=now,
+                claimed_at=now,
+                points=award,
+                meta={},
+            )
+        else:
+            lg.status = "claimed"
+            lg.claimed_at = now
+            lg.points = award
+        session.add(lg)
+
+        user.points = int(user.points or 0) + award
+        _recalc_tier(user)
+        session.add(user)
+
+        session.add(
+            PointTransaction(
+                telegram_id=tid,
+                type=f"daily_task:{key}",
+                delta=award,
+                meta={"day": day, "task_key": key},
+            )
+        )
+
+        await session.commit()
+
+        new_claimed = claimed_points + award
+        new_remaining = max(0, DAILY_MAX_POINTS_PER_DAY - new_claimed)
+        return DailyClaimResp(
+            ok=True,
+            task_key=key,
+            awarded=award,
+            claimed_points=new_claimed,
+            remaining_points=new_remaining,
+            user_points=int(user.points or 0),
+        )
+
+
 
 @app.post("/api/inventory/convert_ticket", response_model=ConvertTicketsResp)
 async def inventory_convert_ticket(req: ConvertTicketsReq):
@@ -6400,10 +6388,6 @@ async def inventory_convert_ticket(req: ConvertTicketsReq):
                     meta={"qty": qty, "rate": int(TICKET_CONVERT_RATE)},
                 )
             )
-
-            # daily tasks: conversion
-            await daily_apply_event(session, tid, "convert_any")
-
 
             points_now = int(user.points or 0)
             tickets_now = int(ticket_row.count or 0)
@@ -6478,10 +6462,6 @@ async def inventory_convert_prize(req: ConvertPrizeReq):
                     meta={"claim_code": code, "value": added},
                 )
             )
-
-            # daily tasks: conversion
-            await daily_apply_event(session, tid, "convert_any")
-
 
             points_now = int(user.points or 0)
 
