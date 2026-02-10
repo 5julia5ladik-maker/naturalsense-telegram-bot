@@ -69,6 +69,8 @@ BOT_TOKEN = env_get("BOT_TOKEN")
 BOT_USERNAME = (env_get("BOT_USERNAME", "") or "").strip().lstrip("@")
 PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
 CHANNEL_USERNAME = env_get("CHANNEL_USERNAME", "NaturalSense") or "NaturalSense"
+CHANNEL_CHAT_ID = (env_get("CHANNEL_CHAT_ID", "") or "").strip()  # optional: -100... or @channelusername
+CHANNEL_INVITE_URL = (env_get("CHANNEL_INVITE_URL", "") or "").strip()  # optional: https://t.me/+...
 DATABASE_URL = env_get("DATABASE_URL", "sqlite+aiosqlite:///./ns.db") or "sqlite+aiosqlite:///./ns.db"
 ADMIN_CHAT_ID = int(env_get("ADMIN_CHAT_ID", "5443870760") or "5443870760")
 
@@ -1247,6 +1249,30 @@ def build_start_inline_kb() -> InlineKeyboardMarkup:
         [[InlineKeyboardButton("↩️ В канал", url=f"https://t.me/{CHANNEL_USERNAME}")]]
     )
 
+def get_channel_chat_id() -> str:
+    """chat_id for Bot API (preferred: CHANNEL_CHAT_ID; fallback: @CHANNEL_USERNAME)."""
+    if CHANNEL_CHAT_ID:
+        return CHANNEL_CHAT_ID
+    u = (CHANNEL_USERNAME or "").strip().lstrip("@")
+    if not u:
+        raise RuntimeError("CHANNEL_USERNAME is empty and CHANNEL_CHAT_ID not set")
+    return f"@{u}"
+
+
+def get_channel_url() -> str:
+    """Public URL to the channel (preferred: invite link)."""
+    if CHANNEL_INVITE_URL:
+        return CHANNEL_INVITE_URL
+    u = (CHANNEL_USERNAME or "").strip().lstrip("@")
+    return f"https://t.me/{u}"
+
+
+def get_bot_deeplink() -> Optional[str]:
+    u = (BOT_USERNAME or "").strip().lstrip("@")
+    if not u:
+        return None
+    return f"https://t.me/{u}?start=channel"
+
 
 async def set_keyboard_silent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Telegram показывает ReplyKeyboard только через сообщение.
@@ -1955,6 +1981,68 @@ async def cmd_admin_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+
+async def cmd_pin_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only: posts a pinned 'menu' message in the channel with buttons to bot+channel."""
+    user = update.effective_user
+    chat = update.effective_chat
+    if not user or not is_admin(user.id):
+        return
+    if not chat or chat.type != "private":
+        try:
+            await update.message.reply_text("Напиши /pin_post мне в ЛС (private), чтобы я мог закрепить пост в канале.")
+        except Exception:
+            pass
+        return
+
+    bot_link = get_bot_deeplink()
+    if not bot_link:
+        await update.message.reply_text("❌ Не задан BOT_USERNAME. Добавь ENV BOT_USERNAME (без @), иначе кнопку 'Войти в бот' сделать нельзя.")
+        return
+
+    channel_chat_id = get_channel_chat_id()
+    channel_url = get_channel_url()
+
+    # Текст поста можно передать аргументами: /pin_post ваш текст...
+    custom = " ".join(context.args).strip() if context.args else ""
+    post_text = custom or (
+        "📰 Natural Sense — журнал косметических новинок\n\n"
+        "• Смотри посты прямо в канале\n"
+        "• Открывай Mini App, копи бонусы и участвуй в розыгрышах\n\n"
+        "Жми кнопку ниже 👇"
+    )
+
+    kb = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🚀 Войти в бот", url=bot_link)],
+            [InlineKeyboardButton("↩️ Войти в канал", url=channel_url)],
+        ]
+    )
+
+    try:
+        sent = await context.bot.send_message(
+            chat_id=channel_chat_id,
+            text=post_text,
+            reply_markup=kb,
+            disable_web_page_preview=True,
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Не смог отправить пост в канал. Проверь что бот админ в канале и CHANNEL_CHAT_ID/CHANNEL_USERNAME. Ошибка: {e}")
+        return
+
+    try:
+        await context.bot.pin_chat_message(
+            chat_id=channel_chat_id,
+            message_id=sent.message_id,
+            disable_notification=True,
+        )
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Пост отправил, но закрепить не смог. Дай боту право 'Закреплять сообщения'. Ошибка: {e}")
+        return
+
+    await update.message.reply_text("✅ Готово: пост отправлен в канал и закреплён. Если нужно обновить — просто вызови /pin_post ещё раз.")
+
+
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not q:
@@ -2282,6 +2370,7 @@ async def start_telegram_bot():
     tg_app.add_handler(CommandHandler("admin_user", cmd_admin_user))
     tg_app.add_handler(CommandHandler("admin_add", cmd_admin_add))
     tg_app.add_handler(CommandHandler("find", cmd_admin_find))
+    tg_app.add_handler(CommandHandler("pin_post", cmd_pin_post))
 
     tg_app.add_handler(CallbackQueryHandler(on_callback))
     tg_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_text_button))
