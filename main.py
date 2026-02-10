@@ -3422,6 +3422,10 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
     }
 
     function openClaimForm(claim_id, claim_code, prize_label){
+      // Open profile sheet and switch to claim flow (works from Cosmetics/Inventory too)
+      state.profileOpen = true;
+      state.inventoryOpen = false;
+      state.invMsg = "";
       state.profileView = "claim";
       state.claim.open = true;
       state.claim.claim_id = claim_id;
@@ -3430,6 +3434,7 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
       state.claim.status = "draft";
             state.claim.step = 1;
       state.claim.form = {full_name:"", phone:"", country:"", city:"", address_line:"", postal_code:"", comment:""};
+      render();
       renderПрофильSheet();
       // load claim data
       (async ()=>{
