@@ -2402,7 +2402,8 @@ async def notify_admin(text: str) -> None:
 # MINI APP (WEBAPP HTML)
 # -----------------------------------------------------------------------------
 def get_webapp_html() -> str:
-    html = r"""<!DOCTYPE html>
+    html = r"""
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
@@ -3363,7 +3364,7 @@ function openDaily(){
   state.dailySheet.open = true;
   render();
   loadDailyTasks();
-  dailyEvent("open_rewards"); // entering rewards screen is already tracked elsewhere, but harmless
+  dailyEvent("open_daily");
 }
 
 function closeDaily(){
@@ -3376,12 +3377,13 @@ async function claimDaily(taskKey){
   state.busy = true; state.dailyMsg=""; renderDailySheet();
   try{
     const r = await apiPost("/api/daily/claim", {telegram_id: tgUserId, task_key: taskKey});
-    state.dailyMsg = "✅ +" + (r.points_claimed||0) + " баллов";
-    await refreshUser();
+    // обновим баланс
+    try{ await refreshUser(); }catch(e){}
+    state.dailyMsg = "✅ +" + (r.points_added||0);
     await loadDailyTasks();
-    haptic("success");
+    render();
   }catch(e){
-    state.dailyMsg = "❌ " + (e.message||"Ошибка");
+    state.dailyMsg = "❌ "+(e.message||"Ошибка");
   }finally{
     state.busy = false;
     renderDailySheet();
@@ -3416,7 +3418,6 @@ async function claimDaily(taskKey){
 
     async function openPosts(tag, title){
       state.postsSheet.open = true;
-      if(tag) dailyEvent("open_brand_tag", {tag});
       state.postsSheet.tag = tag;
       state.postsSheet.title = title || ("#"+tag);
       state.posts = [];
@@ -3453,7 +3454,6 @@ async function claimDaily(taskKey){
 
     async function openInventory(){
       state.inventoryOpen = true;
-      dailyEvent("open_inventory");
       state.invMsg = "";
       render();
       if(!tgUserId) return;
@@ -3801,6 +3801,7 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
       state.claim.form = {full_name:"", phone:"", country:"", city:"", address_line:"", postal_code:"", comment:""};
       render();
       renderПрофильSheet();
+      renderDailySheet();
       // load claim data
       (async ()=>{
         try{
@@ -3820,6 +3821,7 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
           state.claim.step = 1;
         }catch(e){}
         renderПрофильSheet();
+      renderDailySheet();
       })();
     }
 
@@ -3846,7 +3848,8 @@ function easeOutCubic(t){ return 1 - Math.pow(1-t,3); }
             state.rouletteStatus.can_spin = state.rouletteStatus.can_spin_time && !!state.rouletteStatus.enough_points;
             state.rouletteCooldownTick = (state.rouletteCooldownTick||0)+1;
             // rerender only if roulette screen visible
-            if(state.profileView==="roulette"){ renderПрофильSheet(); }
+            if(state.profileView==="roulette"){ renderПрофильSheet();
+      renderDailySheet(); }
           }
         }catch(e){}
       }, 1000);
@@ -3856,6 +3859,7 @@ async function spinRouletteLux(){
       if(!tgUserId || state.busy) return;
       state.busy = true; state.msg=""; state.rouletteWheel.overlay=false;
       renderПрофильSheet();
+      renderDailySheet();
 
       // IMPORTANT: no "fake spins"
       // We do NOT start wheel animation until the server confirms the spin.
@@ -3872,6 +3876,7 @@ async function spinRouletteLux(){
         state.msg = "❌ "+(err && err.message ? err.message : "Ошибка");
         await updateRouletteStatus();
         renderПрофильSheet();
+      renderDailySheet();
         return;
       }
 
@@ -3914,6 +3919,7 @@ async function spinRouletteLux(){
         // refresh user / history / recent
         await Promise.all([refreshUser(), loadRaffleStatus(), loadRouletteHistory(), loadRouletteRecent(), updateRouletteStatus()]);
         renderПрофильSheet();
+      renderDailySheet();
         // popup light
         try{
           if(tg && tg.HapticFeedback && key==="dior_palette"){
@@ -3930,6 +3936,7 @@ async function spinRouletteLux(){
       // IMPORTANT: This is the "Забрать" flow.
       // No conversion confirmation here — conversion has its own button and confirmation.
       state.busy = true; renderПрофильSheet();
+      renderDailySheet();
       try{
         const d = await apiPost("/api/roulette/claim/create", {telegram_id: tgUserId, spin_id: resp.spin_id});
         haptic("medium");
@@ -3939,6 +3946,7 @@ async function spinRouletteLux(){
         state.busy = false;
         state.msg = "❌ "+(e.message||"Ошибка");
         renderПрофильSheet();
+      renderDailySheet();
       }
     }
 
@@ -3954,6 +3962,7 @@ async function spinRouletteLux(){
       if(!ok) return;
 
       state.busy = true; renderПрофильSheet();
+      renderDailySheet();
       try{
         const d = await apiPost("/api/roulette/convert", {telegram_id: tgUserId, spin_id: resp.spin_id});
         state.msg = "✅ Конвертировано: +"+d.converted_value;
@@ -3967,6 +3976,7 @@ async function spinRouletteLux(){
         state.rouletteWheel.prize = null;
         state.rouletteWheel.overlay = false;
         renderПрофильSheet();
+      renderDailySheet();
       }
     }
 
@@ -3974,6 +3984,7 @@ async function spinRouletteLux(){
       state.rouletteWheel.prize = null;
       state.rouletteWheel.overlay = false;
       renderПрофильSheet();
+      renderDailySheet();
     }
 
     // Rendering helpers
@@ -3981,7 +3992,7 @@ async function spinRouletteLux(){
       const tagTitle = "#"+((post.tags && post.tags[0]) ? post.tags[0] : "post");
       const wrap = el("div", full ? "card2" : "miniCard");
       wrap.style.cursor = "pointer";
-      wrap.addEventListener("click", ()=>{ haptic(); dailyEvent("open_post", {message_id: post.message_id}); openLink(post.url); });
+      wrap.addEventListener("click", ()=>{ haptic(); openLink(post.url); });
 
       const tw = el("div","thumbWrap");
       if(full) tw.style.aspectRatio = "16 / 9";
@@ -4253,7 +4264,6 @@ function renderПоиск(main){
 
       try{
         const arr = await apiGet("/api/search?q="+encodeURIComponent(q), { signal: searchAbortController.signal });
-        dailyEvent("use_search", {q_len: (q||"").length});
         state.searchResults = Array.isArray(arr) ? arr : [];
       }catch(e){
         // если отменили — тихо выходим
@@ -4398,19 +4408,19 @@ function renderБонусы(main){
       t4.appendChild(el("div","tileTitle","💎 Челленджи"));
       t4.appendChild(el("div","tileSub","Ежедневная мотивация"));
 
-
-
-const t5 = el("div","tile");
-t5.addEventListener("click", ()=>{ haptic(); openDaily(); });
-t5.appendChild(el("div","tileTitle","🎯 Daily бонусы"));
-t5.appendChild(el("div","tileSub","Задания до 400/день"));
+      
+      const t5 = el("div","tile");
+      t5.addEventListener("click", ()=>{ haptic(); openDaily(); });
+      t5.appendChild(el("div","tileTitle","🎯 Daily бонусы"));
+      t5.appendChild(el("div","tileSub","Задания на +400 в день"));
 
       grid.appendChild(t1);grid.appendChild(t2);grid.appendChild(t3);grid.appendChild(t4);grid.appendChild(t5);
+
       wrap.appendChild(grid);
 
       wrap.appendChild(el("div","hr"));
       const openCh = el("div","btn");
-      openCh.addEventListener("click", ()=>{ haptic(); dailyEvent("open_channel"); openLink("https://t.me/"+CHANNEL); });
+      openCh.addEventListener("click", ()=>{ haptic(); openLink("https://t.me/"+CHANNEL); });
       openCh.appendChild(el("div",null,'<div class="btnTitle">↩️ В канал</div><div class="btnSub">Natural Sense feed</div>'));
       openCh.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
       wrap.appendChild(openCh);
@@ -4453,73 +4463,6 @@ t5.appendChild(el("div","tileSub","Задания до 400/день"));
       }
       content.appendChild(list);
     }
-
-    
-
-function renderDailySheet(){
-  const overlay = document.getElementById("dailyOverlay");
-  overlay.classList.toggle("open", !!state.dailySheet.open);
-  const content = document.getElementById("dailyContent");
-  content.innerHTML = "";
-  if(!state.dailySheet.open) return;
-
-  const hdr = el("div","row");
-  hdr.style.alignItems="baseline";
-  hdr.appendChild(el("div","h1","🎯 Daily бонусы"));
-  const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
-  close.addEventListener("click", ()=>{ haptic(); closeDaily(); });
-  hdr.appendChild(close);
-  content.appendChild(hdr);
-
-  if(state.dailyMsg){
-    content.appendChild(el("div","sub", esc(state.dailyMsg)));
-  }
-
-  if(state.dailyLoading){
-    content.appendChild(el("div","sub","Загрузка…"));
-    return;
-  }
-  if(!state.daily){
-    content.appendChild(el("div","sub","Нет данных."));
-    return;
-  }
-
-  const info = el("div","sub", `Сегодня: ${esc(state.daily.claimed_total)} / ${esc(state.daily.cap)} · До обновления ~${Math.floor((state.daily.seconds_to_reset||0)/3600)}ч`);
-  content.appendChild(info);
-
-  const list = el("div");
-  list.style.marginTop="12px";
-  list.style.display="grid";
-  list.style.gap="10px";
-
-  for(const t of (state.daily.tasks||[])){
-    const row = el("div","btn");
-    const left = el("div");
-    const title = el("div","btnTitle", esc(t.title));
-    const subParts = [];
-    subParts.push("+"+esc(t.points)+" баллов");
-    if(t.key==="open_3_posts") subParts.push("("+esc(t.count)+"/3)");
-    const st = t.claimed ? "🟢 Забрано" : (t.done ? "✅ Выполнено" : "🔒 Не выполнено");
-    subParts.push(st);
-    const sub = el("div","btnSub", subParts.join(" · "));
-    left.appendChild(title); left.appendChild(sub);
-
-    const right = el("div",null,'<div style="opacity:0.9">›</div>');
-    row.appendChild(left);
-    row.appendChild(right);
-
-    if(t.done && !t.claimed){
-      row.addEventListener("click", ()=>{ haptic(); claimDaily(t.key); });
-      right.innerHTML = '<div class="pill">Забрать</div>';
-    }else{
-      row.addEventListener("click", ()=>{ haptic(); });
-    }
-    list.appendChild(row);
-  }
-
-  content.appendChild(list);
-}
-
 
     function renderInventorySheet(){
       const overlay = document.getElementById("invOverlay");
@@ -4711,6 +4654,78 @@ function renderDailySheet(){
       if(state._cleanup && Array.isArray(state._cleanup)){
         try{ state._cleanup.forEach(fn=>{ try{ fn(); }catch(e){} }); }catch(e){}
       }
+
+
+function renderDailySheet(){
+  const o = document.getElementById("dailyOverlay");
+  const c = document.getElementById("dailyContent");
+  if(!o || !c) return;
+  if(!state.dailySheet.open){
+    o.style.display="none";
+    c.innerHTML="";
+    return;
+  }
+  o.style.display="flex";
+  c.innerHTML="";
+
+  c.appendChild(el("div","sheetTitle","🎯 Daily бонусы"));
+  if(state.dailyLoading){
+    c.appendChild(el("div","muted","Загружаю..."));
+    return;
+  }
+  if(state.dailyMsg){
+    const msg = el("div","muted", state.dailyMsg);
+    msg.style.marginTop="10px";
+    c.appendChild(msg);
+  }
+  const d = state.daily;
+  if(!d || !Array.isArray(d.tasks)){
+    c.appendChild(el("div","muted","Нет данных"));
+    return;
+  }
+
+  // progress
+  const prog = el("div","card");
+  const left = Math.max(0, (d.daily_cap||400) - (d.points_claimed||0));
+  prog.appendChild(el("div","row",
+    `<div><div class="h1">Сегодня</div><div class="sub">Можно ещё: <b>+${left}</b> из ${d.daily_cap||400}</div></div>`));
+  c.appendChild(prog);
+
+  const list = el("div");
+  list.style.marginTop="10px";
+
+  for(const t of d.tasks){
+    const item = el("div","card");
+    item.style.marginTop="10px";
+    const top = el("div","row");
+    const leftCol = el("div");
+    leftCol.innerHTML = `<div class="h1" style="font-size:15px">${t.icon||"🎁"} ${t.title||t.key}</div>
+      <div class="sub">${t.desc||""}</div>`;
+    const rightCol = el("div");
+    rightCol.style.textAlign="right";
+    rightCol.innerHTML = `<div style="font-weight:800">+${t.points||0}</div>`;
+    top.appendChild(leftCol); top.appendChild(rightCol);
+    item.appendChild(top);
+
+    const actions = el("div","row");
+    actions.style.marginTop="10px";
+
+    const status = t.claimed ? "🟢 Забрано" : (t.done ? "✅ Выполнено" : "🔒 Не выполнено");
+    actions.appendChild(el("div","sub", status));
+
+    const btn = el("div","pill", t.claimed ? "🟢 Забрано" : (t.done ? "Забрать" : "🔒"));
+    btn.style.cursor = (t.done && !t.claimed) ? "pointer" : "default";
+    btn.style.opacity = (t.done && !t.claimed) ? "1" : "0.55";
+    if(t.done && !t.claimed){ btn.addEventListener("click", ()=>{ haptic(); claimDaily(t.key); }); }
+    actions.appendChild(btn);
+
+    item.appendChild(actions);
+    list.appendChild(item);
+  }
+
+  c.appendChild(list);
+}
+
       state._cleanup = [];
 
       // Stop roulette animations when profile is closed or when we are not on the roulette view
@@ -4785,18 +4800,23 @@ content.appendChild(info);
           b.addEventListener("click", ()=>{ haptic(); onClick(); });
           return b;
         }
-                list.appendChild(menuBtn("👥 Рефералы","Ссылка и бонус +20", ()=>{ state.profileView="referrals"; state.msg=""; renderПрофильSheet(); }));
+                list.appendChild(menuBtn("👥 Рефералы","Ссылка и бонус +20", ()=>{ state.profileView="referrals"; state.msg=""; renderПрофильSheet();
+      renderDailySheet(); }));
 list.appendChild(menuBtn("👜 Моя косметичка","Призы и билеты", ()=>{ state.profileOpen=false; render(); openInventory(); }));
-        list.appendChild(menuBtn("🎁 Розыгрыши","Купить билеты (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet(); }));
-        list.appendChild(menuBtn("🎡 Рулетка","Крутить (300)", ()=>{ state.profileView="roulette"; renderПрофильSheet(); }));
-        list.appendChild(menuBtn("🧾 История рулетки","Последние спины", ()=>{ state.profileView="history"; renderПрофильSheet(); }));
+        list.appendChild(menuBtn("🎁 Розыгрыши","Купить билеты (500)", ()=>{ state.profileView="raffle"; renderПрофильSheet();
+      renderDailySheet(); }));
+        list.appendChild(menuBtn("🎡 Рулетка","Крутить (300)", ()=>{ state.profileView="roulette"; renderПрофильSheet();
+      renderDailySheet(); }));
+        list.appendChild(menuBtn("🧾 История рулетки","Последние спины", ()=>{ state.profileView="history"; renderПрофильSheet();
+      renderDailySheet(); }));
         content.appendChild(list);
       }else{
         const back = el("div","btn");
         back.style.justifyContent="center";
         back.style.fontWeight="900";
         back.textContent = "← Назад";
-        back.addEventListener("click", ()=>{ haptic(); state.profileView="menu"; state.msg=""; renderПрофильSheet(); });
+        back.addEventListener("click", ()=>{ haptic(); state.profileView="menu"; state.msg=""; renderПрофильSheet();
+      renderDailySheet(); });
         content.appendChild(back);
 
                 if(state.profileView==="referrals"){
@@ -4836,6 +4856,7 @@ list.appendChild(menuBtn("👜 Моя косметичка","Призы и би�
               state.msg = "ℹ️ Не удалось скопировать";
             }
             renderПрофильSheet();
+      renderDailySheet();
           });
           content.appendChild(copy);
 
@@ -5011,7 +5032,8 @@ if(state.profileView==="roulette"){
           // ticker
           const ticker = el("div","ticker");
           ticker.style.cursor = "pointer";
-          ticker.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet(); });
+          ticker.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet();
+      renderDailySheet(); });
           const recent = (state.rouletteRecent||[]).map(x=>x.prize_label).filter(Boolean);
           const tickerText = "Последние выигрыши: "+(recent.length?recent.join(" • "):"—");
           const tt = el("div","tickerText", esc(tickerText));
@@ -5024,7 +5046,8 @@ if(state.profileView==="roulette"){
           (state.rouletteHistory||[]).slice(0,10).forEach(it=>{
             const c = el("div","chip", esc((it.prize_label||"").replace("баллов","").trim() || "приз"));
             c.style.cursor="pointer";
-            c.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet(); });
+            c.addEventListener("click", ()=>{ haptic(); state.profileView="history"; renderПрофильSheet();
+      renderDailySheet(); });
             chips.appendChild(c);
           });
           stage.appendChild(chips);
@@ -5141,7 +5164,8 @@ content.appendChild(wrap);
             const back = el("div","btn");
             back.style.marginTop="12px";
             back.innerHTML = '<div><div class="btnTitle">Назад</div><div class="btnSub">Вернуться</div></div><div style="opacity:0.85">›</div>';
-            back.addEventListener("click", ()=>{ state.profileView="roulette"; renderПрофильSheet(); });
+            back.addEventListener("click", ()=>{ state.profileView="roulette"; renderПрофильSheet();
+      renderDailySheet(); });
             card.appendChild(back);
             content.appendChild(card);
           }else{
@@ -5222,6 +5246,7 @@ content.appendChild(wrap);
               haptic();
               state.claim.step = step-1;
               renderПрофильSheet();
+      renderDailySheet();
             });
 
             const nextStep = el("div","btn");
@@ -5239,14 +5264,20 @@ content.appendChild(wrap);
 
               // simple validation per step
               if(step===1){
-                if((f.full_name||"").trim().length < 2){ state.msg="❌ Укажи имя и фамилию."; renderПрофильSheet(); return; }
-                if((f.phone||"").trim().length < 3){ state.msg="❌ Укажи телефон."; renderПрофильSheet(); return; }
-                state.claim.step = 2; haptic("light"); renderПрофильSheet(); return;
+                if((f.full_name||"").trim().length < 2){ state.msg="❌ Укажи имя и фамилию."; renderПрофильSheet();
+      renderDailySheet(); return; }
+                if((f.phone||"").trim().length < 3){ state.msg="❌ Укажи телефон."; renderПрофильSheet();
+      renderDailySheet(); return; }
+                state.claim.step = 2; haptic("light"); renderПрофильSheet();
+      renderDailySheet(); return;
               }
               if(step===2){
-                if((f.country||"").trim().length < 2){ state.msg="❌ Укажи страну."; renderПрофильSheet(); return; }
-                if((f.city||"").trim().length < 1){ state.msg="❌ Укажи город."; renderПрофильSheet(); return; }
-                state.claim.step = 3; haptic("light"); renderПрофильSheet(); return;
+                if((f.country||"").trim().length < 2){ state.msg="❌ Укажи страну."; renderПрофильSheet();
+      renderDailySheet(); return; }
+                if((f.city||"").trim().length < 1){ state.msg="❌ Укажи город."; renderПрофильSheet();
+      renderDailySheet(); return; }
+                state.claim.step = 3; haptic("light"); renderПрофильSheet();
+      renderDailySheet(); return;
               }
 
               // step 3 submit
@@ -5254,12 +5285,16 @@ content.appendChild(wrap);
               if(!agreeEl || !agreeEl.checked){
                 state.msg="❌ Подтверди корректность данных.";
                 renderПрофильSheet();
+      renderDailySheet();
                 return;
               }
-              if((f.address_line||"").trim().length < 5){ state.msg="❌ Укажи адрес."; renderПрофильSheet(); return; }
-              if((f.postal_code||"").trim().length < 2){ state.msg="❌ Укажи индекс."; renderПрофильSheet(); return; }
+              if((f.address_line||"").trim().length < 5){ state.msg="❌ Укажи адрес."; renderПрофильSheet();
+      renderDailySheet(); return; }
+              if((f.postal_code||"").trim().length < 2){ state.msg="❌ Укажи индекс."; renderПрофильSheet();
+      renderDailySheet(); return; }
 
               state.busy=true; state.msg=""; renderПрофильSheet();
+      renderDailySheet();
               try{
                 await apiPost("/api/roulette/claim/submit", {
                   telegram_id: tgUserId,
@@ -5282,6 +5317,7 @@ content.appendChild(wrap);
               }finally{
                 state.busy=false;
                 renderПрофильSheet();
+      renderDailySheet();
               }
             });
 
@@ -5339,8 +5375,8 @@ if(state.profileView==="history"){
         const n = el("div","navItem"+(state.tab===it.id?" navItemActive":""));
         n.addEventListener("click", ()=>{
           haptic();
-          if(it.id==="profile"){ openПрофиль("menu"); dailyEvent("open_profile"); }
-          else { state.tab = it.id; render(); if(it.id==="rewards"){ dailyEvent("open_rewards"); } }
+          if(it.id==="profile") openПрофиль("menu");
+          else { state.tab = it.id; render(); }
         });
         n.appendChild(el("div","navIcon", it.icon));
         n.appendChild(el("div","navLabel", it.label));
@@ -5377,6 +5413,16 @@ if(state.profileView==="history"){
       prS.appendChild(el("div","sheetHandle"));
       const prC = el("div"); prC.id="profileContent";
       prS.appendChild(prC); prO.appendChild(prS); root.appendChild(prO);
+
+      // Daily
+      const dO = el("div","sheetOverlay"); dO.id="dailyOverlay";
+      dO.addEventListener("click", (e)=>{ if(e.target===dO){ haptic(); closeDaily(); }});
+      const dS = el("div","sheet");
+      dS.addEventListener("click",(e)=>e.stopPropagation());
+      dS.appendChild(el("div","sheetHandle"));
+      const dC = el("div"); dC.id="dailyContent";
+      dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
+
     }
 
     function render(){
@@ -5401,9 +5447,9 @@ if(state.profileView==="history"){
       root.appendChild(app);
 
       renderPostsSheet();
-      renderDailySheet();
       renderInventorySheet();
       renderПрофильSheet();
+      renderDailySheet();
     }
 
     showSplash();
@@ -5416,7 +5462,6 @@ if(state.profileView==="history"){
         try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
       }
       await Promise.all([refreshUser(), loadBotUsername()]);
-      try{ await dailyEvent("open_app"); }catch(e){}
       await loadЖурналBlocks();
       render();
       hideSplash();
