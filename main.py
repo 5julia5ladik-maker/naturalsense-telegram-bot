@@ -134,7 +134,7 @@ DEFAULT_RAFFLE_ID = 1
 # INVENTORY / CONVERSION (FIXED RATES)
 # -----------------------------------------------------------------------------
 TICKET_CONVERT_RATE = 300          # 1 raffle ticket -> 300 points
-DIOR_PALETTE_CONVERT_VALUE = 3000  # 1 Dior palette -> 3000 points (fixed)  # 1 Dior palette -> 50_000 points (fixed)
+DIOR_PALETTE_CONVERT_VALUE = 3000  # 1 Dior palette -> 3000 points (главный приз)
 
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
 
@@ -2767,7 +2767,16 @@ def get_webapp_html() -> str:
       }
       return window.confirm((title?title+"\\n\\n":"") + (message||""));
     }
-    function esc(s){
+    
+    function fmtNum(n){
+      try{
+        const x = Number(n||0);
+        return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+      }catch(e){
+        return String(n||0);
+      }
+    }
+function esc(s){
       return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
     }
     function el(tag, cls, html){
@@ -2782,6 +2791,7 @@ def get_webapp_html() -> str:
     }
 
     let postsRefreshTimer = null;
+        const DIOR_CONVERT_VALUE = 3000;
     const state = {
       tab: "journal",
       user: null,
@@ -3568,7 +3578,7 @@ async function spinRouletteLux(){
 
       const ok = await askConfirm(
         "Конвертировать приз?",
-        "Вы получите +50 000 баллов. После конвертации забрать приз будет нельзя.",
+        "Вы получите +"+fmtNum(DIOR_CONVERT_VALUE)+" баллов. После конвертации забрать приз будет нельзя.",
         "Да, конвертировать"
       );
       if(!ok) return;
@@ -4185,7 +4195,7 @@ function renderБонусы(main){
             claimBtn.style.fontWeight="950";
             claimBtn.style.border="1px solid rgba(235,245,255,0.22)";
             claimBtn.style.background="rgba(235,245,255,0.10)";
-            claimBtn.innerHTML = '🎁 Забрать приз';
+            claimBtn.innerHTML = (st==='awaiting_contact' ? '✍️ Продолжить оформление' : '🎁 Забрать приз');
             claimBtn.addEventListener("click", ()=>{
               haptic();
               const cid = p.claim_id;
