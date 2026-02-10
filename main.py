@@ -5,9 +5,6 @@ import asyncio
 import logging
 import secrets
 import hashlib
-import hmac
-import json
-import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Literal, Any
@@ -15,7 +12,7 @@ from typing import Optional, Literal, Any
 import httpx
 from pydantic import BaseModel, Field
 
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -47,13 +44,10 @@ from sqlalchemy import (
     text as sql_text,
     update,
     func,
-    case,
     Index,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 
 # -----------------------------------------------------------------------------
@@ -77,67 +71,6 @@ PUBLIC_BASE_URL = (env_get("PUBLIC_BASE_URL", "") or "").rstrip("/")
 CHANNEL_USERNAME = env_get("CHANNEL_USERNAME", "NaturalSense") or "NaturalSense"
 DATABASE_URL = env_get("DATABASE_URL", "sqlite+aiosqlite:///./ns.db") or "sqlite+aiosqlite:///./ns.db"
 ADMIN_CHAT_ID = int(env_get("ADMIN_CHAT_ID", "5443870760") or "5443870760")
-
-# -----------------------------------------------------------------------------
-# Telegram Mini App auth (initData validation)
-# -----------------------------------------------------------------------------
-def _parse_init_data(init_data: str) -> dict[str, str]:
-    # initData is query-string formatted
-    return dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
-
-
-def _verify_init_data(init_data: str, bot_token: str) -> dict[str, Any]:
-    """Validate Telegram WebApp initData and return parsed payload.
-
-    Raises HTTPException(401) if invalid.
-    """
-    if not init_data:
-        raise HTTPException(status_code=401, detail="missing_init_data")
-
-    data = _parse_init_data(init_data)
-    recv_hash = data.pop("hash", None)
-    if not recv_hash:
-        raise HTTPException(status_code=401, detail="missing_hash")
-
-    # Telegram: secret_key = HMAC_SHA256("WebAppData", bot_token) or sha256(bot_token)?
-    # For Web Apps: key = sha256(bot_token) (as bytes), then HMAC over data_check_string.
-    secret_key = hashlib.sha256(bot_token.encode("utf-8")).digest()
-
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data.items()))
-    calc_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
-
-    if not hmac.compare_digest(calc_hash, recv_hash):
-        raise HTTPException(status_code=401, detail="bad_init_data_hash")
-
-    # Optional: auth_date freshness (24h)
-    try:
-        auth_date = int(data.get("auth_date", "0"))
-        if auth_date > 0:
-            if datetime.utcnow().timestamp() - auth_date > 60 * 60 * 24:
-                # don't hard fail, just warn (Telegram sometimes keeps it longer in cache)
-                pass
-    except Exception:
-        pass
-
-    # parse user json
-    if "user" in data:
-        try:
-            data["user_obj"] = json.loads(data["user"])
-        except Exception:
-            data["user_obj"] = None
-
-    return data
-
-
-def _tid_from_init_data(init_data: str) -> Optional[int]:
-    try:
-        payload = _verify_init_data(init_data, BOT_TOKEN)
-        u = payload.get("user_obj") or {}
-        tid = int(u.get("id") or 0)
-        return tid if tid > 0 else None
-    except Exception:
-        return None
-
 
 APP_VERSION = (env_get("APP_VERSION", "1.0.4") or "1.0.4").strip()
 ASSET_VERSION = (env_get("ASSET_VERSION", APP_VERSION) or APP_VERSION).strip()
@@ -444,15 +377,8 @@ async_session = async_session_maker
 
 
 async def _safe_exec(conn, sql: str):
-    """Execute a migration statement safely.
-
-    IMPORTANT: in Postgres, a failed statement aborts the whole transaction.
-    We wrap each statement into a SAVEPOINT (nested transaction) so that
-    one failed ALTER does not break all subsequent migrations.
-    """
     try:
-        async with conn.begin_nested():  # SAVEPOINT
-            await conn.execute(sql_text(sql))
+        await conn.execute(sql_text(sql))
     except Exception as e:
         logger.info("DB migration skipped/failed (ok in some DBs): %s | %s", sql, e)
 
@@ -495,27 +421,6 @@ async def init_db():
         )
         await _safe_exec(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_task_logs_tid_day_key ON daily_task_logs (telegram_id, day, task_key);")
         await _safe_exec(conn, "CREATE INDEX IF NOT EXISTS ix_daily_task_logs_tid_day ON daily_task_logs (telegram_id, day);")
-
-        # daily_task_logs schema migration (existing DBs may lack columns)
-        # We add columns in a safe, idempotent way, then normalize NULLs.
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS status VARCHAR;")
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS done_at TIMESTAMP NULL;")
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP NULL;")
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS points INTEGER;")
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS meta JSON;")
-
-        # normalize legacy rows (NULLs)
-        await _safe_exec(conn, "UPDATE daily_task_logs SET status = COALESCE(status, 'done');")
-        await _safe_exec(conn, "UPDATE daily_task_logs SET points = COALESCE(points, 0);")
-        await _safe_exec(conn, "UPDATE daily_task_logs SET meta = COALESCE(meta, '{}'::json);")
-
-        # enforce defaults / constraints (best-effort)
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN status SET DEFAULT 'done';")
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN points SET DEFAULT 0;")
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN meta SET DEFAULT '{}'::json;")
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN status SET NOT NULL;")
-        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN points SET NOT NULL;")
-
 
         # posts
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;")
@@ -638,12 +543,8 @@ async def _daily_points_claimed(session: AsyncSession, telegram_id: int, day: st
         )
         return int((await session.execute(q)).scalar_one() or 0)
     except Exception as e:
-        # If a previous statement failed, the session may be in an aborted transaction.
-        # Rollback to make the session usable for subsequent queries in this request.
-        try:
-            await session.rollback()
-        except Exception:
-            pass
+        # If the table is not created yet (old DB) or any transient DB error happens,
+        # do not break the Mini App — just return 0.
         logger.info("daily_points_claimed fallback: %s", e)
         return 0
 
@@ -656,81 +557,45 @@ async def _get_daily_logs(session: AsyncSession, telegram_id: int, day: str) -> 
         rows = res.scalars().all()
         return {r.task_key: r for r in rows}
     except Exception as e:
-        # If a previous statement failed, the session may be in an aborted transaction.
-        # Rollback to make the session usable for subsequent queries in this request.
-        try:
-            await session.rollback()
-        except Exception:
-            pass
+        # If the table is missing or DB temporarily unavailable — return empty logs.
         logger.info("daily_logs fallback: %s", e)
         return {}
 
 
-async def _mark_daily_done(
-    session: AsyncSession,
-    telegram_id: int,
-    day: str,
-    task_key: str,
-    meta: dict | None = None,
-) -> None:
-    """Mark daily task as done (idempotent, race-safe).
+async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, task_key: str, meta: dict | None = None) -> None:
+    existing = (await session.execute(
+        select(DailyTaskLog).where(
+            DailyTaskLog.telegram_id == telegram_id,
+            DailyTaskLog.day == day,
+            DailyTaskLog.task_key == task_key,
+        )
+    )).scalar_one_or_none()
 
-    Important:
-    - Never downgrades a claimed task back to done.
-    - Uses UPSERT to avoid unique-constraint races when multiple client events arrive concurrently.
-    """
     now = datetime.utcnow()
-    meta = meta or {}
-
-    ins = pg_insert(DailyTaskLog).values(
-        telegram_id=telegram_id,
-        day=day,
-        task_key=task_key,
-        status="done",
-        done_at=now,
-        claimed_at=None,
-        points=0,
-        meta=meta,
-    )
-
-    # On conflict (same telegram_id+day+task_key):
-    # - keep "claimed" if already claimed
-    # - otherwise set status to "done" and merge meta
-    status_expr = case(
-        (DailyTaskLog.status == "claimed", "claimed"),
-        else_="done",
-    )
-    points_expr = case(
-        (DailyTaskLog.status == "claimed", DailyTaskLog.points),
-        else_=0,
-    )
-    done_at_expr = func.coalesce(DailyTaskLog.done_at, ins.excluded.done_at)
-
-    # Meta merging is intentionally conservative (no jsonb operators) to keep DB compatibility.
-    meta_expr = ins.excluded.meta
-
-    stmt = ins.on_conflict_do_update(
-        index_elements=[DailyTaskLog.telegram_id, DailyTaskLog.day, DailyTaskLog.task_key],
-        set_={
-            "status": status_expr,
-            "done_at": done_at_expr,
-            "points": points_expr,
-            "meta": meta_expr,
-            # keep claimed_at if already claimed
-            "claimed_at": DailyTaskLog.claimed_at,
-        },
-    )
-
-    try:
-        await session.execute(stmt)
-    except IntegrityError:
-        # Extremely rare, but if the transaction is aborted by a concurrent DDL/constraint issue,
-        # rollback and ignore to avoid breaking the Mini App.
-        try:
-            await session.rollback()
-        except Exception:
-            pass
+    if existing:
+        # do not downgrade claimed
+        if existing.status != "claimed":
+            existing.status = "done"
+            existing.done_at = existing.done_at or now
+            if meta:
+                m = dict(existing.meta or {})
+                m.update(meta)
+                existing.meta = m
+            session.add(existing)
         return
+
+    session.add(
+        DailyTaskLog(
+            telegram_id=telegram_id,
+            day=day,
+            task_key=task_key,
+            status="done",
+            done_at=now,
+            points=0,
+            meta=meta or {},
+        )
+    )
+
 
 async def _can_unlock_bonus_day(task_map: dict[str, dict[str, Any]], logs: dict[str, DailyTaskLog]) -> bool:
     # All non-special tasks must be claimed (or at least done?) -> to avoid abuse, require claimed.
@@ -3401,11 +3266,7 @@ function esc(s){
       const timeoutMs = 12000;
       const t = setTimeout(()=>controller.abort(), timeoutMs);
       try{
-        const hdrs = Object.assign({}, (opts && opts.headers) || {});
-        try{
-          if(tg && tg.initData) hdrs["X-Telegram-InitData"] = tg.initData;
-        }catch(e){}
-        const r = await fetch(url, Object.assign({}, opts||{}, {headers: hdrs, signal: controller.signal, cache:"no-store"}));
+        const r = await fetch(url, Object.assign({}, opts||{}, {signal: controller.signal, cache:"no-store"}));
         const data = await r.json().catch(()=> ({}));
         if(!r.ok) throw new Error(data.detail || ("HTTP "+r.status));
         return data;
@@ -3563,8 +3424,6 @@ function esc(s){
       state.busy = true; state.msg = ""; render();
       try{
         const d = await apiPost("/api/roulette/spin", {telegram_id: tgUserId});
-        try{ await dailyEvent('spin_roulette'); }catch(e){}
-
         state.msg = "🎡 Выпало: "+d.prize_label;
         try{
           if(tg && tg.showPopup){
@@ -4485,31 +4344,8 @@ async function dailyEvent(event, data){
   }
 }
 
-
-function _startDailyPoll(){
-  try{
-    if(state.__dailyPoll) return;
-    state.__dailyPoll = setInterval(async ()=>{
-      try{
-        if(!state.dailyOpen || !tgUserId) return;
-        state.daily = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
-        render();
-      }catch(e){}
-    }, 5000);
-  }catch(e){}
-}
-function _stopDailyPoll(){
-  try{
-    if(state.__dailyPoll){
-      clearInterval(state.__dailyPoll);
-      state.__dailyPoll = null;
-    }
-  }catch(e){}
-}
-
 async function openDaily(){
   state.dailyOpen = true;
-  _startDailyPoll();
   state.dailyMsg = "";
   render();
   try{
@@ -4525,7 +4361,6 @@ async function openDaily(){
 }
 function closeDaily(){
   state.dailyOpen = false;
-  _stopDailyPoll();
   state.dailyMsg = "";
   render();
 }
@@ -4549,65 +4384,6 @@ async function claimDaily(taskKey){
   }
 }
 
-
-async function performDailyAction(taskKey){
-  // No "Выполнить" state in UI; user taps the same card ("Выполни чтобы забрать"),
-  // we navigate to the place where the task can be completed. Completion is still
-  // confirmed by server events.
-  try{
-    if(!taskKey) return;
-    if(taskKey === "open_miniapp"){
-      // already inside Mini App -> just record
-      await dailyEvent("open_miniapp");
-      if(state && state.dailyOpen){
-        state.daily = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
-        render();
-      }
-      return;
-    }
-    if(taskKey === "open_channel"){
-      try{ await dailyEvent("open_channel"); }catch(e){}
-      openLink("https://t.me/"+CHANNEL);
-      return;
-    }
-    if(taskKey === "use_search"){
-      // open search panel; event is recorded when user actually searches
-      state.searchOpen = true;
-      render();
-      setTimeout(()=>{ try{ if(searchInputEl) searchInputEl.focus(); }catch(e){} }, 120);
-      return;
-    }
-    if(taskKey === "spin_roulette"){
-      // open roulette sheet; event recorded after successful spin
-      state.rouletteOpen = true;
-      render();
-      return;
-    }
-    if(taskKey === "open_post"){
-      // open journal/posts list; open_post is recorded when user taps a post (3 times)
-      state.journalOpen = true;
-      render();
-      return;
-    }
-    if(taskKey === "open_profile"){
-      state.activeTab = "profile";
-      render();
-      return;
-    }
-    if(taskKey === "open_inventory"){
-      state.activeTab = "inventory";
-      render();
-      return;
-    }
-    if(taskKey === "convert_prize"){
-      // open inventory where conversion happens
-      state.activeTab = "inventory";
-      render();
-      return;
-    }
-    // Special / unknown -> do nothing
-  }catch(e){}
-}
 function renderDailySheet(){
   const overlay = document.getElementById("dailyOverlay");
   if(!overlay) return;
@@ -4677,19 +4453,9 @@ function renderDailySheet(){
 
     const btn = el("div","btn");
     const canClaim = !!t.done && !t.claimed;
-    const isLocked = !t.done && !t.claimed;
-    // Button is always clickable except already claimed.
-    btn.style.opacity = t.claimed ? "0.55" : (canClaim ? "1" : "0.85");
-    btn.style.pointerEvents = t.claimed ? "none" : "auto";
-    btn.addEventListener("click", async ()=>{ 
-      haptic();
-      if(t.claimed) return;
-      if(canClaim){
-        await claimDaily(t.key);
-      }else if(isLocked){
-        await performDailyAction(t.key);
-      }
-    });
+    btn.style.opacity = canClaim ? "1" : "0.55";
+    btn.style.pointerEvents = canClaim ? "auto" : "none";
+    btn.addEventListener("click", ()=>{ haptic(); claimDaily(t.key); });
     btn.appendChild(el("div",null,'<div class="btnTitle">'+(t.claimed ? "✅ Получено" : (t.done ? "🎁 Забрать" : "🔒 Выполни чтобы забрать"))+'</div><div class="btnSub">'+(t.claimed ? "Награда уже начислена" : (t.done ? "Нажми, чтобы получить бонусы" : "Сначала выполни задание"))+'</div>'));
     btn.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
     btnRow.appendChild(btn);
@@ -6420,13 +6186,7 @@ async def raffle_status(telegram_id: int):
 
 @app.post("/api/raffle/buy_ticket", response_model=BuyTicketResp)
 async def raffle_buy_ticket(req: BuyTicketReq):
-    tid: int | None = None
-    if x_telegram_initdata:
-        tid = _tid_from_init_data(x_telegram_initdata)
-    if tid is None:
-        tid = int(req.telegram_id)
-    if not tid or tid <= 0:
-        raise HTTPException(status_code=400, detail="invalid_telegram_id")
+    tid = int(req.telegram_id)
     qty = max(1, int(req.qty))
     cost = RAFFLE_TICKET_COST * qty
 
@@ -6476,13 +6236,7 @@ async def raffle_buy_ticket(req: BuyTicketReq):
 # -----------------------------------------------------------------------------
 @app.get("/api/inventory", response_model=InventoryResp)
 async def inventory_api(telegram_id: int):
-    tid: int | None = None
-    if x_telegram_initdata:
-        tid = _tid_from_init_data(x_telegram_initdata)
-    if tid is None and telegram_id is not None:
-        tid = int(telegram_id)
-    if not tid or tid <= 0:
-        raise HTTPException(status_code=400, detail="invalid_telegram_id")
+    tid = int(telegram_id)
     async with async_session_maker() as session:
         user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
         if not user:
@@ -6539,7 +6293,7 @@ async def inventory_api(telegram_id: int):
 # DAILY TASKS API
 # -----------------------------------------------------------------------------
 @app.get("/api/daily/tasks", response_model=DailyTasksResp)
-async def daily_tasks_api(telegram_id: int | None = None, x_telegram_initdata: str | None = Header(None, alias="X-Telegram-InitData")):
+async def daily_tasks_api(telegram_id: int):
     tid = int(telegram_id)
     day = _today_key()
     task_map = _daily_tasks_map()
@@ -6551,18 +6305,6 @@ async def daily_tasks_api(telegram_id: int | None = None, x_telegram_initdata: s
             user = User(telegram_id=tid, points=10)
             session.add(user)
             await session.commit()
-
-
-        # Hard guarantee: opening Mini App marks 'open_miniapp' as DONE for today (server-side, no client dependence)
-        try:
-            await _mark_daily_done(session, tid, day, "open_miniapp")
-            await session.commit()
-        except Exception as e:
-            try:
-                await session.rollback()
-            except Exception:
-                pass
-            logger.info("daily_tasks auto-done open_miniapp failed: %s", e)
 
         logs = await _get_daily_logs(session, tid, day)
 
@@ -6611,20 +6353,10 @@ async def daily_tasks_api(telegram_id: int | None = None, x_telegram_initdata: s
 
 
 @app.post("/api/daily/event")
-async def daily_event_api(req: DailyEventReq, x_telegram_initdata: str | None = Header(None, alias="X-Telegram-InitData")):
-    tid: int | None = None
-    if x_telegram_initdata:
-        tid = _tid_from_init_data(x_telegram_initdata)
-    if tid is None:
-        tid = int(req.telegram_id)
-    if not tid or tid <= 0:
-        raise HTTPException(status_code=400, detail="invalid_telegram_id")
+async def daily_event_api(req: DailyEventReq):
+    tid = int(req.telegram_id)
     day = _today_key()
     ev = (req.event or "").strip().lower()
-
-
-    if tid <= 0:
-        raise HTTPException(status_code=400, detail="invalid_telegram_id")
 
     async with async_session_maker() as session:
         user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
@@ -6662,24 +6394,14 @@ async def daily_event_api(req: DailyEventReq, x_telegram_initdata: str | None = 
             await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
         else:
             # ignore unknown events
-            raise HTTPException(status_code=400, detail="unknown_event")
-
-        try:
-            await session.commit()
-        except Exception as e:
-            try:
-                await session.rollback()
-            except Exception:
-                pass
-            # client events are best-effort; don't break UI
-            logger.info("daily_event commit failed: %s", e)
             return {"ok": True, "ignored": True}
 
-        return {"ok": True, "event": ev}
+        await session.commit()
+        return {"ok": True}
 
 
 @app.post("/api/daily/claim", response_model=DailyClaimResp)
-async def daily_claim_api(req: DailyClaimReq, x_telegram_initdata: str | None = Header(None, alias="X-Telegram-InitData")):
+async def daily_claim_api(req: DailyClaimReq):
     tid = int(req.telegram_id)
     key = (req.task_key or "").strip()
     day = _today_key()
@@ -6762,35 +6484,7 @@ async def daily_claim_api(req: DailyClaimReq, x_telegram_initdata: str | None = 
             )
         )
 
-        try:
-            await session.commit()
-        except IntegrityError:
-            # Concurrent claim: someone else claimed in parallel.
-            try:
-                await session.rollback()
-            except Exception:
-                pass
-            logs2 = await _get_daily_logs(session, tid, day)
-            lg2 = logs2.get(key)
-            if lg2 and lg2.status == "claimed":
-                claimed_points2 = await _daily_points_claimed(session, tid, day)
-                remaining2 = max(0, DAILY_MAX_POINTS_PER_DAY - claimed_points2)
-                return DailyClaimResp(
-                    ok=True,
-                    task_key=key,
-                    awarded=0,
-                    claimed_points=claimed_points2,
-                    remaining_points=remaining2,
-                    user_points=int(user.points or 0),
-                )
-            raise HTTPException(status_code=500, detail="claim_race_failed")
-        except Exception as e:
-            try:
-                await session.rollback()
-            except Exception:
-                pass
-            logger.exception("daily_claim commit failed")
-            raise HTTPException(status_code=500, detail="claim_failed")
+        await session.commit()
 
         new_claimed = claimed_points + award
         new_remaining = max(0, DAILY_MAX_POINTS_PER_DAY - new_claimed)
@@ -7123,12 +6817,6 @@ async def roulette_spin(req: SpinReq):
             await session.flush()
 
             spin_id = int(spin_row.id)
-
-            # Server-side daily tracking: successful roulette spin marks task as DONE
-            try:
-                await _mark_daily_done(session, tid, _today_key(now), "spin_roulette")
-            except Exception as e:
-                logger.info("daily roulette auto-done failed: %s", e)
 
 
             # ------------------ REF REVSHARE: 10% from invitee bonus wins ------------------
