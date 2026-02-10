@@ -44,10 +44,13 @@ from sqlalchemy import (
     text as sql_text,
     update,
     func,
+    case,
     Index,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 
 # -----------------------------------------------------------------------------
@@ -543,8 +546,12 @@ async def _daily_points_claimed(session: AsyncSession, telegram_id: int, day: st
         )
         return int((await session.execute(q)).scalar_one() or 0)
     except Exception as e:
-        # If the table is not created yet (old DB) or any transient DB error happens,
-        # do not break the Mini App — just return 0.
+        # If a previous statement failed, the session may be in an aborted transaction.
+        # Rollback to make the session usable for subsequent queries in this request.
+        try:
+            await session.rollback()
+        except Exception:
+            pass
         logger.info("daily_points_claimed fallback: %s", e)
         return 0
 
@@ -557,45 +564,81 @@ async def _get_daily_logs(session: AsyncSession, telegram_id: int, day: str) -> 
         rows = res.scalars().all()
         return {r.task_key: r for r in rows}
     except Exception as e:
-        # If the table is missing or DB temporarily unavailable — return empty logs.
+        # If a previous statement failed, the session may be in an aborted transaction.
+        # Rollback to make the session usable for subsequent queries in this request.
+        try:
+            await session.rollback()
+        except Exception:
+            pass
         logger.info("daily_logs fallback: %s", e)
         return {}
 
 
-async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, task_key: str, meta: dict | None = None) -> None:
-    existing = (await session.execute(
-        select(DailyTaskLog).where(
-            DailyTaskLog.telegram_id == telegram_id,
-            DailyTaskLog.day == day,
-            DailyTaskLog.task_key == task_key,
-        )
-    )).scalar_one_or_none()
+async def _mark_daily_done(
+    session: AsyncSession,
+    telegram_id: int,
+    day: str,
+    task_key: str,
+    meta: dict | None = None,
+) -> None:
+    """Mark daily task as done (idempotent, race-safe).
 
+    Important:
+    - Never downgrades a claimed task back to done.
+    - Uses UPSERT to avoid unique-constraint races when multiple client events arrive concurrently.
+    """
     now = datetime.utcnow()
-    if existing:
-        # do not downgrade claimed
-        if existing.status != "claimed":
-            existing.status = "done"
-            existing.done_at = existing.done_at or now
-            if meta:
-                m = dict(existing.meta or {})
-                m.update(meta)
-                existing.meta = m
-            session.add(existing)
-        return
+    meta = meta or {}
 
-    session.add(
-        DailyTaskLog(
-            telegram_id=telegram_id,
-            day=day,
-            task_key=task_key,
-            status="done",
-            done_at=now,
-            points=0,
-            meta=meta or {},
-        )
+    ins = pg_insert(DailyTaskLog).values(
+        telegram_id=telegram_id,
+        day=day,
+        task_key=task_key,
+        status="done",
+        done_at=now,
+        claimed_at=None,
+        points=0,
+        meta=meta,
     )
 
+    # On conflict (same telegram_id+day+task_key):
+    # - keep "claimed" if already claimed
+    # - otherwise set status to "done" and merge meta
+    status_expr = case(
+        (DailyTaskLog.status == "claimed", "claimed"),
+        else_="done",
+    )
+    points_expr = case(
+        (DailyTaskLog.status == "claimed", DailyTaskLog.points),
+        else_=0,
+    )
+    done_at_expr = func.coalesce(DailyTaskLog.done_at, ins.excluded.done_at)
+
+    # Meta merging is intentionally conservative (no jsonb operators) to keep DB compatibility.
+    meta_expr = ins.excluded.meta
+
+    stmt = ins.on_conflict_do_update(
+        index_elements=[DailyTaskLog.telegram_id, DailyTaskLog.day, DailyTaskLog.task_key],
+        set_={
+            "status": status_expr,
+            "done_at": done_at_expr,
+            "points": points_expr,
+            "meta": meta_expr,
+            # keep claimed_at if already claimed
+            "claimed_at": DailyTaskLog.claimed_at,
+        },
+    )
+
+    try:
+        await session.execute(stmt)
+    except IntegrityError:
+        # Extremely rare, but if the transaction is aborted by a concurrent DDL/constraint issue,
+        # rollback and ignore to avoid breaking the Mini App.
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        return
 
 async def _can_unlock_bonus_day(task_map: dict[str, dict[str, Any]], logs: dict[str, DailyTaskLog]) -> bool:
     # All non-special tasks must be claimed (or at least done?) -> to avoid abuse, require claimed.
@@ -6491,7 +6534,17 @@ async def daily_event_api(req: DailyEventReq):
             # ignore unknown events
             return {"ok": True, "ignored": True}
 
-        await session.commit()
+        try:
+            await session.commit()
+        except Exception as e:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            # client events are best-effort; don't break UI
+            logger.info("daily_event commit failed: %s", e)
+            return {"ok": True, "ignored": True}
+
         return {"ok": True}
 
 
@@ -6579,7 +6632,35 @@ async def daily_claim_api(req: DailyClaimReq):
             )
         )
 
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Concurrent claim: someone else claimed in parallel.
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            logs2 = await _get_daily_logs(session, tid, day)
+            lg2 = logs2.get(key)
+            if lg2 and lg2.status == "claimed":
+                claimed_points2 = await _daily_points_claimed(session, tid, day)
+                remaining2 = max(0, DAILY_MAX_POINTS_PER_DAY - claimed_points2)
+                return DailyClaimResp(
+                    ok=True,
+                    task_key=key,
+                    awarded=0,
+                    claimed_points=claimed_points2,
+                    remaining_points=remaining2,
+                    user_points=int(user.points or 0),
+                )
+            raise HTTPException(status_code=500, detail="claim_race_failed")
+        except Exception as e:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            logger.exception("daily_claim commit failed")
+            raise HTTPException(status_code=500, detail="claim_failed")
 
         new_claimed = claimed_points + award
         new_remaining = max(0, DAILY_MAX_POINTS_PER_DAY - new_claimed)
