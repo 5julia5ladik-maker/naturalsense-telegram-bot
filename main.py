@@ -110,6 +110,14 @@ REGISTER_BONUS_POINTS = 100
 REFERRAL_ACTIVE_BONUS_POINTS = 600
 REFERRAL_WEEK_BONUS_POINTS = 300
 
+# Referral revshare: inviter receives 10% of invitee BONUS roulette wins (only when invitee is ACTIVE)
+REF_REVSHARE_PCT = 0.10
+REF_REVSHARE_PER_REFERRED_DAY_CAP = 150   # max points/day per 1 referred user
+REF_REVSHARE_PER_INVITER_DAY_CAP = 600    # max points/day total per inviter
+REF_INACTIVE_AFTER_DAYS = 7               # if invitee doesn't show up for N days -> inactive (revshare paused)
+REF_ACTIVE_MIN_LOGIN_DAYS = 3
+REF_ACTIVE_MIN_SPINS = 1
+
 STREAK_MILESTONES = {
     3: 100,
     7: 250,
@@ -173,6 +181,12 @@ class User(Base):
     referral_count = Column(Integer, default=0)
     ref_bonus_paid = Column(Boolean, default=False, nullable=False)  # реф-бонус за 3 дня активности invitee
     ref_week_bonus_paid = Column(Boolean, default=False, nullable=False)  # доп. реф-бонус за 7 дней активности invitee
+
+    # activity + referrals analytics
+    last_seen_at = Column(DateTime, nullable=True)  # naive UTC
+    daily_login_total = Column(Integer, default=0)  # distinct daily bonus claims (1/day)
+    roulette_spins_total = Column(Integer, default=0)  # total roulette spins
+    ref_active_at = Column(DateTime, nullable=True)  # when user became "active referral" (for inviter revshare)
 
 
 class Post(Base):
@@ -281,6 +295,22 @@ class RouletteClaim(Base):
 Index("ix_roulette_claims_tid_created", RouletteClaim.telegram_id, RouletteClaim.created_at)
 
 
+
+class ReferralEarning(Base):
+    __tablename__ = "ref_earnings"
+
+    id = Column(Integer, primary_key=True)
+    inviter_id = Column(BigInteger, index=True, nullable=False)   # telegram_id inviter
+    referred_id = Column(BigInteger, index=True, nullable=False)  # telegram_id referred
+    amount = Column(Integer, nullable=False)  # points credited to inviter
+    created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)  # naive UTC
+    source = Column(String, nullable=False, default="roulette_win")  # roulette_win / other
+    meta = Column(JSON, nullable=True)
+
+Index("ix_ref_earnings_inviter_created", ReferralEarning.inviter_id, ReferralEarning.created_at)
+Index("ix_ref_earnings_ref_created", ReferralEarning.referred_id, ReferralEarning.created_at)
+
+
 # -----------------------------------------------------------------------------
 # DATABASE
 # -----------------------------------------------------------------------------
@@ -334,6 +364,29 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
         await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_week_bonus_paid BOOLEAN NOT NULL DEFAULT FALSE;")
 
+        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP NULL;")
+        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_login_total INTEGER NOT NULL DEFAULT 0;")
+        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS roulette_spins_total INTEGER NOT NULL DEFAULT 0;")
+        await _safe_exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_active_at TIMESTAMP NULL;")
+
+        # referral earnings (revshare 10% from invitee roulette wins)
+        await _safe_exec(
+            conn,
+            """
+            CREATE TABLE IF NOT EXISTS ref_earnings (
+                id SERIAL PRIMARY KEY,
+                inviter_id BIGINT NOT NULL,
+                referred_id BIGINT NOT NULL,
+                amount INTEGER NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT (NOW()),
+                source TEXT NOT NULL DEFAULT 'roulette_win',
+                meta JSONB NULL
+            );
+            """,
+        )
+        await _safe_exec(conn, "CREATE INDEX IF NOT EXISTS ix_ref_earnings_inviter_created ON ref_earnings (inviter_id, created_at);")
+        await _safe_exec(conn, "CREATE INDEX IF NOT EXISTS ix_ref_earnings_ref_created ON ref_earnings (referred_id, created_at);")
+
         # ✅ Postgres: int32 -> bigint
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;")
         await _safe_exec(conn, "ALTER TABLE users ALTER COLUMN referred_by TYPE BIGINT;")
@@ -372,6 +425,61 @@ def _recalc_tier(user: User):
         user.tier = "free"
 
 
+
+def _utc_day_start(dt: datetime) -> datetime:
+    """Naive UTC start of day for dt (dt must be naive UTC)."""
+    return datetime(dt.year, dt.month, dt.day)
+
+
+def _days_ago(dt: Optional[datetime], now: datetime) -> Optional[int]:
+    if not dt:
+        return None
+    return max(0, int((now - dt).total_seconds() // 86400))
+
+
+def _referral_status(invitee: User, now: datetime) -> tuple[str, str, dict[str, int]]:
+    """
+    Returns: (status_code, status_label, progress)
+    status_code: pending|active|inactive
+    progress: {days_done, days_need, spins_done, spins_need}
+    """
+    days_done = int(invitee.daily_login_total or 0)
+    spins_done = int(invitee.roulette_spins_total or 0)
+    progress = {
+        "days_done": min(days_done, REF_ACTIVE_MIN_LOGIN_DAYS),
+        "days_need": REF_ACTIVE_MIN_LOGIN_DAYS,
+        "spins_done": min(spins_done, REF_ACTIVE_MIN_SPINS),
+        "spins_need": REF_ACTIVE_MIN_SPINS,
+    }
+    base_active = (days_done >= REF_ACTIVE_MIN_LOGIN_DAYS) and (spins_done >= REF_ACTIVE_MIN_SPINS)
+    if not base_active:
+        return "pending", "⏳ Не активирован", progress
+
+    last_seen = invitee.last_seen_at or invitee.last_daily_bonus_at or invitee.joined_at
+    inactive_days = _days_ago(last_seen, now) or 0
+    if inactive_days >= REF_INACTIVE_AFTER_DAYS:
+        return "inactive", "⚠️ Неактивный", progress
+
+    return "active", "✅ Активный", progress
+
+
+async def touch_user_seen(telegram_id: int, username: str | None = None, first_name: str | None = None) -> None:
+    """Update last_seen_at and basic profile fields."""
+    now = datetime.utcnow()
+    async with async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+        if not user:
+            return
+        user.last_seen_at = now
+        if username is not None:
+            user.username = username.lower() if username else None
+        if first_name is not None:
+            user.first_name = first_name
+        session.add(user)
+        await session.commit()
+
+
+
 async def get_user(telegram_id: int) -> Optional[User]:
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
@@ -402,6 +510,11 @@ async def create_user_with_referral(
     async with async_session_maker() as session:
         existing = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
         if existing:
+            existing.username = (username.lower() if username else None)
+            existing.first_name = first_name
+            existing.last_seen_at = now
+            session.add(existing)
+            await session.commit()
             return existing, False
 
         inviter: User | None = None
@@ -420,6 +533,11 @@ async def create_user_with_referral(
             referred_by=(referred_by if inviter else None),
             referral_count=0,
             ref_bonus_paid=False,
+            ref_week_bonus_paid=False,
+            last_seen_at=now,
+            daily_login_total=1,
+            roulette_spins_total=0,
+            ref_active_at=None,
         )
         _recalc_tier(user)
         session.add(user)
@@ -487,6 +605,13 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
 
         user.best_streak = max(user.best_streak or 0, user.daily_streak or 0)
         user.last_daily_bonus_at = now
+        user.last_seen_at = now
+        user.daily_login_total = int(user.daily_login_total or 0) + 1
+
+        # if invitee hits ACTIVE threshold for first time
+        if user.referred_by and (user.ref_active_at is None):
+            if int(user.daily_login_total or 0) >= REF_ACTIVE_MIN_LOGIN_DAYS and int(user.roulette_spins_total or 0) >= REF_ACTIVE_MIN_SPINS:
+                user.ref_active_at = now
 
         streak_bonus = 0
         if user.daily_streak in STREAK_MILESTONES:
@@ -928,9 +1053,12 @@ def is_admin(user_id: int) -> bool:
 
 
 def get_main_keyboard():
-    # ✅ СНИЗУ ТОЛЬКО: Профиль + Помощь
+    # ✅ СНИЗУ: Профиль + Рефералы + Помощь
     return ReplyKeyboardMarkup(
-        [[KeyboardButton("👤 Профиль"), KeyboardButton("ℹ️ Помощь")]],
+        [
+            [KeyboardButton("👤 Профиль"), KeyboardButton("👥 Рефералы")],
+            [KeyboardButton("ℹ️ Помощь")],
+        ],
         resize_keyboard=True,
     )
 
@@ -978,10 +1106,13 @@ def build_help_text() -> str:
 • 14 дней: +600
 • 30 дней: +1500
 
-🎟 *Рефералка (за активного)*
+🎟 *Рефералка*
 /invite — твоя ссылка.
 • На 3‑й день активности приглашённого: +{REFERRAL_ACTIVE_BONUS_POINTS}
 • На 7‑й день активности приглашённого: +{REFERRAL_WEEK_BONUS_POINTS}
+• Если приглашённый *АКТИВНЫЙ* — ты получаешь *10%* от его *бонусных выигрышей* в рулетке.
+  (Если он не заходит 7 дней — статус становится неактивным, 10% замораживается.)
+👥 Рефералы — отслеживание статуса и сколько ты получил.
 
 🎰 *Рулетка*
 Стоимость 1 спина: {ROULETTE_SPIN_COST} 💎
@@ -993,6 +1124,105 @@ def build_help_text() -> str:
         REFERRAL_WEEK_BONUS_POINTS=REFERRAL_WEEK_BONUS_POINTS,
         ROULETTE_SPIN_COST=ROULETTE_SPIN_COST,
     )
+
+
+
+async def _sum_ref_earnings(session: AsyncSession, inviter_id: int, referred_id: int | None = None, day_start: datetime | None = None) -> int:
+    q = select(func.coalesce(func.sum(ReferralEarning.amount), 0)).where(ReferralEarning.inviter_id == int(inviter_id))
+    if referred_id is not None:
+        q = q.where(ReferralEarning.referred_id == int(referred_id))
+    if day_start is not None:
+        q = q.where(ReferralEarning.created_at >= day_start)
+    return int((await session.execute(q)).scalar_one() or 0)
+
+
+async def build_referrals_page(inviter_id: int, page: int = 0, page_size: int = 6) -> tuple[str, InlineKeyboardMarkup]:
+    now = datetime.utcnow()
+    day_start = _utc_day_start(now)
+    page = max(0, int(page))
+
+    async with async_session_maker() as session:
+        # list of invitees
+        total = int(
+            (await session.execute(select(func.count()).select_from(User).where(User.referred_by == int(inviter_id)))).scalar_one()
+            or 0
+        )
+        offset = page * page_size
+        rows = (
+            await session.execute(
+                select(User)
+                .where(User.referred_by == int(inviter_id))
+                .order_by(User.joined_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+        ).scalars().all()
+
+        active_cnt = 0
+        inactive_cnt = 0
+        pending_cnt = 0
+        for u in (
+            await session.execute(select(User).where(User.referred_by == int(inviter_id)))
+        ).scalars().all():
+            st, _, _ = _referral_status(u, now)
+            if st == "active":
+                active_cnt += 1
+            elif st == "inactive":
+                inactive_cnt += 1
+            else:
+                pending_cnt += 1
+
+        earned_total = await _sum_ref_earnings(session, inviter_id)
+        earned_today = await _sum_ref_earnings(session, inviter_id, day_start=day_start)
+
+        lines: list[str] = []
+        lines.append("👥 *Рефералы*")
+        lines.append("")
+        lines.append(f"Всего: *{total}* | ✅ активных: *{active_cnt}* | ⚠️ неактивных: *{inactive_cnt}* | ⏳ не актив.: *{pending_cnt}*")
+        lines.append(f"Заработано всего: *+{earned_total}* | Сегодня: *+{earned_today}*")
+        lines.append("")
+        if not rows:
+            lines.append("Пока нет приглашённых. Используй /invite чтобы получить ссылку.")
+        else:
+            for u in rows:
+                uname = f"@{u.username}" if u.username else (u.first_name or "Пользователь")
+                st_code, st_label, prog = _referral_status(u, now)
+                last_seen = u.last_seen_at or u.last_daily_bonus_at or u.joined_at
+                da = _days_ago(last_seen, now)
+                last_seen_txt = f"{da} дн. назад" if da is not None else "—"
+                utotal = await _sum_ref_earnings(session, inviter_id, referred_id=int(u.telegram_id))
+                utoday = await _sum_ref_earnings(session, inviter_id, referred_id=int(u.telegram_id), day_start=day_start)
+
+                lines.append(f"• {uname} — {st_label}")
+                lines.append(f"  Последний визит: *{last_seen_txt}* | Получено: *+{utotal}* (сегодня *+{utoday}*)")
+
+                if st_code == "pending":
+                    days_left = max(0, REF_ACTIVE_MIN_LOGIN_DAYS - int(u.daily_login_total or 0))
+                    spins_left = max(0, REF_ACTIVE_MIN_SPINS - int(u.roulette_spins_total or 0))
+                    need_parts = []
+                    if days_left > 0:
+                        need_parts.append(f"{days_left} дн. входа")
+                    if spins_left > 0:
+                        need_parts.append(f"{spins_left} спин")
+                    need = ", ".join(need_parts) if need_parts else "—"
+                    lines.append(f"  До активации: *{need}*")
+                elif st_code == "inactive":
+                    lines.append("  10% заморожено: реферал не заходил 7 дней. Вернётся в актив при следующем входе.")
+
+                lines.append("")
+
+        # pagination kb
+        btns = []
+        nav = []
+        if offset > 0:
+            nav.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"ref_page:{page-1}"))
+        if (offset + page_size) < total:
+            nav.append(InlineKeyboardButton("Вперёд ➡️", callback_data=f"ref_page:{page+1}"))
+        if nav:
+            btns.append(nav)
+
+        kb = InlineKeyboardMarkup(btns) if btns else InlineKeyboardMarkup([])
+        return "\n".join(lines).strip(), kb
 
 
 async def tg_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1554,11 +1784,27 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
 
     uid = q.from_user.id
+
+    data = q.data or ""
+
+    # referrals pagination (available for everyone)
+    if data.startswith("ref_page:"):
+        try:
+            page = int(data.split(":", 1)[1])
+        except Exception:
+            page = 0
+        page_text, kb = await build_referrals_page(q.from_user.id, page=page)
+        try:
+            await q.edit_message_text(page_text, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            # if editing fails, send new message
+            await q.message.reply_text(page_text, parse_mode="Markdown", reply_markup=kb)
+        return
+
     if not is_admin(uid):
         await q.edit_message_text("⛔️ Нет доступа.")
         return
 
-    data = q.data or ""
     if data == "admin_stats":
         await q.edit_message_text((await admin_stats_text()), parse_mode="Markdown")
         return
@@ -1576,6 +1822,12 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
     txt = update.message.text.strip()
+
+    # update last seen
+    try:
+        await touch_user_seen(update.effective_user.id, update.effective_user.username, update.effective_user.first_name)
+    except Exception:
+        pass
 
     # ✅ если ожидаем контакты/адрес по claim — принимаем любое сообщение
     async with async_session_maker() as session:
@@ -1617,6 +1869,11 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if txt == "👤 Профиль":
         await cmd_profile(update, context)
+        return
+
+    if txt == "👥 Рефералы":
+        page_text, kb = await build_referrals_page(update.effective_user.id, page=0)
+        await update.message.reply_text(page_text, parse_mode="Markdown", reply_markup=kb)
         return
 
     if txt == "ℹ️ Помощь":
@@ -4667,6 +4924,11 @@ async def webapp():
 
 @app.get("/api/user/{telegram_id}")
 async def get_user_api(telegram_id: int):
+    # mark activity (mini app open / profile refresh)
+    try:
+        await touch_user_seen(int(telegram_id))
+    except Exception:
+        pass
     user = await get_user(int(telegram_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -5538,6 +5800,15 @@ async def roulette_spin(req: SpinReq):
             user.points = (user.points or 0) - ROULETTE_SPIN_COST
             session.add(PointTransaction(telegram_id=tid, type="roulette_spin", delta=-ROULETTE_SPIN_COST, meta={}))
 
+            # activity tracking
+            user.last_seen_at = now
+            user.roulette_spins_total = int(user.roulette_spins_total or 0) + 1
+
+            # if this user is invitee and reaches ACTIVE threshold for the first time -> mark time
+            if user.referred_by and (user.ref_active_at is None):
+                if int(user.daily_login_total or 0) >= REF_ACTIVE_MIN_LOGIN_DAYS and int(user.roulette_spins_total or 0) >= REF_ACTIVE_MIN_SPINS:
+                    user.ref_active_at = now
+
             roll = secrets.randbelow(1_000_000)
             prize = pick_roulette_prize(roll)
             prize_key = str(prize.get("key") or "")
@@ -5601,6 +5872,77 @@ async def roulette_spin(req: SpinReq):
             await session.flush()
 
             spin_id = int(spin_row.id)
+
+
+# ------------------ REF REVSHARE: 10% from invitee bonus wins ------------------
+# Pay to inviter ONLY if invitee is ACTIVE (3 days logins + >=1 spin) and not inactive (7 days)
+if prize_type == "points" and prize_value > 0 and user.referred_by:
+    st_code, _, _ = _referral_status(user, now)
+    if st_code == "active":
+        inviter_id = int(user.referred_by)
+        raw_share = int(prize_value * REF_REVSHARE_PCT)
+        if raw_share > 0:
+            # caps
+            day_start = _utc_day_start(now)
+            per_user_today = int(
+                (await session.execute(
+                    select(func.coalesce(func.sum(ReferralEarning.amount), 0))
+                    .where(ReferralEarning.inviter_id == inviter_id)
+                    .where(ReferralEarning.referred_id == tid)
+                    .where(ReferralEarning.created_at >= day_start)
+                )).scalar_one() or 0
+            )
+            inviter_today = int(
+                (await session.execute(
+                    select(func.coalesce(func.sum(ReferralEarning.amount), 0))
+                    .where(ReferralEarning.inviter_id == inviter_id)
+                    .where(ReferralEarning.created_at >= day_start)
+                )).scalar_one() or 0
+            )
+            remaining = min(
+                max(0, REF_REVSHARE_PER_REFERRED_DAY_CAP - per_user_today),
+                max(0, REF_REVSHARE_PER_INVITER_DAY_CAP - inviter_today),
+            )
+            pay = min(raw_share, remaining)
+            if pay > 0:
+                inviter = (
+                    await session.execute(
+                        select(User).where(User.telegram_id == inviter_id).with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if inviter:
+                    inviter.points = (inviter.points or 0) + int(pay)
+                    _recalc_tier(inviter)
+                    session.add(
+                        ReferralEarning(
+                            inviter_id=inviter_id,
+                            referred_id=tid,
+                            amount=int(pay),
+                            created_at=now,
+                            source="roulette_win",
+                            meta={
+                                "spin_id": spin_id,
+                                "invitee_win": int(prize_value),
+                                "pct": int(REF_REVSHARE_PCT * 100),
+                                "prize": prize_label,
+                            },
+                        )
+                    )
+                    session.add(
+                        PointTransaction(
+                            telegram_id=inviter_id,
+                            type="ref_revshare",
+                            delta=int(pay),
+                            meta={
+                                "from": tid,
+                                "spin_id": spin_id,
+                                "invitee_win": int(prize_value),
+                                "pct": int(REF_REVSHARE_PCT * 100),
+                            },
+                        )
+                    )
+
+# -----------------------------------------------------------------------------
 
             # Auto-create inventory item for Dior (physical prize) so it appears in Cosmetics Bag immediately.
             if prize_type == "physical_dior_palette":
