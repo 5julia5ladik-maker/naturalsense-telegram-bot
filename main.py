@@ -2709,28 +2709,23 @@ def get_webapp_html() -> str:
     function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
 
     function applyTelegramTheme(){
-      // FORCE DARK: pixel-perfect same UI in any Telegram theme.
-      const bg = DEFAULT_BG;
-      const text = "rgba(255,255,255,0.92)";
-      const muted = "rgba(255,255,255,0.60)";
-
-      try{ document.documentElement.dataset.scheme = "dark"; }catch(e){}
-      try{ document.documentElement.setAttribute("data-scheme","dark"); }catch(e){}
+      const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
+      const p = tg && tg.themeParams ? tg.themeParams : {};
+      const bg = p.bg_color || DEFAULT_BG;
+      const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
+      const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
 
       setVar("--bg", bg);
-      setVar("--bgSolid", bg);
-      setVar("--bgGrad", "");
       setVar("--text", text);
       setVar("--muted", muted);
+      setVar("--stroke", scheme==="dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
+      setVar("--card", scheme==="dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
+      setVar("--card2", scheme==="dark" ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)");
 
-      setVar("--stroke", "rgba(255,255,255,0.12)");
-      setVar("--card", "rgba(255,255,255,0.08)");
-      setVar("--card2", "rgba(255,255,255,0.06)");
-
-      setVar("--sheetOverlay", hexToRgba(bg,0.55));
-      setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
-      setVar("--glassStroke", "rgba(255,255,255,0.18)");
-      setVar("--glassShadow", "rgba(0,0,0,0.45)");
+      setVar("--sheetOverlay", scheme==="dark" ? hexToRgba(bg,0.55) : hexToRgba(bg,0.45));
+      setVar("--sheetCardBg", scheme==="dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.86)");
+      setVar("--glassStroke", scheme==="dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
+      setVar("--glassShadow", scheme==="dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
 
       try{
         if(tg){
@@ -4973,52 +4968,20 @@ if(state.profileView==="history"){
     showSplash();
     setTimeout(()=>{ hideSplash(); }, 6000);
 
-    async async function boot(){
-      const watchdog = setTimeout(()=>{
-        // если что-то зависло — убираем сплеш и показываем кнопку перезагрузки
-        try{
-          const s = document.getElementById("nsSplash");
-          if(s && !s.classList.contains("hide")){
-            hideSplash();
-            const root = document.getElementById("root");
-            if(root && !root.innerHTML.trim()){
-              root.innerHTML = `
-                <div class="container" style="padding:18px">
-                  <div class="h1" style="font-size:18px;font-weight:950">Не удалось загрузить</div>
-                  <div class="sub" style="margin-top:8px">Проверь интернет и нажми «Перезагрузить».</div>
-                  <div class="btnPrimary" id="reloadBtn" style="margin-top:14px">Перезагрузить</div>
-                </div>
-              `;
-              const btn = document.getElementById("reloadBtn");
-              if(btn) btn.addEventListener("click", ()=>{ try{ location.reload(); }catch(e){} });
-            }
-          }
-        }catch(e){}
-      }, 12000);
-
-      try{
-        if(tg){
-          try{ tg.expand(); }catch(e){}
-          applyTelegramTheme();
-          try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
-          try{ tg.ready && tg.ready(); }catch(e){}
-        }else{
-          applyTelegramTheme();
-        }
-
-        await Promise.all([refreshUser(), loadBotUsername()]);
-        await loadЖурналBlocks();
-        render();
-      }catch(err){
-        try{ console.error(err); }catch(e){}
-      }finally{
-        try{ clearTimeout(watchdog); }catch(e){}
-        hideSplash();
+    async function boot(){
+      if(tg){
+        try{ tg.expand(); }catch(e){}
+        applyTelegramTheme();
+        try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
       }
+      await Promise.all([refreshUser(), loadBotUsername()]);
+      await loadЖурналBlocks();
+      render();
+      hideSplash();
     }
 
-    if(document.readyState === "loading"){ document.addEventListener("DOMContentLoaded", boot); } else { boot(); }
-})();
+    document.addEventListener("DOMContentLoaded", boot);
+  })();
   </script>
 </body>
 </html>
