@@ -4348,10 +4348,14 @@ list.appendChild(menuBtn("👜 Моя косметичка","Призы и би�
           const box = el("div");
           box.style.marginTop="12px";
           box.innerHTML =
-            '<div style="font-size:14px;font-weight:950">👥 Рефералы</div>'+
-            '<div class="sub" style="margin-top:6px">+20 баллов за каждого нового пользователя (1 раз).</div>';
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">'+
+              '<div style="font-size:14px;font-weight:950">👥 Рефералы</div>'+
+              '<div class="pill" id="refReload" style="cursor:pointer">↻</div>'+
+            '</div>'+
+            '<div class="sub" style="margin-top:6px">Твой доход: <b>10%</b> от бонусных выигрышей активных друзей. Если друг не заходит 7 дней — статус замораживается.</div>';
           content.appendChild(box);
 
+          // Invite link
           const ref = (tgUserId && state.botUsername) ? ("https://t.me/"+state.botUsername+"?start="+tgUserId) : "";
           if(ref){
             const linkBox = el("div","card2");
@@ -4379,6 +4383,111 @@ list.appendChild(menuBtn("👜 Моя косметичка","Призы и би�
             renderПрофильSheet();
           });
           content.appendChild(copy);
+
+          const statsWrap = el("div");
+          statsWrap.style.marginTop="12px";
+          content.appendChild(statsWrap);
+
+          const listWrap = el("div");
+          listWrap.style.marginTop="10px";
+          content.appendChild(listWrap);
+
+          const renderStatusPill = (st)=>{
+            if(st==="active") return '<span class="pill" style="background:rgba(76,175,80,0.22);border-color:rgba(76,175,80,0.35)">✅ Активный</span>';
+            if(st==="inactive") return '<span class="pill" style="background:rgba(255,152,0,0.18);border-color:rgba(255,152,0,0.30)">⚠️ Неактивный</span>';
+            return '<span class="pill" style="background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.16)">⏳ До активации</span>';
+          };
+
+          const timeAgo = (iso)=>{
+            if(!iso) return "—";
+            const t = new Date(iso).getTime();
+            if(!t) return "—";
+            const diff = Math.max(0, Date.now()-t);
+            const d = Math.floor(diff/86400000);
+            const h = Math.floor((diff%86400000)/3600000);
+            if(d>0) return d+"д назад";
+            if(h>0) return h+"ч назад";
+            return "только что";
+          };
+
+          async function loadReferrals(){
+            listWrap.innerHTML = '<div class="sub">Загружаю…</div>';
+            statsWrap.innerHTML = "";
+            try{
+              const r = await fetch("/api/referrals?telegram_id="+encodeURIComponent(tgUserId));
+              const data = await r.json();
+
+              // Summary
+              const s = el("div","card2");
+              s.innerHTML =
+                '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">'+
+                  '<div>'+
+                    '<div style="font-weight:900">Итог</div>'+
+                    '<div class="sub" style="margin-top:4px">Всего: <b>'+data.total_referrals+'</b> · ✅ '+data.active+' · ⏳ '+data.pending+' · ⚠️ '+data.inactive+'</div>'+
+                  '</div>'+
+                  '<div style="text-align:right">'+
+                    '<div style="font-weight:950">+'+data.earned_total+' 💎</div>'+
+                    '<div class="sub">сегодня: +'+data.earned_today+'</div>'+
+                  '</div>'+
+                '</div>';
+              statsWrap.appendChild(s);
+
+              // List
+              listWrap.innerHTML = "";
+              if(!data.items || data.items.length===0){
+                listWrap.innerHTML = '<div class="sub">Пока нет рефералов. Поделись ссылкой выше.</div>';
+                return;
+              }
+
+              data.items.forEach((it)=>{
+                const card = el("div","card2");
+                const name = (it.username ? "@"+it.username : (it.name || ("ID "+it.telegram_id)));
+                const last = timeAgo(it.last_seen_at);
+
+                let progress = "";
+                if(it.status==="pending"){
+                  const lleft = it.progress?.login_left ?? 0;
+                  const needSpin = it.progress?.need_spin;
+                  const parts = [];
+                  if(lleft>0) parts.push("ещё "+lleft+" дн. входа");
+                  if(needSpin) parts.push("нужен 1 спин");
+                  progress = parts.length ? ("<div class='sub' style='margin-top:4px'>До активации: <b>"+parts.join(" · ")+"</b></div>") : "";
+                }else if(it.status==="inactive"){
+                  progress = "<div class='sub' style='margin-top:4px'>Не заходил 7 дней — доход заморожен</div>";
+                }else{
+                  progress = "<div class='sub' style='margin-top:4px'>10% с бонусных выигрышей активен</div>";
+                }
+
+                card.innerHTML =
+                  '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">'+
+                    '<div style="min-width:0">'+
+                      '<div style="font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(name)+'</div>'+
+                      '<div class="sub">Последний визит: '+esc(last)+'</div>'+
+                    '</div>'+
+                    '<div style="text-align:right;white-space:nowrap">'+
+                      renderStatusPill(it.status)+
+                    '</div>'+
+                  '</div>'+
+                  progress+
+                  '<div style="display:flex;justify-content:space-between;gap:10px;margin-top:10px">'+
+                    '<div class="pill">сегодня: <b>+'+it.earned_today+'</b></div>'+
+                    '<div class="pill">всего: <b>+'+it.earned_total+'</b></div>'+
+                  '</div>';
+                listWrap.appendChild(card);
+              });
+
+            }catch(e){
+              listWrap.innerHTML = '<div class="sub">Ошибка загрузки. Попробуй позже.</div>';
+            }
+          }
+
+          // hook reload
+          setTimeout(()=>{
+            const rr = document.getElementById("refReload");
+            if(rr) rr.onclick = ()=>loadReferrals();
+          },0);
+
+          loadReferrals();
 
           if(state.msg && state.msg.startsWith("ℹ️")){
             const m = el("div","card2", esc(state.msg));
@@ -5291,6 +5400,129 @@ async def api_bot_username():
         except Exception:
             return {"bot_username": ""}
     return {"bot_username": ""}
+
+
+
+# -----------------------------------------------------------------------------
+# REFERRALS API (Mini App)
+# -----------------------------------------------------------------------------
+def _naive_utc_now() -> datetime:
+    return datetime.utcnow()
+
+def _naive_utc_midnight(dt: datetime) -> datetime:
+    return datetime(dt.year, dt.month, dt.day)
+
+@app.get("/api/referrals")
+async def api_referrals(telegram_id: int):
+    """
+    Returns inviter referrals list with clear status/progress and earnings.
+    Used by Mini App profile -> referrals view.
+    """
+    async with SessionLocal() as session:
+        inviter = await get_or_create_user(session, telegram_id=telegram_id)
+        await session.commit()
+
+        # Referred users
+        q = select(User).where(User.referred_by == inviter.telegram_id).order_by(User.joined_at.desc())
+        referred_users = (await session.execute(q)).scalars().all()
+
+        now = _naive_utc_now()
+        inactive_cutoff = now - timedelta(days=7)
+        today_mid = _naive_utc_midnight(now)
+
+        # Earnings totals
+        total_sum = await session.execute(
+            select(func.coalesce(func.sum(ReferralEarning.amount), 0)).where(ReferralEarning.inviter_id == inviter.telegram_id)
+        )
+        total_earned = int(total_sum.scalar() or 0)
+
+        today_sum = await session.execute(
+            select(func.coalesce(func.sum(ReferralEarning.amount), 0)).where(
+                ReferralEarning.inviter_id == inviter.telegram_id,
+                ReferralEarning.created_at >= today_mid,
+            )
+        )
+        earned_today = int(today_sum.scalar() or 0)
+
+        # Per referred aggregates (total + today)
+        per_total = dict(
+            (row[0], int(row[1] or 0))
+            for row in (await session.execute(
+                select(ReferralEarning.referred_id, func.sum(ReferralEarning.amount)).where(
+                    ReferralEarning.inviter_id == inviter.telegram_id
+                ).group_by(ReferralEarning.referred_id)
+            )).all()
+        )
+        per_today = dict(
+            (row[0], int(row[1] or 0))
+            for row in (await session.execute(
+                select(ReferralEarning.referred_id, func.sum(ReferralEarning.amount)).where(
+                    ReferralEarning.inviter_id == inviter.telegram_id,
+                    ReferralEarning.created_at >= today_mid,
+                ).group_by(ReferralEarning.referred_id)
+            )).all()
+        )
+
+        items = []
+        active_count = 0
+        pending_count = 0
+        inactive_count = 0
+
+        for u in referred_users:
+            # Determine status
+            status: str
+            if u.ref_active_at is not None:
+                if u.last_seen_at is not None and u.last_seen_at < inactive_cutoff:
+                    status = "inactive"
+                    inactive_count += 1
+                else:
+                    status = "active"
+                    active_count += 1
+            else:
+                status = "pending"
+                pending_count += 1
+
+            # Progress to active
+            login_days = int(u.daily_login_total or 0)
+            login_done = min(login_days, 3)
+            login_left = max(0, 3 - login_done)
+            spin_done = int(u.roulette_spins_total or 0) >= 1
+            need_spin = not spin_done
+
+            # last seen
+            last_seen_iso = u.last_seen_at.isoformat() if u.last_seen_at else None
+
+            items.append({
+                "telegram_id": int(u.telegram_id),
+                "name": u.full_name or "",
+                "username": (u.username or "").lstrip("@"),
+                "status": status,  # pending / active / inactive
+                "last_seen_at": last_seen_iso,
+                "progress": {
+                    "login_done": login_done,
+                    "login_left": login_left,
+                    "need_spin": need_spin,
+                },
+                "earned_total": int(per_total.get(u.telegram_id, 0)),
+                "earned_today": int(per_today.get(u.telegram_id, 0)),
+            })
+
+        return {
+            "inviter_id": int(inviter.telegram_id),
+            "total_referrals": len(items),
+            "active": active_count,
+            "pending": pending_count,
+            "inactive": inactive_count,
+            "earned_total": total_earned,
+            "earned_today": earned_today,
+            "items": items,
+            "revshare_percent": 10,
+            "inactive_after_days": 7,
+            "activation_rule": {
+                "login_days_required": 3,
+                "spins_required": 1,
+            }
+        }
 
 
 @app.get("/health")
