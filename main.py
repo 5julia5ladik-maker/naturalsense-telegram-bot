@@ -5419,118 +5419,124 @@ async def api_referrals(telegram_id: int):
     Used by Mini App profile -> referrals view.
     """
     try:
-    async with SessionLocal() as session:
-        inviter = await get_or_create_user(session, telegram_id=telegram_id)
-        await session.commit()
+        async with SessionLocal() as session:
+            inviter = await get_or_create_user(session, telegram_id=telegram_id)
+            await session.commit()
 
-        # Referred users
-        q = select(User).where(User.referred_by == inviter.telegram_id).order_by(User.joined_at.desc())
-        referred_users = (await session.execute(q)).scalars().all()
-
-        now = _naive_utc_now()
-        inactive_cutoff = now - timedelta(days=7)
-        today_mid = _naive_utc_midnight(now)
-
-        # Earnings totals
-        total_sum = await session.execute(
-            select(func.coalesce(func.sum(ReferralEarning.amount), 0)).where(ReferralEarning.inviter_id == inviter.telegram_id)
-        )
-        total_earned = int(total_sum.scalar() or 0)
-
-        today_sum = await session.execute(
-            select(func.coalesce(func.sum(ReferralEarning.amount), 0)).where(
-                ReferralEarning.inviter_id == inviter.telegram_id,
-                ReferralEarning.created_at >= today_mid,
+            # Referred users
+            q = (
+                select(User)
+                .where(User.referred_by == inviter.telegram_id)
+                .order_by(User.joined_at.desc())
             )
-        )
-        earned_today = int(today_sum.scalar() or 0)
+            referred_users = (await session.execute(q)).scalars().all()
 
-        # Per referred aggregates (total + today)
-        per_total = dict(
-            (row[0], int(row[1] or 0))
-            for row in (await session.execute(
-                select(ReferralEarning.referred_id, func.sum(ReferralEarning.amount)).where(
+            now = _naive_utc_now()
+            inactive_cutoff = now - timedelta(days=7)
+            today_mid = _naive_utc_midnight(now)
+
+            # Earnings totals
+            total_sum = await session.execute(
+                select(func.coalesce(func.sum(ReferralEarning.amount), 0)).where(
                     ReferralEarning.inviter_id == inviter.telegram_id
-                ).group_by(ReferralEarning.referred_id)
-            )).all()
-        )
-        per_today = dict(
-            (row[0], int(row[1] or 0))
-            for row in (await session.execute(
-                select(ReferralEarning.referred_id, func.sum(ReferralEarning.amount)).where(
+                )
+            )
+            total_earned = int(total_sum.scalar() or 0)
+
+            today_sum = await session.execute(
+                select(func.coalesce(func.sum(ReferralEarning.amount), 0)).where(
                     ReferralEarning.inviter_id == inviter.telegram_id,
                     ReferralEarning.created_at >= today_mid,
-                ).group_by(ReferralEarning.referred_id)
-            )).all()
-        )
+                )
+            )
+            earned_today = int(today_sum.scalar() or 0)
 
-        items = []
-        active_count = 0
-        pending_count = 0
-        inactive_count = 0
+            # Per referred aggregates (total + today)
+            per_total_rows = await session.execute(
+                select(ReferralEarning.referred_id, func.sum(ReferralEarning.amount))
+                .where(ReferralEarning.inviter_id == inviter.telegram_id)
+                .group_by(ReferralEarning.referred_id)
+            )
+            per_total = {int(rid): int(amount or 0) for rid, amount in per_total_rows.all()}
 
-        for u in referred_users:
-            # Determine status
-            status: str
-            if u.ref_active_at is not None:
-                if u.last_seen_at is not None and u.last_seen_at < inactive_cutoff:
-                    status = "inactive"
-                    inactive_count += 1
+            per_today_rows = await session.execute(
+                select(ReferralEarning.referred_id, func.sum(ReferralEarning.amount))
+                .where(
+                    ReferralEarning.inviter_id == inviter.telegram_id,
+                    ReferralEarning.created_at >= today_mid,
+                )
+                .group_by(ReferralEarning.referred_id)
+            )
+            per_today = {int(rid): int(amount or 0) for rid, amount in per_today_rows.all()}
+
+            items = []
+            active_count = 0
+            pending_count = 0
+            inactive_count = 0
+
+            for u in referred_users:
+                # Determine status
+                if u.ref_active_at is not None:
+                    if u.last_seen_at is not None and u.last_seen_at < inactive_cutoff:
+                        status = "inactive"
+                        inactive_count += 1
+                    else:
+                        status = "active"
+                        active_count += 1
                 else:
-                    status = "active"
-                    active_count += 1
-            else:
-                status = "pending"
-                pending_count += 1
+                    status = "pending"
+                    pending_count += 1
 
-            # Progress to active
-            login_days = int(u.daily_login_total or 0)
-            login_done = min(login_days, 3)
-            login_left = max(0, 3 - login_done)
-            spin_done = int(u.roulette_spins_total or 0) >= 1
-            need_spin = not spin_done
+                # Progress to active
+                login_days = int(u.daily_login_total or 0)
+                login_done = min(login_days, 3)
+                login_left = max(0, 3 - login_done)
+                spin_done = int(u.roulette_spins_total or 0) >= 1
+                need_spin = not spin_done
 
-            # last seen
-            last_seen_iso = u.last_seen_at.isoformat() if u.last_seen_at else None
+                last_seen_iso = u.last_seen_at.isoformat() if u.last_seen_at else None
 
-            items.append({
-                "telegram_id": int(u.telegram_id),
-                "name": (u.first_name or (u.username or "") or f"ID {u.telegram_id}"),
-                "username": (u.username or "").lstrip("@"),
-                "status": status,  # pending / active / inactive
-                "last_seen_at": last_seen_iso,
-                "progress": {
-                    "login_done": login_done,
-                    "login_left": login_left,
-                    "need_spin": need_spin,
-                },
-                "earned_total": int(per_total.get(u.telegram_id, 0)),
-                "earned_today": int(per_today.get(u.telegram_id, 0)),
-            })
+                name = (u.first_name or (u.username or "") or f"ID {u.telegram_id}")
+                username = (u.username or "").lstrip("@")
 
-        return {
-            "inviter_id": int(inviter.telegram_id),
-            "total_referrals": len(items),
-            "active": active_count,
-            "pending": pending_count,
-            "inactive": inactive_count,
-            "earned_total": total_earned,
-            "earned_today": earned_today,
-            "items": items,
-            "revshare_percent": 10,
-            "inactive_after_days": 7,
-            "activation_rule": {
-                "login_days_required": 3,
-                "spins_required": 1,
+                items.append(
+                    {
+                        "telegram_id": int(u.telegram_id),
+                        "name": name,
+                        "username": username,
+                        "status": status,  # pending / active / inactive
+                        "last_seen_at": last_seen_iso,
+                        "progress": {
+                            "login_done": login_done,
+                            "login_left": login_left,
+                            "need_spin": need_spin,
+                        },
+                        "earned_total": int(per_total.get(int(u.telegram_id), 0)),
+                        "earned_today": int(per_today.get(int(u.telegram_id), 0)),
+                    }
+                )
+
+            return {
+                "inviter_id": int(inviter.telegram_id),
+                "total_referrals": len(items),
+                "active": active_count,
+                "pending": pending_count,
+                "inactive": inactive_count,
+                "earned_total": total_earned,
+                "earned_today": earned_today,
+                "items": items,
+                "revshare_percent": 10,
+                "inactive_after_days": 7,
+                "activation_rule": {"login_days_required": 3, "spins_required": 1},
             }
-        }
-
 
     except Exception as e:
         logger.exception("/api/referrals failed: %s", e)
         raise HTTPException(status_code=500, detail="referrals_error")
 
+
 @app.get("/health")
+
 async def health():
     return {"status": "healthy"}
 
