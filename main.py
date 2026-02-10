@@ -2709,14 +2709,17 @@ def get_webapp_html() -> str:
     function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
 
     function applyTelegramTheme(){
-      // FORCE DARK LOOK: always render identical to dark theme (pixel-perfect)
+      // FORCE DARK: pixel-perfect same UI in any Telegram theme.
       const bg = DEFAULT_BG;
       const text = "rgba(255,255,255,0.92)";
       const muted = "rgba(255,255,255,0.60)";
 
+      try{ document.documentElement.dataset.scheme = "dark"; }catch(e){}
       try{ document.documentElement.setAttribute("data-scheme","dark"); }catch(e){}
 
       setVar("--bg", bg);
+      setVar("--bgSolid", bg);
+      setVar("--bgGrad", "");
       setVar("--text", text);
       setVar("--muted", muted);
 
@@ -2731,11 +2734,9 @@ def get_webapp_html() -> str:
 
       try{
         if(tg){
-          try{ tg.setHeaderColor && tg.setHeaderColor("bg_color"); }catch(e){}
-          try{ tg.setBackgroundColor && tg.setBackgroundColor(bg); }catch(e){}
+          tg.setHeaderColor(bg);
+          tg.setBackgroundColor(bg);
         }
-      }catch(e){}
-    }
       }catch(e){}
     }
 
@@ -4972,20 +4973,52 @@ if(state.profileView==="history"){
     showSplash();
     setTimeout(()=>{ hideSplash(); }, 6000);
 
-    async function boot(){
-      if(tg){
-        try{ tg.expand(); }catch(e){}
-        applyTelegramTheme();
-        try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
+    async async function boot(){
+      const watchdog = setTimeout(()=>{
+        // если что-то зависло — убираем сплеш и показываем кнопку перезагрузки
+        try{
+          const s = document.getElementById("nsSplash");
+          if(s && !s.classList.contains("hide")){
+            hideSplash();
+            const root = document.getElementById("root");
+            if(root && !root.innerHTML.trim()){
+              root.innerHTML = `
+                <div class="container" style="padding:18px">
+                  <div class="h1" style="font-size:18px;font-weight:950">Не удалось загрузить</div>
+                  <div class="sub" style="margin-top:8px">Проверь интернет и нажми «Перезагрузить».</div>
+                  <div class="btnPrimary" id="reloadBtn" style="margin-top:14px">Перезагрузить</div>
+                </div>
+              `;
+              const btn = document.getElementById("reloadBtn");
+              if(btn) btn.addEventListener("click", ()=>{ try{ location.reload(); }catch(e){} });
+            }
+          }
+        }catch(e){}
+      }, 12000);
+
+      try{
+        if(tg){
+          try{ tg.expand(); }catch(e){}
+          applyTelegramTheme();
+          try{ tg.onEvent && tg.onEvent("themeChanged", applyTelegramTheme); }catch(e){}
+          try{ tg.ready && tg.ready(); }catch(e){}
+        }else{
+          applyTelegramTheme();
+        }
+
+        await Promise.all([refreshUser(), loadBotUsername()]);
+        await loadЖурналBlocks();
+        render();
+      }catch(err){
+        try{ console.error(err); }catch(e){}
+      }finally{
+        try{ clearTimeout(watchdog); }catch(e){}
+        hideSplash();
       }
-      await Promise.all([refreshUser(), loadBotUsername()]);
-      await loadЖурналBlocks();
-      render();
-      hideSplash();
     }
 
     if(document.readyState === "loading"){ document.addEventListener("DOMContentLoaded", boot); } else { boot(); }
-  })();
+})();
   </script>
 </body>
 </html>
