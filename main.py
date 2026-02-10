@@ -142,28 +142,45 @@ DIOR_PALETTE_CONVERT_VALUE = 3000  # 1 Dior palette -> 3000 points (главны
 # PUBLIC URL RESOLUTION (for Telegram WebApp button)
 # -----------------------------------------------------------------------------
 def resolve_public_base_url() -> str:
+    """
+    Returns absolute public base URL (scheme + host), without trailing slash.
+
+    Telegram Mini Apps REQUIRE an absolute https:// URL for WebAppInfo.
+    """
     base = (PUBLIC_BASE_URL or "").strip().rstrip("/")
     if base:
         if base.startswith("http://") or base.startswith("https://"):
             return base
         # assume https if scheme missing
         return "https://" + base.lstrip("/")
-    # Railway commonly provides a public domain when a domain is attached
-    dom = (os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip()
-    if dom:
-        return "https://" + dom.strip().lstrip("https://").lstrip("http://").rstrip("/")
-    # fallback: user may provide full RAILWAY_URL or a custom domain in RAILWAY_STATIC_URL
-    for k in ("RAILWAY_URL", "RAILWAY_STATIC_URL", "RENDER_EXTERNAL_URL"):
+
+    # Railway frequently provides a domain without scheme via RAILWAY_STATIC_URL (custom domain)
+    # or RAILWAY_PUBLIC_DOMAIN (railway-provided domain example.up.railway.app).
+    for k in ("RAILWAY_STATIC_URL", "RAILWAY_PUBLIC_DOMAIN", "RAILWAY_URL", "RENDER_EXTERNAL_URL"):
         v = (os.getenv(k) or "").strip().rstrip("/")
-        if v:
-            if v.startswith("http://") or v.startswith("https://"):
-                return v
-            return "https://" + v.lstrip("/")
+        if not v:
+            continue
+        if v.startswith("http://") or v.startswith("https://"):
+            return v
+        # value may be just the hostname
+        return "https://" + v.lstrip("/")
+
     return ""
+
 
 def get_webapp_url() -> str:
     base = resolve_public_base_url()
     return f"{base}/webapp" if base else "/webapp"
+
+def _log_public_base_url_health():
+    base = resolve_public_base_url()
+    if not base:
+        logger.error("❌ PUBLIC_BASE_URL is not set and Railway domain vars are empty. Mini App button will NOT open in Telegram.")
+        logger.error("➡️ Set PUBLIC_BASE_URL to your Railway public domain, e.g. https://example.up.railway.app")
+    else:
+        logger.info("✅ Resolved PUBLIC_BASE_URL=%s", base)
+
+_log_public_base_url_health()
 # -----------------------------------------------------------------------------
 # DAILY TASKS CONFIG (max 400/day)
 # -----------------------------------------------------------------------------
