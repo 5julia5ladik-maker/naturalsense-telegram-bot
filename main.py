@@ -2107,17 +2107,37 @@ def get_webapp_html() -> str:
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
-      --bg:#0c0f14;
+      --bg:#0c0f14;              /* Telegram bg_color fallback */
+      --bgSolid:#0c0f14;         /* solid used for Telegram header/background */
+      /* Background layers (composed) */
+      --bgL1: radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%);
+      --bgL2: radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), transparent 55%);
+      --bgL3: var(--bgSolid);
+
+      /* Surfaces */
       --card:rgba(255,255,255,0.08);
       --card2:rgba(255,255,255,0.06);
+
+      --cardGradTop: rgba(255,255,255,0.09);
+      --cardGradBot: rgba(255,255,255,0.05);
+      --cardShadow: 0 10px 30px rgba(0,0,0,0.35);
+
       --text:rgba(255,255,255,0.92);
       --muted:rgba(255,255,255,0.60);
       --gold:rgba(230,193,128,0.90);
+
       --stroke:rgba(255,255,255,0.12);
+
       --sheetOverlay:rgba(12,15,20,0.55);
       --sheetCardBg:rgba(255,255,255,0.10);
+
       --glassStroke:rgba(255,255,255,0.18);
       --glassShadow:rgba(0,0,0,0.45);
+
+      --navBg: rgba(18,22,30,0.55);
+      --navItemBg: rgba(255,255,255,0.05);
+      --sheetHandleBg: rgba(255,255,255,0.22);
+
       --r-lg:22px;
       --r-md:16px;
       --r-sm:14px;
@@ -2125,9 +2145,9 @@ def get_webapp_html() -> str:
     body{
       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
       background:
-        radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%),
-        radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), transparent 55%),
-        var(--bg);
+        var(--bgL1),
+        var(--bgL2),
+        var(--bgL3);
       color:var(--text);
       overflow-x:hidden;
     }
@@ -2142,10 +2162,10 @@ def get_webapp_html() -> str:
 
     .card{
       border:1px solid var(--stroke);
-      background:linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05));
+      background:linear-gradient(180deg, var(--cardGradTop), var(--cardGradBot));
       border-radius:var(--r-lg);
       padding:14px;
-      box-shadow:0 10px 30px rgba(0,0,0,0.35);
+      box-shadow:var(--cardShadow);
       position:relative;
       overflow:hidden;
     }
@@ -2163,10 +2183,7 @@ def get_webapp_html() -> str:
       font-size:12px;font-weight:700;
       user-select:none;
     }
-    .btn{
-      width:100%;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.06);
+    \1var(--card2);
       border-radius:18px;
       padding:14px;
       display:flex;
@@ -2179,9 +2196,7 @@ def get_webapp_html() -> str:
     .btnTitle{font-size:15px;font-weight:750}
     .btnSub{margin-top:4px;font-size:12px;color:var(--muted)}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-    .tile{
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.06);
+    \1var(--card2);
       border-radius:18px;
       padding:12px;
       cursor:pointer;
@@ -2196,10 +2211,7 @@ def get_webapp_html() -> str:
     .hScroll{display:flex;gap:10px;overflow:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch}
     .hScroll::-webkit-scrollbar{display:none}
 
-    .miniCard{
-      min-width:220px;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.06);
+    \1var(--card2);
       border-radius:18px;
       padding:12px;
       cursor:pointer;
@@ -2284,7 +2296,7 @@ def get_webapp_html() -> str:
       width:min(560px, calc(100% - 24px));
       display:flex;gap:10px;padding:10px;
       border-radius:22px;border:1px solid var(--glassStroke);
-      background:rgba(18,22,30,0.55);
+      background:var(--navBg);
       backdrop-filter:blur(22px) saturate(180%);
       -webkit-backdrop-filter:blur(22px) saturate(180%);
       box-shadow:0 12px 40px var(--glassShadow);
@@ -2292,7 +2304,7 @@ def get_webapp_html() -> str:
     .navItem{
       flex:1;border-radius:16px;padding:10px 8px;text-align:center;
       cursor:pointer;user-select:none;border:1px solid transparent;
-      background:rgba(255,255,255,0.05);
+      background:var(--navItemBg);
       display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;
     }
     .navItemActive{border:1px solid rgba(230,193,128,0.35);background:rgba(230,193,128,0.12)}
@@ -2321,16 +2333,13 @@ def get_webapp_html() -> str:
       padding:14px 14px 10px;
       max-height:84vh;overflow:auto;
     }
-    .sheetHandle{width:46px;height:5px;border-radius:999px;background:rgba(255,255,255,0.22);margin:0 auto 10px}
-    .input{
-      width:100%;
-      border:1px solid var(--stroke);
-      background:rgba(255,255,255,0.06);
+    .sheetHandle{width:46px;height:5px;border-radius:999px;background:var(--sheetHandleBg);margin:0 auto 10px}
+    \1var(--card2);
       border-radius:16px;
       padding:12px 12px;
       outline:none;color:var(--text);font-size:14px;
     }
-    .seg{display:flex;gap:8px;border:1px solid var(--stroke);background:rgba(255,255,255,0.05);padding:6px;border-radius:18px}
+    .seg{display:flex;gap:8px;border:1px solid var(--stroke);background:var(--card);padding:6px;border-radius:18px}
     .segBtn{
       flex:1;padding:10px;border-radius:14px;text-align:center;
       cursor:pointer;user-select:none;font-size:13px;border:1px solid transparent;
@@ -2712,25 +2721,62 @@ def get_webapp_html() -> str:
       const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
       const p = tg && tg.themeParams ? tg.themeParams : {};
       const bg = p.bg_color || DEFAULT_BG;
+      const headerBg = (scheme==="dark") ? bg : "#F6F1EB";
       const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
       const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
 
       setVar("--bg", bg);
+      setVar("--bgSolid", headerBg);
       setVar("--text", text);
       setVar("--muted", muted);
-      setVar("--stroke", scheme==="dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
-      setVar("--card", scheme==="dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
-      setVar("--card2", scheme==="dark" ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)");
 
-      setVar("--sheetOverlay", scheme==="dark" ? hexToRgba(bg,0.55) : hexToRgba(bg,0.45));
-      setVar("--sheetCardBg", scheme==="dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.86)");
-      setVar("--glassStroke", scheme==="dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
-      setVar("--glassShadow", scheme==="dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
+      if(scheme==="dark"){
+        setVar("--stroke", "rgba(255,255,255,0.12)");
+        setVar("--card", "rgba(255,255,255,0.08)");
+        setVar("--card2", "rgba(255,255,255,0.06)");
+        setVar("--cardGradTop", "rgba(255,255,255,0.09)");
+        setVar("--cardGradBot", "rgba(255,255,255,0.05)");
+        setVar("--cardShadow", "0 10px 30px rgba(0,0,0,0.35)");
+
+        setVar("--bgL1", "radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), rgba(0,0,0,0) 60%)");
+        setVar("--bgL2", "radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), rgba(0,0,0,0) 55%)");
+        setVar("--bgL3", bg);
+
+        setVar("--sheetOverlay", hexToRgba(bg,0.55));
+        setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
+        setVar("--glassStroke", "rgba(255,255,255,0.18)");
+        setVar("--glassShadow", "rgba(0,0,0,0.45)");
+
+        setVar("--navBg", "rgba(18,22,30,0.55)");
+        setVar("--navItemBg", "rgba(255,255,255,0.05)");
+        setVar("--sheetHandleBg", "rgba(255,255,255,0.22)");
+      }else{
+        // Premium Light (pastel gradient + readable glass)
+        setVar("--stroke", "rgba(0,0,0,0.08)");
+        setVar("--card", "rgba(255,255,255,0.58)");
+        setVar("--card2", "rgba(255,255,255,0.72)");
+        setVar("--cardGradTop", "rgba(255,255,255,0.72)");
+        setVar("--cardGradBot", "rgba(255,255,255,0.56)");
+        setVar("--cardShadow", "0 10px 30px rgba(120,90,60,0.18), 0 1px 4px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.55)");
+
+        setVar("--bgL1", "repeating-linear-gradient(0deg, rgba(0,0,0,0.028), rgba(0,0,0,0.028) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 3px)");
+        setVar("--bgL2", "radial-gradient(1200px 800px at 18% 8%, rgba(255,255,255,0.78), rgba(255,255,255,0) 62%)");
+        setVar("--bgL3", "linear-gradient(135deg, #F7F2EC 0%, #EFE6DC 48%, #E9DDD2 100%)");
+
+        setVar("--sheetOverlay", hexToRgba(bg,0.40));
+        setVar("--sheetCardBg", "rgba(255,255,255,0.78)");
+        setVar("--glassStroke", "rgba(255,255,255,0.55)");
+        setVar("--glassShadow", "rgba(0,0,0,0.14)");
+
+        setVar("--navBg", "rgba(255,255,255,0.62)");
+        setVar("--navItemBg", "rgba(255,255,255,0.40)");
+        setVar("--sheetHandleBg", "rgba(0,0,0,0.12)");
+      }
 
       try{
         if(tg){
-          tg.setHeaderColor(bg);
-          tg.setBackgroundColor(bg);
+          tg.setHeaderColor(headerBg);
+          tg.setBackgroundColor(headerBg);
         }
       }catch(e){}
     }
