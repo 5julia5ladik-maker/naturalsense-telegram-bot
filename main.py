@@ -4328,8 +4328,19 @@ async function dailyEvent(event, data){
   try{
     if(!tgUserId) return;
     await apiPost("/api/daily/event", {telegram_id: tgUserId, event: event, data: (data||{})});
+
+    // If Daily sheet is open — refresh tasks so the user sees completion instantly.
+    if(state && state.dailyOpen){
+      clearTimeout(state.__dailyRefreshT);
+      state.__dailyRefreshT = setTimeout(async ()=>{
+        try{
+          state.daily = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
+          render();
+        }catch(e){}
+      }, 450);
+    }
   }catch(e){
-    // silent
+    // silent (must never break main UI)
   }
 }
 
@@ -4339,6 +4350,8 @@ async function openDaily(){
   render();
   try{
     if(!tgUserId) return;
+    // Ensure "Зайти в Mini App" is always recorded before loading the list.
+    try{ await dailyEvent('open_miniapp'); }catch(e){}
     state.daily = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
   }catch(e){
     state.daily = null;
