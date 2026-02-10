@@ -2663,49 +2663,89 @@ def get_webapp_html() -> str:
 
 
 /* =========================
-   PURE WHITE PREMIUM — LIGHT ONLY
+   PURE WHITE EXPRESSIVE — LIGHT ONLY
    ========================= */
 html[data-scheme="light"]{
-  --bg:#F6F4F1;
-  --card:rgba(255,255,255,0.94);
-  --card2:rgba(255,255,255,0.96);
-  --text:#2C2A28;
-  --muted:#6F6A64;
-  --stroke:rgba(0,0,0,0.06);
-  --sheetOverlay:rgba(255,255,255,0.55);
-  --sheetCardBg:rgba(255,255,255,0.96);
-  --glassStroke:rgba(0,0,0,0.08);
-  --glassShadow:rgba(0,0,0,0.12);
+  --bg:#F5F3EF;
+  --bg-accent:#EDE8E2;
+
+  --card:rgba(255,255,255,0.98);
+  --card2:#FFFFFF;
+
+  --text:#1F1D1B;
+  --text-strong:#141210;
+  --muted:#5F5A55;
+
+  --stroke:rgba(0,0,0,0.12);
+  --stroke-soft:rgba(0,0,0,0.08);
+
+  --shadow-soft:0 6px 18px rgba(0,0,0,0.10);
+  --shadow-strong:0 12px 32px rgba(0,0,0,0.18);
 }
 
 html[data-scheme="light"] body{
   background:
-    radial-gradient(1200px 800px at 20% 0%, rgba(255,255,255,0.9), transparent 60%),
-    linear-gradient(180deg,#F6F4F1,#EFEAE3);
+    radial-gradient(900px 600px at 10% 0%, #FFFFFF 0%, transparent 60%),
+    linear-gradient(180deg,var(--bg),var(--bg-accent));
   color:var(--text);
 }
 
 html[data-scheme="light"] .card,
-html[data-scheme="light"] .card2,
 html[data-scheme="light"] .tile,
 html[data-scheme="light"] .miniCard{
-  background:rgba(255,255,255,0.96);
-  box-shadow:0 8px 22px rgba(0,0,0,0.08);
+  background:var(--card);
+  border:1px solid var(--stroke);
+  box-shadow:var(--shadow-soft);
+}
+
+html[data-scheme="light"] .card strong,
+html[data-scheme="light"] h1,
+html[data-scheme="light"] h2{
+  color:var(--text-strong);
 }
 
 html[data-scheme="light"] .bottomNavInner{
-  background:rgba(255,255,255,0.94);
-  backdrop-filter:blur(14px);
+  background:rgba(255,255,255,0.96);
+  border-top:1px solid var(--stroke-soft);
+  box-shadow:0 -10px 26px rgba(0,0,0,0.18);
 }
 
 html[data-scheme="light"] .wheelBox{
   background:#FFFFFF;
-  border:1px solid rgba(0,0,0,0.08);
+  border-radius:50%;
+  border:2px solid rgba(0,0,0,0.18);
+  box-shadow:
+    0 18px 40px rgba(0,0,0,0.25),
+    inset 0 2px 0 rgba(255,255,255,0.9);
+}
+
+html[data-scheme="light"] .wheelSector{
+  filter:brightness(0.92);
+}
+
+html[data-scheme="light"] .wheelText,
+html[data-scheme="light"] .wheelLabel{
+  color:#1F1D1B;
+  text-shadow:
+    0 1px 0 rgba(255,255,255,0.8),
+    0 2px 6px rgba(0,0,0,0.35);
 }
 
 html[data-scheme="light"] .wheelCenter{
   background:#FFFFFF;
-  color:#3A3734;
+  color:#1F1D1B;
+  font-weight:700;
+  box-shadow:
+    inset 0 0 0 2px rgba(0,0,0,0.12),
+    0 4px 12px rgba(0,0,0,0.25);
+}
+
+html[data-scheme="light"] .button,
+html[data-scheme="light"] .btn{
+  background:linear-gradient(180deg,#FFFFFF,#F1ECE6);
+  border:1px solid var(--stroke);
+  box-shadow:var(--shadow-soft);
+  color:var(--text-strong);
 }
 
 </style>
