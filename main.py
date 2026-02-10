@@ -2661,89 +2661,6 @@ def get_webapp_html() -> str:
     }
     .sparkle{position:absolute; inset:0; pointer-events:none}
 
-
-/* =========================
-   LIGHT THEME — 1:1 DARK SHADOWS
-   ========================= */
-
-/* We reuse ALL shadows from dark.
-   Only colors are inverted for light background.
-*/
-
-html[data-scheme="light"]{
-  --bg:#F4F2EE;
-  --bg2:#ECE8E2;
-
-  --card:#FFFFFF;
-  --card2:#FFFFFF;
-
-  --text:#1C1A18;
-  --text2:#3A3632;
-  --muted:#6A645E;
-
-  /* SHADOWS — IDENTICAL TO DARK */
-  --shadow-xs:0 1px 2px rgba(0,0,0,0.10);
-  --shadow-sm:0 4px 10px rgba(0,0,0,0.16);
-  --shadow-md:0 8px 24px rgba(0,0,0,0.22);
-  --shadow-lg:0 14px 40px rgba(0,0,0,0.30);
-}
-
-html[data-scheme="light"] body{
-  background:
-    radial-gradient(1200px 800px at 15% -10%, #FFFFFF 0%, transparent 55%),
-    linear-gradient(180deg,var(--bg),var(--bg2));
-  color:var(--text);
-}
-
-/* CARDS / TILES — EXACT DEPTH AS DARK */
-html[data-scheme="light"] .card,
-html[data-scheme="light"] .tile,
-html[data-scheme="light"] .miniCard{
-  background:var(--card);
-  box-shadow:var(--shadow-md);
-  border:1px solid rgba(0,0,0,0.08);
-}
-
-/* BUTTONS */
-html[data-scheme="light"] .btn,
-html[data-scheme="light"] .button{
-  background:linear-gradient(180deg,#FFFFFF,#F0ECE6);
-  box-shadow:var(--shadow-sm);
-  color:var(--text);
-}
-
-/* BOTTOM NAV — SAME SHADOW AS DARK */
-html[data-scheme="light"] .bottomNavInner{
-  background:rgba(255,255,255,0.96);
-  box-shadow:0 -12px 32px rgba(0,0,0,0.28);
-  border-top:1px solid rgba(0,0,0,0.08);
-}
-
-/* ROULETTE — 1:1 DARK DEPTH */
-html[data-scheme="light"] .wheelBox{
-  background:#FFFFFF;
-  box-shadow:
-    0 18px 42px rgba(0,0,0,0.30),
-    inset 0 2px 0 rgba(255,255,255,0.95);
-  border:2px solid rgba(0,0,0,0.12);
-}
-
-html[data-scheme="light"] .wheelText,
-html[data-scheme="light"] .wheelLabel{
-  color:var(--text);
-  text-shadow:
-    0 1px 0 rgba(255,255,255,0.9),
-    0 3px 8px rgba(0,0,0,0.45);
-}
-
-html[data-scheme="light"] .wheelCenter{
-  background:#FFFFFF;
-  color:var(--text);
-  box-shadow:
-    inset 0 0 0 2px rgba(0,0,0,0.14),
-    0 6px 18px rgba(0,0,0,0.35);
-}
-
 </style>
 </head>
 <body>
@@ -5066,6 +4983,11 @@ if(state.profileView==="history"){
     document.addEventListener("DOMContentLoaded", boot);
   })();
   </script>
+
+<script>
+document.documentElement.setAttribute("data-scheme","dark");
+</script>
+
 </body>
 </html>
 """
