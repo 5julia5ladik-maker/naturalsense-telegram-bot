@@ -6465,6 +6465,18 @@ async def daily_tasks_api(telegram_id: int):
             session.add(user)
             await session.commit()
 
+
+        # Hard guarantee: opening Mini App marks 'open_miniapp' as DONE for today (server-side, no client dependence)
+        try:
+            await _mark_daily_done(session, tid, day, "open_miniapp")
+            await session.commit()
+        except Exception as e:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            logger.info("daily_tasks auto-done open_miniapp failed: %s", e)
+
         logs = await _get_daily_logs(session, tid, day)
 
         # progress counters (stored in meta)
@@ -6517,6 +6529,10 @@ async def daily_event_api(req: DailyEventReq):
     day = _today_key()
     ev = (req.event or "").strip().lower()
 
+
+    if tid <= 0:
+        raise HTTPException(status_code=400, detail="invalid_telegram_id")
+
     async with async_session_maker() as session:
         user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
         if not user:
@@ -6553,7 +6569,7 @@ async def daily_event_api(req: DailyEventReq):
             await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
         else:
             # ignore unknown events
-            return {"ok": True, "ignored": True}
+            raise HTTPException(status_code=400, detail="unknown_event")
 
         try:
             await session.commit()
@@ -6566,7 +6582,7 @@ async def daily_event_api(req: DailyEventReq):
             logger.info("daily_event commit failed: %s", e)
             return {"ok": True, "ignored": True}
 
-        return {"ok": True}
+        return {"ok": True, "event": ev}
 
 
 @app.post("/api/daily/claim", response_model=DailyClaimResp)
@@ -7014,6 +7030,12 @@ async def roulette_spin(req: SpinReq):
             await session.flush()
 
             spin_id = int(spin_row.id)
+
+            # Server-side daily tracking: successful roulette spin marks task as DONE
+            try:
+                await _mark_daily_done(session, tid, _today_key(now), "spin_roulette")
+            except Exception as e:
+                logger.info("daily roulette auto-done failed: %s", e)
 
 
             # ------------------ REF REVSHARE: 10% from invitee bonus wins ------------------
