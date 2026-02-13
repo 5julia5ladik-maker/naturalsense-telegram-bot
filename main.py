@@ -209,9 +209,9 @@ TICKET_CONVERT_RATE = 300          # 1 raffle ticket -> 300 points
 DIOR_PALETTE_CONVERT_VALUE = 3000  # 1 Dior palette -> 3000 points (главный приз)
 
 # -----------------------------------------------------------------------------
-# DAILY TASKS CONFIG (max 400/day)
+# DAILY TASKS CONFIG (max 600/day)
 # -----------------------------------------------------------------------------
-DAILY_MAX_POINTS_PER_DAY = 400
+DAILY_MAX_POINTS_PER_DAY = 600
 
 # Important: tasks are claimed manually ("Забрать"). Client only sends events; server validates and caps.
 DAILY_TASKS: list[dict[str, Any]] = [
@@ -231,9 +231,9 @@ DAILY_TASKS: list[dict[str, Any]] = [
     {"key": "convert_prize", "title": "Конвертировать приз/билет", "points": 40, "icon": "🔁"},
 
     # Бонус дня (чтобы добить ровно до 400)
-    {"key": "bonus_day", "title": "Собрать все задания дня", "points": 30, "icon": "🎁", "special": True},
+    {"key": "bonus_day", "title": "Собрать все задания дня", "points": 150, "icon": "🎁", "special": True},
 ]
-# Total base (excluding bonus_day) = 370; with bonus_day = 400
+# Total base (excluding bonus_day) = 370; with bonus_day = 520 (plan cap is 600)
 
 
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
@@ -610,6 +610,54 @@ def _utc_day_start(dt: datetime) -> datetime:
 # -----------------------------------------------------------------------------
 # DAILY TASKS HELPERS
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Telegram membership checks (for Daily tasks)
+# -----------------------------------------------------------------------------
+_SUB_CACHE: dict[tuple[int, str], tuple[bool, float]] = {}  # (uid, day_key)->(is_member, ts_epoch)
+_SUB_CACHE_TTL = 30.0  # seconds
+
+def _channel_chat_ref() -> str:
+    # Prefer numeric chat id if provided, else @username
+    if CHANNEL_CHAT_ID:
+        return CHANNEL_CHAT_ID
+    u = (CHANNEL_USERNAME or "").strip().lstrip("@")
+    return f"@{u}" if u else "@NaturalSense"
+
+async def _is_user_subscribed_to_channel(user_id: int) -> bool:
+    """Return True if user is member/admin/creator of the channel. Best-effort + cached."""
+    day_key = _today_key()
+    key = (int(user_id), day_key)
+    try:
+        now_ts = asyncio.get_event_loop().time()
+    except Exception:
+        now_ts = 0.0
+
+    cached = _SUB_CACHE.get(key)
+    if cached and (now_ts - cached[1]) <= _SUB_CACHE_TTL:
+        return bool(cached[0])
+
+    if not BOT_TOKEN:
+        _SUB_CACHE[key] = (False, now_ts)
+        return False
+
+    chat_ref = _channel_chat_ref()
+    ok = False
+    try:
+        # Use raw HTTP to avoid tight coupling with tg_app lifecycle
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
+        client = await _get_http_client()
+        r = await client.get(url, params={"chat_id": chat_ref, "user_id": int(user_id)})
+        data = r.json() if r is not None else {}
+        status = ""
+        if isinstance(data, dict) and data.get("ok") and isinstance(data.get("result"), dict):
+            status = str(data["result"].get("status") or "")
+        ok = status in ("member", "administrator", "creator")
+    except Exception:
+        ok = False
+
+    _SUB_CACHE[key] = (ok, now_ts)
+    return ok
+
 def _today_key(now: datetime | None = None) -> str:
     n = now or datetime.utcnow()
     return f"{n.year:04d}-{n.month:02d}-{n.day:02d}"
@@ -2262,7 +2310,7 @@ async def on_discussion_message(update: Update, context: ContextTypes.DEFAULT_TY
     text_ = (msg.text or "").strip()
 
     # basic anti-spam for daily tasks: ignore very short messages
-    if len(text_) < 10:
+    if len(text_) < 3:
         return
 
     # update last seen (best-effort)
@@ -4510,7 +4558,7 @@ function renderБонусы(main){
       const t5 = el("div","tile");
       t5.addEventListener("click", ()=>{ haptic(); openDaily(); });
       t5.appendChild(el("div","tileTitle","🎯 Daily бонусы"));
-      t5.appendChild(el("div","tileSub","Задания на +400/день"));
+      t5.appendChild(el("div","tileSub","Задания на +600/день"));
 
             grid.appendChild(t1);grid.appendChild(t2);grid.appendChild(t3);grid.appendChild(t4);grid.appendChild(t5);
       wrap.appendChild(grid);
@@ -4609,7 +4657,7 @@ function renderDailySheet(){
   if(state.daily && typeof state.daily.claimed_points==="number"){
     content.appendChild(el("div","sub","Сегодня: "+esc(state.daily.claimed_points)+" / "+esc(state.daily.max_points)+" · осталось "+esc(state.daily.remaining_points)));
   }else{
-    content.appendChild(el("div","sub","Ежедневные задания, чтобы набрать до 400 бонусов."));
+    content.appendChild(el("div","sub","Ежедневные задания, чтобы набрать до 600 бонусов."));
   }
 
   if(state.dailyMsg){
@@ -4643,6 +4691,9 @@ function renderDailySheet(){
       sub = t.claimed ? "Получено" : (t.done ? "Выполнено" : "Не выполнено");
     }
     left.appendChild(el("div","sub", esc(sub)));
+    if(t.note){
+      left.appendChild(el("div","sub", esc(t.note)));
+    }
     row.appendChild(left);
 
     const pill = el("div","pill","💎 +"+esc(t.points));
@@ -6308,6 +6359,7 @@ class DailyTaskItem(BaseModel):
     progress: int = 0
     done: bool = False
     claimed: bool = False
+    note: str | None = None
 
 
 class DailyTasksResp(BaseModel):
@@ -6517,6 +6569,12 @@ async def raffle_buy_ticket(req: BuyTicketReq):
             points_now = int(user.points or 0)
             tickets_now = int(ticket_row.count or 0)
 
+            # Daily: convert_prize completed when conversion is processed by server
+            try:
+                await _mark_daily_done(session, tid, _today_key(), "convert_prize", {"type": "ticket", "qty": qty})
+            except Exception:
+                pass
+
     return {"telegram_id": tid, "points": points_now, "ticket_count": tickets_now}
 
 
@@ -6598,7 +6656,17 @@ async def daily_tasks_api(telegram_id: int):
         logs = await _get_daily_logs(session, tid, day)
 
         # progress counters (stored in meta)
-        post_opened = int((logs.get("open_post").meta or {}).get("count", 0) if logs.get("open_post") else 0)
+        post_opened = 0
+        try:
+            lgp = logs.get("open_post")
+            if lgp and isinstance(lgp.meta, dict):
+                ids = lgp.meta.get("ids") or []
+                if isinstance(ids, list):
+                    post_opened = int(min(3, len({int(x) for x in ids if str(x).isdigit()})))
+                else:
+                    post_opened = int(min(3, int(lgp.meta.get("count", 0) or 0)))
+        except Exception:
+            post_opened = int((logs.get("open_post").meta or {}).get("count", 0) if logs.get("open_post") else 0)
 
         items: list[DailyTaskItem] = []
         for cfg in DAILY_TASKS:
@@ -6606,6 +6674,8 @@ async def daily_tasks_api(telegram_id: int):
             need = int(cfg.get("need", 1))
             lg = logs.get(key)
             done = bool(lg) and (lg.status in ("done", "claimed"))
+            if key == "open_channel":
+                done = await _is_user_subscribed_to_channel(tid)
             claimed = bool(lg) and (lg.status == "claimed")
             progress = 0
             if key == "open_post":
@@ -6628,6 +6698,7 @@ async def daily_tasks_api(telegram_id: int):
                     progress=progress,
                     done=done,
                     claimed=claimed,
+                    note=("Вы должны быть подписаным на канал" if key=="open_channel" else ("Нужно открыть 3 разных поста" if key=="open_post" else None)),
                 )
             )
 
@@ -6655,32 +6726,56 @@ async def daily_event_api(req: DailyEventReq):
             session.add(user)
             await session.commit()
 
-        # NOTE: client events are best-effort; we still cap rewards on claim.
+        # NOTE: client events are best-effort; we still validate on claim for sensitive tasks.
         if ev == "open_miniapp":
             await _mark_daily_done(session, tid, day, "open_miniapp")
+
         elif ev == "open_channel":
-            await _mark_daily_done(session, tid, day, "open_channel")
+            # Security: do NOT trust client. Subscription is validated server-side on /claim and /tasks.
+            # We keep event as no-op to avoid breaking old clients.
+            pass
+
         elif ev == "use_search":
-            await _mark_daily_done(session, tid, day, "use_search", {"q": (req.data or {}).get("q", "")[:64]})
+            q = str((req.data or {}).get("q") or "").strip()
+            if len(q) >= 3:
+                await _mark_daily_done(session, tid, day, "use_search", {"q": q[:64]})
+
         elif ev == "open_inventory":
             await _mark_daily_done(session, tid, day, "open_inventory")
+
         elif ev == "open_profile":
             await _mark_daily_done(session, tid, day, "open_profile")
-        elif ev == "comment_post":
-            await _mark_daily_done(session, tid, day, "comment_post")
-        elif ev == "reply_comment":
-            await _mark_daily_done(session, tid, day, "reply_comment")
-        elif ev == "spin_roulette":
-            await _mark_daily_done(session, tid, day, "spin_roulette")
-        elif ev == "convert_prize":
-            await _mark_daily_done(session, tid, day, "convert_prize")
+
+        elif ev in ("comment_post", "reply_comment"):
+            # Security: comments are confirmed only via bot updates in the discussion group.
+            pass
+
+        elif ev in ("spin_roulette", "convert_prize"):
+            # Security: these are confirmed only by server actions (spin/convert endpoints).
+            pass
+
         elif ev == "open_post":
-            # count up to need (3)
-            logs = await _get_daily_logs(session, tid, day)
-            lg = logs.get("open_post")
-            cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
-            cnt = min(3, cnt + 1)
-            await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
+            # Count unique posts (by message_id) up to need=3
+            mid = (req.data or {}).get("message_id")
+            try:
+                mid_i = int(mid)
+            except Exception:
+                mid_i = 0
+            if mid_i > 0:
+                logs = await _get_daily_logs(session, tid, day)
+                lg = logs.get("open_post")
+                ids = []
+                try:
+                    ids = list((lg.meta or {}).get("ids", []) if lg else [])
+                except Exception:
+                    ids = []
+                # keep unique ints only
+                ids_set = {int(x) for x in ids if str(x).isdigit()}
+                ids_set.add(mid_i)
+                # store as sorted list for stability
+                ids_list = sorted(ids_set)[:20]
+                cnt = min(int(_daily_tasks_map().get("open_post", {}).get("need", 3)), len(ids_list))
+                await _mark_daily_done(session, tid, day, "open_post", {"ids": ids_list, "count": cnt})
         else:
             # ignore unknown events
             return {"ok": True, "ignored": True}
@@ -6689,7 +6784,8 @@ async def daily_event_api(req: DailyEventReq):
         return {"ok": True}
 
 
-@app.post("/api/daily/claim", response_model=DailyClaimResp)
+@app.post("/api/daily/claim"
+, response_model=DailyClaimResp)
 async def daily_claim_api(req: DailyClaimReq):
     tid = int(req.telegram_id)
     key = (req.task_key or "").strip()
@@ -6712,15 +6808,32 @@ async def daily_claim_api(req: DailyClaimReq):
 
         # determine if task is done server-side
         done = False
-        if cfg.get("special"):
+        if key == "open_channel":
+            done = await _is_user_subscribed_to_channel(tid)
+        elif cfg.get("special"):
             done = await _can_unlock_bonus_day(task_map, logs)
         elif key == "open_post":
-            cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
+            cnt = 0
+            try:
+                if lg and isinstance(lg.meta, dict):
+                    ids = lg.meta.get("ids") or []
+                    if isinstance(ids, list):
+                        cnt = int(len({int(x) for x in ids if str(x).isdigit()}))
+                    else:
+                        cnt = int(lg.meta.get("count", 0) or 0)
+            except Exception:
+                cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
             done = cnt >= int(cfg.get("need", 1))
         else:
             done = lg is not None
 
         if not done:
+            if key == "open_channel":
+                raise HTTPException(status_code=400, detail="Вы должны быть подписаным на канал")
+            if key == "use_search":
+                raise HTTPException(status_code=400, detail="Используй поиск (минимум 3 символа)")
+            if key == "open_post":
+                raise HTTPException(status_code=400, detail="Нужно открыть 3 разных поста")
             raise HTTPException(status_code=400, detail="task_not_done")
         if lg and lg.status == "claimed":
             claimed_points = await _daily_points_claimed(session, tid, day)
@@ -6832,6 +6945,12 @@ async def inventory_convert_ticket(req: ConvertTicketsReq):
             points_now = int(user.points or 0)
             tickets_now = int(ticket_row.count or 0)
 
+            # Daily: convert_prize completed when conversion is processed by server
+            try:
+                await _mark_daily_done(session, tid, _today_key(), "convert_prize", {"type": "ticket", "qty": qty})
+            except Exception:
+                pass
+
     return {
         "telegram_id": tid,
         "points": points_now,
@@ -6904,6 +7023,12 @@ async def inventory_convert_prize(req: ConvertPrizeReq):
             )
 
             points_now = int(user.points or 0)
+
+            # Daily: convert_prize completed when conversion is processed by server
+            try:
+                await _mark_daily_done(session, tid, _today_key(), "convert_prize", {"type": "prize", "claim_code": code})
+            except Exception:
+                pass
 
     return {"telegram_id": tid, "points": points_now, "claim_code": code, "added_points": int(DIOR_PALETTE_CONVERT_VALUE)}
 
@@ -7111,6 +7236,12 @@ async def roulette_spin(req: SpinReq):
             await session.flush()
 
             spin_id = int(spin_row.id)
+
+            # Daily: spin_roulette is completed when a real spin is processed by server
+            try:
+                await _mark_daily_done(session, tid, _today_key(), "spin_roulette", {"spin_id": spin_id})
+            except Exception:
+                pass
 
 
             # ------------------ REF REVSHARE: 10% from invitee bonus wins ------------------
