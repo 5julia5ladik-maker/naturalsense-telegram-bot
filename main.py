@@ -1,3 +1,13 @@
+"""Natural Sense Telegram Bot + Mini App (FastAPI + python-telegram-bot).
+
+IMPORTANT:
+- This file is intentionally kept as a single module for easy Railway deploy.
+- Changes in this revision are **non-functional**: readability, structure, safety guards,
+  and small refactors that do NOT alter UI/logic/percentages/flows.
+
+Sections are separated with big headers (CONFIG / DB / TELEGRAM / WEBAPP / API).
+"""
+
 import os
 import re
 import html
@@ -24,7 +34,7 @@ HTTP_RETRIES = int(os.getenv("HTTP_RETRIES", "3"))
 HTTP_BACKOFF_BASE = float(os.getenv("HTTP_BACKOFF_BASE", "0.6"))
 
 def _utcnow() -> datetime:
-    """Naive UTC timestamp to keep DB comparisons consistent."""
+    """Return a *naive* UTC timestamp (kept naive for DB consistency in this project)."""
     return datetime.utcnow()
 
 async def _get_http_client() -> httpx.AsyncClient:
@@ -118,6 +128,7 @@ logger = logging.getLogger("main")
 # -----------------------------------------------------------------------------
 # CONFIG (ENV)
 # -----------------------------------------------------------------------------
+# NOTE: We keep env parsing centralized and explicit to make later edits safer.
 def env_get(name: str, default: str | None = None) -> str | None:
     v = os.getenv(name)
     return v if v is not None else default
@@ -3636,6 +3647,7 @@ function esc(s){
 
 
     // ------------------ ROULETTE LUX (Obsidian Glass) ------------------
+    // NOTE: UI/logic must stay stable. Percentages are controlled by `chance` values below.
     // Chances (percent): +50=45, +100=25, +150=15, +200=8, +300=4, ticket=2, Dior=1
     const ROULETTE_SEGMENTS = [
       {key:"points_500",  icon:"💎", text:"+50",  chance:45},
