@@ -133,7 +133,7 @@ CHANNEL_INVITE_URL = (env_get("CHANNEL_INVITE_URL", "") or "").strip()  # option
 DATABASE_URL = env_get("DATABASE_URL", "sqlite+aiosqlite:///./ns.db") or "sqlite+aiosqlite:///./ns.db"
 ADMIN_CHAT_ID = int(env_get("ADMIN_CHAT_ID", "5443870760") or "5443870760")
 
-APP_VERSION = (env_get("APP_VERSION", "1.0.4") or "1.0.4").strip()
+APP_VERSION = (env_get("APP_VERSION", "1.1") or "1.1").strip()
 ASSET_VERSION = (env_get("ASSET_VERSION", APP_VERSION) or APP_VERSION).strip()
 
 # Fix Railway postgres schemes for async SQLAlchemy
@@ -322,6 +322,10 @@ class DailyTaskLog(Base):
     task_key = Column(String, nullable=False)
     status = Column(String, nullable=False, default="done")  # done | claimed
 
+
+    # Backward-compat: some DBs have NOT NULL column is_done (used by older schema)
+    is_done = Column(Boolean, nullable=False, default=True)
+
     done_at = Column(DateTime, nullable=True)     # naive UTC
     claimed_at = Column(DateTime, nullable=True)  # naive UTC
     points = Column(Integer, nullable=False, default=0)
@@ -473,6 +477,8 @@ async def init_db():
                 day VARCHAR NOT NULL,
                 task_key VARCHAR NOT NULL,
                 status VARCHAR NOT NULL DEFAULT 'done',
+        is_done BOOLEAN NOT NULL DEFAULT TRUE,
+                is_done BOOLEAN NOT NULL DEFAULT TRUE,
                 done_at TIMESTAMP NULL,
                 claimed_at TIMESTAMP NULL,
                 points INTEGER NOT NULL DEFAULT 0,
@@ -482,6 +488,10 @@ async def init_db():
         )
         await _safe_exec(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_task_logs_tid_day_key ON daily_task_logs (telegram_id, day, task_key);")
         await _safe_exec(conn, "CREATE INDEX IF NOT EXISTS ix_daily_task_logs_tid_day ON daily_task_logs (telegram_id, day);")
+        # daily_task_logs compatibility (older schemas expect is_done NOT NULL)
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS is_done BOOLEAN NOT NULL DEFAULT TRUE;")
+        await _safe_exec(conn, "UPDATE daily_task_logs SET is_done = TRUE WHERE is_done IS NULL;")
+
 
         # posts
         await _safe_exec(conn, "ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;")
@@ -529,6 +539,8 @@ async def init_db():
         day VARCHAR NOT NULL,
         task_key VARCHAR NOT NULL,
         status VARCHAR NOT NULL DEFAULT 'done',
+        is_done BOOLEAN NOT NULL DEFAULT TRUE,
+                is_done BOOLEAN NOT NULL DEFAULT TRUE,
         done_at TIMESTAMP NULL,
         claimed_at TIMESTAMP NULL,
         points INTEGER NOT NULL DEFAULT 0,
@@ -637,6 +649,10 @@ async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, ta
         # do not downgrade claimed
         if existing.status != "claimed":
             existing.status = "done"
+            try:
+                existing.is_done = True
+            except Exception:
+                pass
             existing.done_at = existing.done_at or now
             if meta:
                 m = dict(existing.meta or {})
@@ -651,6 +667,7 @@ async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, ta
             day=day,
             task_key=task_key,
             status="done",
+            is_done=True,
             done_at=now,
             points=0,
             meta=meta or {},
@@ -2392,9 +2409,8 @@ async def _telegram_runner():
         await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
         logger.info("✅ Telegram bot started (polling)")
         while True:
-            # Auto-discover missed channel posts (best-effort)
-            await reconcile_recent_public_posts(max_probe=60)
-            await asyncio.sleep(30)
+            # Keep runner alive; channel_post handlers index posts in real-time
+            await asyncio.sleep(int(os.getenv('BOT_IDLE_TICK', '30')))
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -2450,6 +2466,12 @@ async def start_telegram_bot():
 
     tg_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, on_channel_post))
     tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST, on_edited_channel_post))
+
+    try:
+        me = await tg_app.bot.get_me()
+        logger.info('🤖 Bot identity: @%s (id=%s)', me.username, me.id)
+    except Exception as e:
+        logger.warning('Bot getMe failed (token/webhook issue?): %s', e)
 
     tg_task = asyncio.create_task(_telegram_runner())
 
@@ -6619,6 +6641,7 @@ async def daily_claim_api(req: DailyClaimReq):
                 day=day,
                 task_key=key,
                 status="claimed",
+                is_done=True,
                 done_at=now,
                 claimed_at=now,
                 points=award,
@@ -6626,6 +6649,10 @@ async def daily_claim_api(req: DailyClaimReq):
             )
         else:
             lg.status = "claimed"
+            try:
+                lg.is_done = True
+            except Exception:
+                pass
             lg.claimed_at = now
             lg.points = award
         session.add(lg)
