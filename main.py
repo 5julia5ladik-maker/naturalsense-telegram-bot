@@ -227,15 +227,16 @@ DAILY_TASKS: list[dict[str, Any]] = [
 
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
 
-# per 1_000_000
+# per 1_000_000 (проценты:
+# +50=45%, +100=25%, +150=15%, +200=8%, +300=4%, билет=2%, Dior=1%)
 ROULETTE_DISTRIBUTION: list[dict[str, Any]] = [
-    {"weight": 416_667, "key": "points_500", "type": "points", "value": 50, "label": "+50 баллов"},
-    {"weight": 291_667, "key": "points_1000", "type": "points", "value": 100, "label": "+100 баллов"},
-    {"weight": 125_000, "key": "points_1500", "type": "points", "value": 150, "label": "+150 баллов"},
-    {"weight": 83_333,  "key": "points_2000", "type": "points", "value": 200, "label": "+200 баллов"},
-    {"weight": 41_667,  "key": "ticket_1",   "type": "raffle_ticket", "value": 1, "label": "🎟 +1 билет"},
-    {"weight": 29_166,  "key": "points_3000", "type": "points", "value": 300, "label": "+300 баллов"},
-    {"weight": 12_500,  "key": "dior_palette", "type": "physical_dior_palette", "value": 1, "label": "✨ Dior Palette"},
+    {"weight": 450_000, "key": "points_500", "type": "points", "value": 50, "label": "+50 баллов"},
+    {"weight": 250_000, "key": "points_1000", "type": "points", "value": 100, "label": "+100 баллов"},
+    {"weight": 150_000, "key": "points_1500", "type": "points", "value": 150, "label": "+150 баллов"},
+    {"weight": 80_000,  "key": "points_2000", "type": "points", "value": 200, "label": "+200 баллов"},
+    {"weight": 40_000,  "key": "points_3000", "type": "points", "value": 300, "label": "+300 баллов"},
+    {"weight": 20_000,  "key": "ticket_1",   "type": "raffle_ticket", "value": 1, "label": "🎟 +1 билет"},
+    {"weight": 10_000,  "key": "dior_palette", "type": "physical_dior_palette", "value": 1, "label": "✨ Dior Palette"},
 ]
 ROULETTE_TOTAL = sum(x["weight"] for x in ROULETTE_DISTRIBUTION)
 if ROULETTE_TOTAL != 1_000_000:
@@ -3241,6 +3242,8 @@ function esc(s){
       raffle:null,
       rouletteHistory:[],
 
+      rouletteOddsOpen:false,
+
       rouletteRecent: [],
       rouletteWheel: {angle:0, spinning:false, mode:"idle", lastTick:-1, startedAt:0, targetKey:null, spinId:null, prize:null, overlay:false},
       rouletteStatus: {can_spin:true, seconds_left:0, enough_points:true, points:0, spin_cost:300},
@@ -3548,6 +3551,16 @@ function esc(s){
       render();
     }
 
+    // Roulette odds sheet
+    function openRouletteOdds(){
+      state.rouletteOddsOpen = true;
+      render();
+    }
+    function closeRouletteOdds(){
+      state.rouletteOddsOpen = false;
+      render();
+    }
+
     async function loadRaffleStatus(){
       if(!tgUserId) return;
       try{
@@ -3623,14 +3636,15 @@ function esc(s){
 
 
     // ------------------ ROULETTE LUX (Obsidian Glass) ------------------
+    // Chances (percent): +50=45, +100=25, +150=15, +200=8, +300=4, ticket=2, Dior=1
     const ROULETTE_SEGMENTS = [
-      {key:"points_500",  icon:"💎", text:"+50"},
-      {key:"points_1000", icon:"💎", text:"+100"},
-      {key:"points_1500", icon:"💎", text:"+150"},
-      {key:"points_2000", icon:"💎", text:"+200"},
-      {key:"ticket_1",    icon:"🎟", text:"+1"},
-      {key:"points_3000", icon:"💎", text:"+300"},
-      {key:"dior_palette",icon:"✨", text:"Dior"},
+      {key:"points_500",  icon:"💎", text:"+50",  chance:45},
+      {key:"points_1000", icon:"💎", text:"+100", chance:25},
+      {key:"points_1500", icon:"💎", text:"+150", chance:15},
+      {key:"points_2000", icon:"💎", text:"+200", chance:8},
+      {key:"ticket_1",    icon:"🎟", text:"+1",   chance:2},
+      {key:"points_3000", icon:"💎", text:"+300", chance:4},
+      {key:"dior_palette",icon:"✨", text:"Dior", chance:1},
     ];
     const SEG_N = ROULETTE_SEGMENTS.length;
     const SEG_ANGLE = (Math.PI*2)/SEG_N;
@@ -4865,6 +4879,60 @@ function renderDailySheet(){
       }
     }
 
+    function renderRouletteOddsSheet(){
+      const overlay = document.getElementById("oddsOverlay");
+      if(!overlay) return;
+      overlay.classList.toggle("open", !!state.rouletteOddsOpen);
+      const content = document.getElementById("oddsContent");
+      if(!content) return;
+      content.innerHTML = "";
+      if(!state.rouletteOddsOpen) return;
+
+      const hdr = el("div","row");
+      hdr.style.alignItems="baseline";
+      hdr.appendChild(el("div","h1","📊 Шансы рулетки"));
+      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
+      close.addEventListener("click", ()=>{ haptic(); closeRouletteOdds(); });
+      hdr.appendChild(close);
+      content.appendChild(hdr);
+
+      // list
+      const list = el("div");
+      list.style.marginTop = "12px";
+      list.style.display = "grid";
+      list.style.gap = "10px";
+
+      // We show exactly the configured chances on the wheel.
+      for(const s of ROULETTE_SEGMENTS){
+        const row = el("div","card2");
+        row.style.display = "flex";
+        row.style.justifyContent = "space-between";
+        row.style.alignItems = "center";
+        row.style.gap = "10px";
+
+        const left = el("div");
+        left.style.display = "flex";
+        left.style.alignItems = "center";
+        left.style.gap = "10px";
+
+        const ic = el("div",null,'<div style="font-size:18px;line-height:1">'+esc(String(s.icon||""))+'</div>');
+        const title = el("div");
+        const sub = (s.key||"").startsWith("points_") ? "бонусы" : ((s.key||"")==="ticket_1" ? "билет" : "приз");
+        title.innerHTML = '<div style="font-weight:900">'+esc(String(s.text||""))+'</div><div class="sub" style="margin-top:4px">'+esc(sub)+'</div>';
+        left.appendChild(ic);
+        left.appendChild(title);
+
+        const pct = el("div",null,'<div class="pill" style="border-color:rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);font-weight:950">'+esc(String(s.chance))+'%</div>');
+
+        row.appendChild(left);
+        row.appendChild(pct);
+        list.appendChild(row);
+      }
+      content.appendChild(list);
+
+      content.appendChild(el("div","sub", "Проценты: +50=45%, +100=25%, +150=15%, +200=8%, +300=4%, билет=2%, Dior=1%"));
+    }
+
     function renderПрофильSheet(){
       const overlay = document.getElementById("profileOverlay");
       overlay.classList.toggle("open", !!state.profileOpen);
@@ -5144,9 +5212,20 @@ if(state.profileView==="roulette"){
 
           const title = el("div");
           title.style.marginTop="12px";
-          title.innerHTML =
+          const titleRow = el("div","row");
+          titleRow.style.alignItems = "flex-start";
+          const titleLeft = el("div");
+          titleLeft.innerHTML =
             '<div style="font-size:14px;font-weight:900">Рулетка</div>'+
             '<div class="sub" style="margin-top:6px">Крутить = '+String((state.rouletteStatus?.spin_cost)||0)+' баллов.</div>';
+          const oddsBtn = el("div","pill","📊 Шансы");
+          oddsBtn.style.cursor = "pointer";
+          oddsBtn.style.borderColor = "rgba(255,255,255,0.14)";
+          oddsBtn.style.background = "rgba(255,255,255,0.06)";
+          oddsBtn.addEventListener("click", ()=>{ haptic(); openRouletteOdds(); });
+          titleRow.appendChild(titleLeft);
+          titleRow.appendChild(oddsBtn);
+          title.appendChild(titleRow);
           wrap.appendChild(title);
 
           const stage = el("div","wheelStage");
@@ -5549,6 +5628,15 @@ dS.appendChild(el("div","sheetHandle"));
 const dC = el("div"); dC.id="dailyContent";
 dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
 
+      // Roulette odds
+      const oO = el("div","sheetOverlay"); oO.id="oddsOverlay";
+      oO.addEventListener("click", (e)=>{ if(e.target===oO){ haptic(); closeRouletteOdds(); }});
+      const oS = el("div","sheet");
+      oS.addEventListener("click",(e)=>e.stopPropagation());
+      oS.appendChild(el("div","sheetHandle"));
+      const oC = el("div"); oC.id="oddsContent";
+      oS.appendChild(oC); oO.appendChild(oS); root.appendChild(oO);
+
     }
 
     function render(){
@@ -5574,6 +5662,7 @@ dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
 
       renderPostsSheet();
       renderInventorySheet();
+      renderRouletteOddsSheet();
       renderПрофильSheet();
       renderDailySheet();
     }
