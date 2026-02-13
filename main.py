@@ -12,6 +12,64 @@ from typing import Optional, Literal, Any
 import httpx
 from pydantic import BaseModel, Field
 
+# -----------------------------------------------------------------------------
+# HTTP CLIENT (shared) + retry/throttle for t.me embed fetches
+# -----------------------------------------------------------------------------
+_HTTP_CLIENT: httpx.AsyncClient | None = None
+_HTTP_SEMAPHORE: asyncio.Semaphore | None = None
+
+HTTP_MAX_CONCURRENCY = int(os.getenv("HTTP_MAX_CONCURRENCY", "4"))
+HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "10"))
+HTTP_RETRIES = int(os.getenv("HTTP_RETRIES", "3"))
+HTTP_BACKOFF_BASE = float(os.getenv("HTTP_BACKOFF_BASE", "0.6"))
+
+def _utcnow() -> datetime:
+    """Naive UTC timestamp to keep DB comparisons consistent."""
+    return datetime.utcnow()
+
+async def _get_http_client() -> httpx.AsyncClient:
+    global _HTTP_CLIENT, _HTTP_SEMAPHORE
+    if _HTTP_SEMAPHORE is None:
+        _HTTP_SEMAPHORE = asyncio.Semaphore(max(1, HTTP_MAX_CONCURRENCY))
+
+    if _HTTP_CLIENT is None:
+        limits = httpx.Limits(max_keepalive_connections=20, max_connections=40)
+        _HTTP_CLIENT = httpx.AsyncClient(
+            timeout=HTTP_TIMEOUT,
+            follow_redirects=True,
+            limits=limits,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+    return _HTTP_CLIENT
+
+async def _close_http_client() -> None:
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is not None:
+        try:
+            await _HTTP_CLIENT.aclose()
+        except Exception:
+            pass
+        _HTTP_CLIENT = None
+
+async def _http_get_text(url: str) -> tuple[int, str]:
+    """HTTP GET with concurrency limit + basic retries/backoff. Returns (status, text)."""
+    client = await _get_http_client()
+    sem = _HTTP_SEMAPHORE or asyncio.Semaphore(1)
+
+    last_exc: Exception | None = None
+    for attempt in range(HTTP_RETRIES + 1):
+        try:
+            async with sem:
+                r = await client.get(url)
+            return r.status_code, (r.text or "")
+        except Exception as e:
+            last_exc = e
+            # backoff: 0.6, 1.2, 2.4 ...
+            await asyncio.sleep(HTTP_BACKOFF_BASE * (2 ** attempt))
+    raise last_exc or RuntimeError("HTTP failed")
+
+
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -1026,12 +1084,19 @@ async def upsert_post_from_channel(
         return p
 
 
+
+# -----------------------------------------------------------------------------
+# HOT PATH CACHE (Mini App feed)
+# -----------------------------------------------------------------------------
+_LIST_POSTS_CACHE: dict[tuple[str | None, int], tuple[float, list[Any]]] = {}
+_LIST_POSTS_CACHE_TTL = float(os.getenv("LIST_POSTS_CACHE_TTL", "20"))
+
 async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
     if tag and tag in BLOCKED_TAGS:
         return []
 
     tag = (tag or "").strip() if tag else None
-    want_norm = None
+    want_norm: str | None = None
     if tag:
         # Канонизируем запрос тега (например, 'люкс' -> 'Люкс'), сравниваем без учета регистра
         tag_canon = CANON_TAGS.get(_norm_tag(tag), tag)
@@ -1039,9 +1104,15 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
 
     # ВАЖНО: чтобы старые посты с тегом не пропадали, сначала берем расширенное окно,
     # затем фильтруем по тегу и только потом применяем offset/limit к отфильтрованному списку.
-    # Это не меняет логику приложения — только позволяет видеть посты с тегом за пределами последних N.
     window = max(1000, (offset + limit) * 40)
     window = min(window, 5000)
+
+    cache_key = (want_norm, window)
+    now_ts = asyncio.get_event_loop().time()
+    cached = _LIST_POSTS_CACHE.get(cache_key)
+    if cached and (now_ts - cached[0]) < _LIST_POSTS_CACHE_TTL:
+        rows = cached[1]
+        return rows[offset: offset + limit]
 
     async with async_session_maker() as session:
         q = (
@@ -1058,7 +1129,9 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
 
         rows = [p for p in rows if any(_canon_norm(x) == want_norm for x in (p.tags or []))]
 
+    _LIST_POSTS_CACHE[cache_key] = (now_ts, rows)
     return rows[offset: offset + limit]
+
 
 
 # -----------------------------------------------------------------------------
@@ -1067,22 +1140,23 @@ async def list_posts(tag: str | None, limit: int = 50, offset: int = 0):
 async def message_exists_public(message_id: int) -> bool:
     url = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            if r.status_code == 404:
-                return False
-            if r.status_code != 200:
-                return True
-
-            html = (r.text or "").lower()
-            if "message not found" in html or "post not found" in html:
-                return False
-            if "join channel" in html or "this channel is private" in html:
-                return True
+        status, body = await _http_get_text(url)
+        if status == 404:
+            return False
+        if status != 200:
+            # treat temporary issues as "exists" to avoid false deletions
             return True
+
+        low = (body or "").lower()
+        if "message not found" in low or "post not found" in low:
+            return False
+        if "join channel" in low or "this channel is private" in low or "private channel" in low:
+            return True
+        return True
     except Exception as e:
         logger.warning("Sweeper check failed for %s: %s", message_id, e)
         return True
+
 
 
 async def sweep_deleted_posts(batch: int = 30):
@@ -1122,12 +1196,13 @@ async def sweep_deleted_posts(batch: int = 30):
 
 
 async def sweeper_loop():
+    interval = int(os.getenv("SWEEPER_INTERVAL", "180"))
     while True:
         try:
             await sweep_deleted_posts(batch=30)
         except Exception as e:
             logger.error("Sweeper error: %s", e)
-        await asyncio.sleep(30)  
+        await asyncio.sleep(max(30, interval))
 # -----------------------------------------------------------------------------
 # PUBLIC RECONCILE (AUTO DISCOVER NEW POSTS)
 # -----------------------------------------------------------------------------
@@ -1135,17 +1210,15 @@ async def fetch_public_post_text(message_id: int) -> str | None:
     """Fetches public embed HTML and extracts visible text. Returns None if not accessible or not found."""
     url = f"https://t.me/{CHANNEL_USERNAME}/{message_id}?embed=1"
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            if r.status_code == 404:
-                return None
-            if r.status_code != 200:
-                return None
-            html_text = r.text or ""
+        status, html_text = await _http_get_text(url)
+        if status == 404:
+            return None
+        if status != 200:
+            return None
     except Exception:
         return None
 
-    low = html_text.lower()
+    low = (html_text or "").lower()
     # Not found / private / need join
     if "message not found" in low or "post not found" in low:
         return None
@@ -1160,65 +1233,8 @@ async def fetch_public_post_text(message_id: int) -> str | None:
     txt = re.sub(r"(?is)<[^>]+>", " ", txt)
     txt = html.unescape(txt)
     txt = re.sub(r"[ \t\r]+", " ", txt)
-    txt = re.sub(r"\n\s+", "\n", txt)
-    txt = txt.strip()
-
-    # Heuristic: keep only the longest chunk that likely contains the message text
-    # If extraction failed, return empty string to still allow tagging from raw.
-    return txt if txt else ""
-
-async def reconcile_recent_public_posts(max_probe: int = 60):
-    """Best-effort: probe message_id gaps after the newest known id and index what exists.
-    This makes the bot resilient if it missed channel_post updates."""
-    try:
-        async with async_session() as session:
-            res = await session.execute(select(func.max(Post.message_id)))
-            last_id = res.scalar() or 0
-    except Exception:
-        return
-
-    start_id = int(last_id) + 1
-    end_id = start_id + int(max_probe) - 1
-
-    for mid in range(start_id, end_id + 1):
-        txt = await fetch_public_post_text(mid)
-        if txt is None:
-            continue
-
-        # Avoid indexing duplicates if concurrent runner
-        try:
-            async with async_session() as session:
-                exists = await session.execute(select(Post).where(Post.message_id == mid))
-                if exists.scalar_one_or_none():
-                    continue
-        except Exception:
-            pass
-
-        # Extract tags from the visible text (works for both text posts and captions)
-        tags = extract_tags(txt)
-
-        # Use the extracted text as post text; date is unknown from public embed reliably
-        await upsert_post_from_channel(
-            message_id=mid,
-            date=datetime.now(timezone.utc),
-            text_=txt,
-            media_type=None,
-            media_file_id=None,
-        )
-        # Ensure tags are persisted even if text got truncated upstream
-        if tags:
-            try:
-                async with async_session() as session:
-                    await session.execute(
-                        update(Post).where(Post.message_id == mid).values(tags=tags)
-                    )
-                    await session.commit()
-            except Exception:
-                pass
-
-        logger.info("🔎 Reconciled public post id=%s tags=%s", mid, tags)
-
-# 30 секунд
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+    return txt.strip() or None
 
 
 # -----------------------------------------------------------------------------
@@ -1298,21 +1314,33 @@ async def get_bot_deeplink_runtime(context: ContextTypes.DEFAULT_TYPE) -> Option
 
 
 
+
+_LAST_SILENT_KB: dict[int, float] = {}
 async def set_keyboard_silent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Telegram показывает ReplyKeyboard только через сообщение.
     # Делаем невидимое сообщение и удаляем -> в чате ничего не видно, кнопки остаются.
     chat = update.effective_chat
     if not chat:
         return
+
+    # Anti-flood: не шлём "тихое" сообщение слишком часто в один и тот же чат
+    now_ts = asyncio.get_event_loop().time()
+    last_ts = _LAST_SILENT_KB.get(chat.id, 0.0)
+    if (now_ts - last_ts) < 8.0:
+        return
+    _LAST_SILENT_KB[chat.id] = now_ts
+
     try:
         m = await context.bot.send_message(chat_id=chat.id, text="\u200b", reply_markup=get_main_keyboard())
-        await asyncio.sleep(0.8)
+        # достаточно маленькой задержки, чтобы Telegram успел применить клавиатуру
+        await asyncio.sleep(0.15)
         try:
             await context.bot.delete_message(chat_id=chat.id, message_id=m.message_id)
         except Exception:
             pass
     except Exception:
         pass
+
 
 
 def build_help_text() -> str:
@@ -1743,7 +1771,7 @@ def _sync_enabled(context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not until:
         return False
     try:
-        return datetime.now(timezone.utc) < until
+        return _utcnow() < until
     except Exception:
         return False
 
@@ -1754,7 +1782,7 @@ async def cmd_sync_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin(update):
         await update.message.reply_text("⛔️ Только админ.")
         return
-    context.application.bot_data[SYNC_KEY] = datetime.now(timezone.utc) + timedelta(minutes=60)
+    context.application.bot_data[SYNC_KEY] = _utcnow() + timedelta(minutes=60)
     await update.message.reply_text(
         "✅ Режим синхронизации медиа ВКЛ на 60 минут.\n"
         "Теперь пересылай посты из канала обычным форвардом (со ссылкой на источник)."
@@ -1849,7 +1877,7 @@ async def on_sync_forward(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         post.media_type = media_type
         post.media_file_id = media_file_id
-        post.updated_at = datetime.now(timezone.utc)
+        post.updated_at = _utcnow()
         await session.commit()
 
     await msg.reply_text(f"✅ Обновил пост {origin_mid}: {media_type}")
@@ -2489,13 +2517,10 @@ def get_webapp_html() -> str:
     <meta http-equiv="Expires" content="0" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="color-scheme" content="dark" />
-  <meta name="theme-color" content="#0c0f14" />
   <title>NS · Natural Sense</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    html{color-scheme:dark}
     :root{
       --bg:#0c0f14;
       --card:rgba(255,255,255,0.08);
@@ -3099,21 +3124,25 @@ def get_webapp_html() -> str:
     function setVar(k,v){ document.documentElement.style.setProperty(k,v); }
 
     function applyTelegramTheme(){
-      // FORCE DARK THEME: ignore Telegram light/day theme completely (pixel-to-pixel).
-      const bg = DEFAULT_BG;
+      const scheme = tg && tg.colorScheme ? tg.colorScheme : "dark";
+      const p = tg && tg.themeParams ? tg.themeParams : {};
+      const bg = p.bg_color || DEFAULT_BG;
+      const text = p.text_color || (scheme==="dark" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)");
+      const muted = p.hint_color || (scheme==="dark" ? "rgba(255,255,255,0.60)" : "rgba(0,0,0,0.55)");
+
       setVar("--bg", bg);
-      setVar("--text", "rgba(255,255,255,0.92)");
-      setVar("--muted", "rgba(255,255,255,0.60)");
-      setVar("--stroke", "rgba(255,255,255,0.12)");
-      setVar("--card", "rgba(255,255,255,0.08)");
-      setVar("--card2", "rgba(255,255,255,0.06)");
-      setVar("--sheetOverlay", hexToRgba(bg,0.55));
-      setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
-      setVar("--glassStroke", "rgba(255,255,255,0.18)");
-      setVar("--glassShadow", "rgba(0,0,0,0.45)");
+      setVar("--text", text);
+      setVar("--muted", muted);
+      setVar("--stroke", scheme==="dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)");
+      setVar("--card", scheme==="dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.72)");
+      setVar("--card2", scheme==="dark" ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)");
+
+      setVar("--sheetOverlay", scheme==="dark" ? hexToRgba(bg,0.55) : hexToRgba(bg,0.45));
+      setVar("--sheetCardBg", scheme==="dark" ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.86)");
+      setVar("--glassStroke", scheme==="dark" ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.10)");
+      setVar("--glassShadow", scheme==="dark" ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.18)");
 
       try{
-        document.documentElement.style.colorScheme = "dark";
         if(tg){
           tg.setHeaderColor(bg);
           tg.setBackgroundColor(bg);
@@ -5575,6 +5604,8 @@ async def lifespan(app_: FastAPI):
             except Exception:
                 pass
         await stop_telegram_bot()
+        await _close_http_client()
+
         logger.info("✅ NS · Natural Sense stopped")
 
 
