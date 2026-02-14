@@ -700,7 +700,13 @@ async def _get_daily_logs(session: AsyncSession, telegram_id: int, day: str) -> 
         return {}
 
 
-async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, task_key: str, meta: dict | None = None) -> None:
+async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, task_key: str, meta: dict | None = None) -> bool:
+    """Upsert daily_task_logs row for (telegram_id, day, task_key).
+    Returns True only when this call should be treated as a *new* counted progress for today.
+    """
+    cfg = DAILY_TASKS.get(task_key)
+    need = int(cfg.get("need", 1)) if cfg else 1
+
     existing = (await session.execute(
         select(DailyTaskLog).where(
             DailyTaskLog.telegram_id == telegram_id,
@@ -710,40 +716,70 @@ async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, ta
     )).scalar_one_or_none()
 
     now = datetime.utcnow()
-    if existing:
-        # do not downgrade claimed
-        if existing.status != "claimed":
-            existing.status = "done"
-            try:
-                existing.is_done = True
-            except Exception:
-                pass
-            existing.done_at = existing.done_at or now
-            try:
-                existing.is_claimed = False
-            except Exception:
-                pass
-            if meta:
-                m = dict(existing.meta or {})
-                m.update(meta)
-                existing.meta = m
-            session.add(existing)
-        return
 
-    session.add(
-        DailyTaskLog(
+    # --- Open 3 posts: allow repeated progress until need is reached ---
+    if task_key == "open_post":
+        prev_cnt = 0
+        if existing and isinstance(existing.meta, dict):
+            prev_cnt = int(existing.meta.get("count", 0) or 0)
+        new_cnt = prev_cnt
+        if meta and isinstance(meta, dict):
+            new_cnt = int(meta.get("count", prev_cnt) or prev_cnt)
+        # If already reached the target today -> do not count again
+        if prev_cnt >= need:
+            return False
+
+        if existing:
+            existing.status = "done"  # status is kept for simplicity; UI uses progress>=need
+            existing.is_done = True
+            existing.done_at = now
+            existing.meta = meta or existing.meta or {}
+            session.add(existing)
+            return True
+
+        session.add(DailyTaskLog(
             telegram_id=telegram_id,
             day=day,
             task_key=task_key,
             status="done",
             is_done=True,
-            is_claimed=False,
             done_at=now,
+            is_claimed=False,
+            claimed_at=None,
             points=0,
+            points_claimed=0,
             meta=meta or {},
-        )
-    )
+        ))
+        return True
 
+    # --- All other tasks (need == 1): count only once per day ---
+    if existing:
+        # already completed today -> nothing to count
+        if getattr(existing, "is_done", False) or getattr(existing, "status", None) in ("done", "claimed"):
+            return False
+
+        existing.status = "done"
+        existing.is_done = True
+        existing.done_at = now
+        if meta is not None:
+            existing.meta = meta
+        session.add(existing)
+        return True
+
+    session.add(DailyTaskLog(
+        telegram_id=telegram_id,
+        day=day,
+        task_key=task_key,
+        status="done",
+        is_done=True,
+        done_at=now,
+        is_claimed=False,
+        claimed_at=None,
+        points=0,
+        points_claimed=0,
+        meta=meta or {},
+    ))
+    return True
 
 async def _can_unlock_bonus_day(task_map: dict[str, dict[str, Any]], logs: dict[str, DailyTaskLog]) -> bool:
     # All non-special tasks must be claimed (or at least done?) -> to avoid abuse, require claimed.
@@ -3330,6 +3366,8 @@ function esc(s){
       daily:null,
       dailyMsg:"",
       dailyBusy:false,
+      dailyTrackEnabled:false,
+      dailyTaskStatus:{},
       msg:"",
       busy:false
     };
@@ -3430,7 +3468,38 @@ function esc(s){
     }
 
 
-    const tgUserId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
+    function extractTelegramId() {
+      const tgApp = window.Telegram && window.Telegram.WebApp;
+      // 1) Fast path: initDataUnsafe.user.id
+      try {
+        const id = tgApp && tgApp.initDataUnsafe && tgApp.initDataUnsafe.user ? tgApp.initDataUnsafe.user.id : null;
+        if (id) return String(id);
+      } catch (e) {}
+
+      // 2) Parse initData (querystring) and extract user JSON
+      try {
+        const init = (tgApp && tgApp.initData) ? String(tgApp.initData) : "";
+        if (init) {
+          const params = new URLSearchParams(init);
+          const userStr = params.get("user");
+          if (userStr) {
+            const user = JSON.parse(decodeURIComponent(userStr));
+            if (user && user.id) return String(user.id);
+          }
+        }
+      } catch (e) {}
+
+      // 3) Fallback: URL query params (if you ever pass telegram_id)
+      try {
+        const p = new URLSearchParams(window.location.search);
+        const id = p.get("telegram_id") || p.get("tg") || p.get("user_id");
+        if (id) return String(id);
+      } catch (e) {}
+
+      return null;
+    }
+
+    const tgUserId = extractTelegramId();
 
     // Data sets
     const JOURNAL_BLOCKS = [
@@ -4602,6 +4671,11 @@ async function refreshDailyIfOpen(reason){
     ]);
     state.dailyLogin = login;
     state.dailyTasks = tasks;
+    // tracking only while Daily is open and tasks are still remaining
+    state.dailyTrackEnabled = !!state.dailyOpen && (Number(tasks?.remaining_points || 0) > 0);
+    const map = {};
+    (tasks?.tasks || []).forEach(t => { map[t.key] = { done: !!t.done, claimed: !!t.claimed, progress: t.progress || null }; });
+    state.dailyTaskStatus = map;
     try{
       if(state.dailyEventUI && tasks && Array.isArray(tasks.tasks)){
         for(const t of tasks.tasks){
@@ -4668,18 +4742,19 @@ function _dailyTaskTitle(taskKey){
 async function dailyEvent(event, data, taskKey){
   const k = String(taskKey || event || "");
   const title = k ? _dailyTaskTitle(k) : "";
-
-  // If task already completed/claimed for today — allow opening links but do NOT spam notifications or API calls.
-  if (k) {
-    const t = (state.dailyTasks || []).find((x) => x.task_key === k);
-    if (t && (t.is_done || t.is_claimed)) {
-      return { ok: true, skipped: true, reason: "already_done" };
-    }
-  }
-
   const now = Date.now();
 
-  // Always set pending (even if Daily sheet closes right after click)
+  // 🔒 We count + show notifications ONLY while Daily window is open and tasks are still remaining.
+  if(!state.dailyOpen || !state.dailyTrackEnabled){
+    return {ok:true, skipped:true, reason:"daily_closed_or_done"};
+  }
+
+  // If this task is already done today — do nothing (no request, no toast)
+  if(k && state.dailyTaskStatus && state.dailyTaskStatus[k] && state.dailyTaskStatus[k].done){
+    return {ok:true, skipped:true, already:true};
+  }
+
+  // Always set pending (while Daily is open)
   try{
     if(k){
       state.dailyEventUI = state.dailyEventUI || {};
@@ -4688,76 +4763,72 @@ async function dailyEvent(event, data, taskKey){
     }
   }catch(e){}
 
-  if(!tgUserId){
-    if(k){
+  const res = await apiPost("/api/daily/event", {telegram_id: tgUserId, event: event, data: (data||{})});
+  if(!res || !res.ok){
+    // show error only if Daily still active and task not done
+    if(state.dailyOpen && state.dailyTrackEnabled && k && !(state.dailyTaskStatus?.[k]?.done)){
+      toast(`❌ Не засчиталось (${res?.reason || "server_error"}) — повтори`);
       try{
         state.dailyEventUI = state.dailyEventUI || {};
-        state.dailyEventUI[k] = {status:"error", at: Date.now(), msg:"no_telegram_id"};
+        state.dailyEventUI[k] = {status:"fail", at: Date.now()};
         render();
       }catch(e){}
-      toast("❌ Не засчиталось" + (title ? (": "+title) : "") + " (нет Telegram ID)");
     }
-    return;
+    return res;
   }
 
-  // Hard timeout guard: if request hangs, flip pending -> error so user sees it.
-  let timeoutFlip = null;
-  try{
-    if(k){
-      timeoutFlip = setTimeout(()=>{
-        try{
-          const cur = state.dailyEventUI && state.dailyEventUI[k];
-          if(cur && cur.status==="pending"){
-            state.dailyEventUI[k] = {status:"error", at: Date.now(), msg:"timeout"};
-            render();
-            toast("❌ Не засчиталось" + (title ? (": "+title) : "") + " (таймаут) — повтори");
-          }
-        }catch(e){}
-      }, 2500);
-    }
-  }catch(e){}
-
-  try{
-    const resp = await apiPost("/api/daily/event", {telegram_id: tgUserId, event: event, data: (data||{})});
-
-    // Backend returns {ok:true} or {ok:false, reason:...}
-    const ok = !!(resp && (resp.ok === true || resp.ok === "true"));
-
-    if(timeoutFlip){ try{ clearTimeout(timeoutFlip); }catch(e){} timeoutFlip=null; }
-
-    if(k){
-      state.dailyEventUI = state.dailyEventUI || {};
-      state.dailyEventUI[k] = ok ? {status:"ok", at: Date.now()} : {status:"error", at: Date.now(), msg: String((resp && (resp.reason||resp.detail)) || "not_ok")};
-      render();
-    }
-
-    if(ok){
-      toast("✅ Засчитано" + (title ? (": "+title) : ""));
-      // Refresh tasks even if Daily is closed (so next open shows new state)
-      scheduleDailyRefresh(250);
-    }else{
-      const why = String((resp && (resp.reason||resp.detail)) || "");
-      toast("❌ Не засчиталось" + (title ? (": "+title) : "") + (why ? (" ("+why+")") : "") + " — повтори");
-      scheduleDailyRefresh(400);
-    }
-  }catch(e){
-    if(timeoutFlip){ try{ clearTimeout(timeoutFlip); }catch(_e){} timeoutFlip=null; }
+  // ignored / unknown events are OK (no toast)
+  if(res.ignored || res.reason === "unknown_event"){
     try{
-      const msg = (e && e.message) ? String(e.message) : "";
       if(k){
         state.dailyEventUI = state.dailyEventUI || {};
-        state.dailyEventUI[k] = {status:"error", at: Date.now(), msg: msg};
+        state.dailyEventUI[k] = {status:"ok", at: Date.now()};
         render();
       }
-      toast("❌ Не засчиталось" + (title ? (": "+title) : "") + (msg ? (" ("+msg+")") : "") + " — повтори");
-      scheduleDailyRefresh(600);
-    }catch(_e){}
+    }catch(e){}
+    return res;
   }
+
+  // Refresh tasks to update UI & map
+  await refreshDailyIfOpen();
+
+  // After refresh: if everything is done, stop tracking & stop toasts for the rest of the day
+  if(state.dailyTasks && Number(state.dailyTasks.remaining_points || 0) <= 0){
+    state.dailyTrackEnabled = false;
+  }
+
+  // ✅ Toast only when it was actually counted now
+  if(res.counted){
+    toast(`✅ Засчитано: ${title || k}`);
+    try{
+      if(k){
+        state.dailyEventUI = state.dailyEventUI || {};
+        state.dailyEventUI[k] = {status:"ok", at: Date.now()};
+        render();
+      }
+    }catch(e){}
+  }
+
+  return res;
 }
+
 
 
 async function openDaily(){
   state.dailyOpen = true;
+        // очистка залипших "pending" (если страница перезагрузилась во время события)
+        try{
+          const now = Date.now();
+          Object.keys(state.dailyEventUI||{}).forEach((k)=>{
+            const ev = state.dailyEventUI[k];
+            if(!ev) return;
+            // если событию больше 30 секунд — сбрасываем
+            if(ev.status==="pending" && ev.t && (now-ev.t)>30000){ delete state.dailyEventUI[k]; }
+            // если уже выполнено — убираем UI-статус, чтобы не было ⏳
+            if(ev.status==="ok"){ /* оставляем ok, чтобы показывать ✅ */ }
+          });
+        }catch(e){}
+
   installDailyAutoRefreshOnce();
   state.dailyMsg = "";
   state.dailyBusy = false;
@@ -4772,6 +4843,11 @@ async function openDaily(){
     ]);
     state.dailyLogin = login;
     state.dailyTasks = tasks;
+    // tracking only while Daily is open and tasks are still remaining
+    state.dailyTrackEnabled = !!state.dailyOpen && (Number(tasks?.remaining_points || 0) > 0);
+    const map = {};
+    (tasks?.tasks || []).forEach(t => { map[t.key] = { done: !!t.done, claimed: !!t.claimed, progress: t.progress || null }; });
+    state.dailyTaskStatus = map;
   }catch(e){
     state.dailyLogin = null;
     state.dailyTasks = null;
@@ -4800,6 +4876,11 @@ async function claimDailyLogin(){
     ]);
     state.dailyLogin = login;
     state.dailyTasks = tasks;
+    // tracking only while Daily is open and tasks are still remaining
+    state.dailyTrackEnabled = !!state.dailyOpen && (Number(tasks?.remaining_points || 0) > 0);
+    const map = {};
+    (tasks?.tasks || []).forEach(t => { map[t.key] = { done: !!t.done, claimed: !!t.claimed, progress: t.progress || null }; });
+    state.dailyTaskStatus = map;
     state.dailyMsg = "✅ Бонус начислен!";
   }catch(e){
     state.dailyMsg = "❌ Не удалось забрать бонус";
@@ -7226,40 +7307,52 @@ async def daily_event_api(request: Request):
                 await session.commit()
 
             # NOTE: client events are best-effort; we still cap rewards on claim.
+            data = data_raw or {}
+            counted = False
+
             if ev == "open_miniapp":
-                await _mark_daily_done(session, tid, day, "open_miniapp")
+                counted = await _mark_daily_done(session, tid, day, "open_miniapp", data)
             elif ev == "open_channel":
-                await _mark_daily_done(session, tid, day, "open_channel")
+                counted = await _mark_daily_done(session, tid, day, "open_channel", data)
             elif ev == "use_search":
-                await _mark_daily_done(
-                    session,
-                    tid,
-                    day,
-                    "use_search",
-                    {"q": str((data_raw or {}).get("q", ""))[:64]},
-                )
-            elif ev == "open_inventory":
-                await _mark_daily_done(session, tid, day, "open_inventory")
-            elif ev == "open_profile":
-                await _mark_daily_done(session, tid, day, "open_profile")
-            elif ev == "comment_post":
-                await _mark_daily_done(session, tid, day, "comment_post")
-            elif ev == "spin_roulette":
-                await _mark_daily_done(session, tid, day, "spin_roulette")
-            elif ev == "convert_prize":
-                await _mark_daily_done(session, tid, day, "convert_prize")
+                counted = await _mark_daily_done(session, tid, day, "use_search", data)
             elif ev == "open_post":
-                # count up to need (3)
-                logs = await _get_daily_logs(session, tid, day)
-                lg = logs.get("open_post")
-                cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
-                cnt = min(3, cnt + 1)
-                await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
+                # progress task: need 3 opens
+                res = await session.execute(
+                    select(DailyTaskLog).where(
+                        DailyTaskLog.telegram_id == tid,
+                        DailyTaskLog.day == day,
+                        DailyTaskLog.task_key == "open_post",
+                    )
+                )
+                lg = res.scalar_one_or_none()
+                prev = 0
+                if lg and isinstance(lg.meta, dict):
+                    prev = int(lg.meta.get("count", 0) or 0)
+                need = int(DAILY_TASKS.get("open_post", {}).get("need", 3))
+                if prev >= need:
+                    await session.commit()
+                    return {"ok": True, "counted": False, "task_key": "open_post"}
+                cnt = min(need, prev + 1)
+                counted = await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
+            elif ev == "open_inventory":
+                counted = await _mark_daily_done(session, tid, day, "open_inventory", data)
+            elif ev == "open_profile":
+                counted = await _mark_daily_done(session, tid, day, "open_profile", data)
+            elif ev == "spin_roulette":
+                counted = await _mark_daily_done(session, tid, day, "spin_roulette", data)
+            elif ev == "convert_prize":
+                counted = await _mark_daily_done(session, tid, day, "convert_prize", data)
+            elif ev == "claim_all":
+                counted = await _mark_daily_done(session, tid, day, "claim_all", data)
             else:
-                return {"ok": False, "reason": "unknown_event", "event": ev}
+                # Unknown event should never break UX
+                await session.commit()
+                return {"ok": True, "counted": False, "ignored": True, "reason": "unknown_event"}
 
             await session.commit()
-            return {"ok": True}
+            return {"ok": True, "counted": bool(counted), "task_key": ev}
+
 
     except Exception as e:
         # never crash the client
