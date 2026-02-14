@@ -3602,10 +3602,22 @@ function esc(s){
       return fetchJson(url + sep + bust, Object.assign({method:"GET"}, (init||{})));
     }
     async function apiPost(url, body){
-      const sep = url.includes("?") ? "&" : "?";
-      const bust = "t="+Date.now();
-      return fetchJson(url + sep + bust, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{})});
+  const sep = url.includes("?") ? "&" : "?";
+  const bust = "t="+Date.now();
+
+  // Always include telegram_id for daily endpoints (prevents missing_telegram_id)
+  const payload = body ? {...body} : {};
+  if(url.startsWith("/api/daily/")){
+    if((payload.telegram_id === undefined || payload.telegram_id === null) && tgUserId){
+      payload.telegram_id = tgUserId;
     }
+  }
+
+  return fetchJson(
+    url + sep + bust,
+    {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)}
+  );
+}
 
     async function refreshUser(){
       if(!tgUserId) return;
@@ -4763,7 +4775,7 @@ async function dailyEvent(event, data, taskKey){
     }
   }catch(e){}
 
-  const res = await apiPost("/api/daily/event", {telegram_id: tgUserId, event: event, data: (data||{})});
+  const res = await apiPost("/api/daily/event", {event, data});
   if(!res || !res.ok){
     // show error only if Daily still active and task not done
     if(state.dailyOpen && state.dailyTrackEnabled && k && !(state.dailyTaskStatus?.[k]?.done)){
