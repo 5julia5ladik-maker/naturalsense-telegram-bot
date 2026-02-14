@@ -543,6 +543,17 @@ async def init_db():
         # Backfill status/is_claimed from whichever exists
         await _safe_exec(conn, "UPDATE daily_task_logs SET status = 'claimed' WHERE is_claimed = TRUE AND status <> 'claimed';")
         await _safe_exec(conn, "UPDATE daily_task_logs SET is_claimed = TRUE WHERE status = 'claimed' AND is_claimed = FALSE;")
+        # Some DBs accidentally have NOT NULL on timestamp columns. Ensure they are nullable.
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN done_at DROP NOT NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN claimed_at DROP NOT NULL;")
+        # Ensure booleans have defaults + NOT NULL
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN is_claimed SET DEFAULT FALSE;")
+        await _safe_exec(conn, "UPDATE daily_task_logs SET is_claimed=FALSE WHERE is_claimed IS NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN is_claimed SET NOT NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN is_done SET DEFAULT TRUE;")
+        await _safe_exec(conn, "UPDATE daily_task_logs SET is_done=TRUE WHERE is_done IS NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN is_done SET NOT NULL;")
+
 
 
         # posts
