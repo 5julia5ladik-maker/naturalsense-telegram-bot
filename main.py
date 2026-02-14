@@ -4635,48 +4635,83 @@ function _dailyTaskTitle(taskKey){
 }
 
 async function dailyEvent(event, data, taskKey){
-  try{
-    if(!tgUserId) return;
-    const k = String(taskKey || event || "");
+  const k = String(taskKey || event || "");
+  const title = k ? _dailyTaskTitle(k) : "";
+  const now = Date.now();
 
-    // UI feedback: show pending/ok/error прямо в Daily, чтобы было понятно засчиталось или нет
-    if(state && state.dailyOpen && k){
+  // Always set pending (even if Daily sheet closes right after click)
+  try{
+    if(k){
       state.dailyEventUI = state.dailyEventUI || {};
-      state.dailyEventUI[k] = {status:"pending", at: Date.now()};
+      state.dailyEventUI[k] = {status:"pending", at: now};
+      render();
+    }
+  }catch(e){}
+
+  if(!tgUserId){
+    if(k){
+      try{
+        state.dailyEventUI = state.dailyEventUI || {};
+        state.dailyEventUI[k] = {status:"error", at: Date.now(), msg:"no_telegram_id"};
+        render();
+      }catch(e){}
+      toast("❌ Не засчиталось" + (title ? (": "+title) : "") + " (нет Telegram ID)");
+    }
+    return;
+  }
+
+  // Hard timeout guard: if request hangs, flip pending -> error so user sees it.
+  let timeoutFlip = null;
+  try{
+    if(k){
+      timeoutFlip = setTimeout(()=>{
+        try{
+          const cur = state.dailyEventUI && state.dailyEventUI[k];
+          if(cur && cur.status==="pending"){
+            state.dailyEventUI[k] = {status:"error", at: Date.now(), msg:"timeout"};
+            render();
+            toast("❌ Не засчиталось" + (title ? (": "+title) : "") + " (таймаут) — повтори");
+          }
+        }catch(e){}
+      }, 2500);
+    }
+  }catch(e){}
+
+  try{
+    const resp = await apiPost("/api/daily/event", {telegram_id: tgUserId, event: event, data: (data||{})});
+
+    // Backend returns {ok:true} or {ok:false, reason:...}
+    const ok = !!(resp && (resp.ok === true || resp.ok === "true"));
+
+    if(timeoutFlip){ try{ clearTimeout(timeoutFlip); }catch(e){} timeoutFlip=null; }
+
+    if(k){
+      state.dailyEventUI = state.dailyEventUI || {};
+      state.dailyEventUI[k] = ok ? {status:"ok", at: Date.now()} : {status:"error", at: Date.now(), msg: String((resp && (resp.reason||resp.detail)) || "not_ok")};
       render();
     }
 
-    await apiPost("/api/daily/event", {telegram_id: tgUserId, event: event, data: (data||{})});
-
-    // Mark as OK (if Daily open) and show toast globally for clarity
-    if(state && state.dailyOpen && k){
-      state.dailyEventUI = state.dailyEventUI || {};
-      state.dailyEventUI[k] = {status:"ok", at: Date.now()};
-    }
-    if(k){
-      const title = _dailyTaskTitle(k);
+    if(ok){
       toast("✅ Засчитано" + (title ? (": "+title) : ""));
-    }
-
-    // If Daily sheet is open — refresh quickly so the user sees completion instantly.
-    // Small delay gives backend time to commit.
-    if(state && state.dailyOpen){
+      // Refresh tasks even if Daily is closed (so next open shows new state)
       scheduleDailyRefresh(250);
+    }else{
+      const why = String((resp && (resp.reason||resp.detail)) || "");
+      toast("❌ Не засчиталось" + (title ? (": "+title) : "") + (why ? (" ("+why+")") : "") + " — повтори");
+      scheduleDailyRefresh(400);
     }
   }catch(e){
+    if(timeoutFlip){ try{ clearTimeout(timeoutFlip); }catch(_e){} timeoutFlip=null; }
     try{
-      const k = String(taskKey || event || "");
-      if(state && state.dailyOpen && k){
-        state.dailyEventUI = state.dailyEventUI || {};
-        state.dailyEventUI[k] = {status:"error", at: Date.now(), msg: (e && e.message) ? String(e.message) : ""};
-      }
+      const msg = (e && e.message) ? String(e.message) : "";
       if(k){
-        const title = _dailyTaskTitle(k);
-        const why = (e && e.message) ? String(e.message) : "";
-        toast("❌ Не засчиталось" + (title ? (": "+title) : "") + (why ? (" ("+why+")") : "") + " — повтори");
+        state.dailyEventUI = state.dailyEventUI || {};
+        state.dailyEventUI[k] = {status:"error", at: Date.now(), msg: msg};
+        render();
       }
+      toast("❌ Не засчиталось" + (title ? (": "+title) : "") + (msg ? (" ("+msg+")") : "") + " — повтори");
+      scheduleDailyRefresh(600);
     }catch(_e){}
-    // silent (must never break main UI)
   }
 }
 
