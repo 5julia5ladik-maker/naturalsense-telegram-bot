@@ -4708,7 +4708,7 @@ function _dailyTaskTitle(taskKey){
   return "";
 }
 
-async async function dailyEvent(event, data, taskKey){
+async function dailyEvent(event, data, taskKey){
   const k = String(taskKey || event || "");
   const title = k ? _dailyTaskTitle(k) : "";
   const now = Date.now();
