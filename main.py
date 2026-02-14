@@ -3499,7 +3499,10 @@ function esc(s){
       return null;
     }
 
-    const tgUserId = extractTelegramId();
+    let tgUserId = extractTelegramId();
+    // Robust fallback: keep last known Telegram ID (helps if initData is temporarily unavailable)
+    try { if (!tgUserId) tgUserId = localStorage.getItem("tgUserId"); } catch (e) {}
+    try { if (tgUserId) localStorage.setItem("tgUserId", String(tgUserId)); } catch (e) {}
 
     // Data sets
     const JOURNAL_BLOCKS = [
