@@ -3205,8 +3205,17 @@ def get_webapp_html() -> str:
     }
     function openLink(url){
       if(!url) return;
-      if(tg && tg.openTelegramLink) tg.openTelegramLink(url);
-      else window.open(url,"_blank");
+      try{
+        const s = String(url);
+        const isTg = s.startsWith("https://t.me/") || s.startsWith("http://t.me/") || s.startsWith("tg://");
+        if(tg){
+          if(isTg && tg.openTelegramLink) return tg.openTelegramLink(s);
+          if(tg.openLink) return tg.openLink(s);
+        }
+        window.open(s,"_blank");
+      }catch(e){
+        try{ window.open(url,"_blank"); }catch(_e){}
+      }
     }
 
     async function askConfirm(title, message, okText){
@@ -3626,7 +3635,6 @@ function esc(s){
       try{
         const d = await apiPost("/api/raffle/buy_ticket", {telegram_id: tgUserId, qty: 1});
         state.msg = "✅ Билет куплен. Твоих билетов: "+d.ticket_count;
-        try{ dailyEvent('spin_roulette'); }catch(e){}
         await refreshUser();
         await loadRaffleStatus();
         haptic("light");
@@ -3644,6 +3652,7 @@ function esc(s){
       try{
         const d = await apiPost("/api/roulette/spin", {telegram_id: tgUserId});
         state.msg = "🎡 Выпало: "+d.prize_label;
+        try{ await dailyEvent('spin_roulette'); }catch(e){}
         try{
           if(tg && tg.showPopup){
             tg.showPopup({title:"🎡 Рулетка", message:"Ваш приз: "+d.prize_label, buttons:[{type:"ok"}]});
@@ -4886,7 +4895,7 @@ function renderDailySheet(){
           later(()=>{ dailyEvent('open_channel'); openLink("https://t.me/"+CHANNEL); });
         }
         else if(it.key==="use_search"){
-          later(()=>{ state.tab="search"; render(); dailyEvent('use_search'); });
+          later(()=>{ state.tab="discover"; render(); dailyEvent('use_search'); });
         }
         else if(it.key==="open_inventory"){
           later(()=>{ openInventory(); /* внутри уже dailyEvent('open_inventory') */ });
