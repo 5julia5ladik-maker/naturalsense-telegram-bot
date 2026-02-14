@@ -4571,6 +4571,15 @@ async function refreshDailyIfOpen(reason){
     ]);
     state.dailyLogin = login;
     state.dailyTasks = tasks;
+    try{
+      if(state.dailyEventUI && tasks && Array.isArray(tasks.tasks)){
+        for(const t of tasks.tasks){
+          if(t && (t.done || t.claimed)){
+            delete state.dailyEventUI[String(t.key||"")];
+          }
+        }
+      }
+    }catch(e){}
     render();
   }catch(e){
     // silent
@@ -4606,10 +4615,48 @@ function installDailyAutoRefreshOnce(){
   }catch(e){}
 }
 
-async function dailyEvent(event, data){
+function toast(msg){
+  try{
+    state.toast = String(msg||"");
+    clearTimeout(state.__toastT);
+    if(state.toast){
+      state.__toastT = setTimeout(()=>{ state.toast=""; render(); }, 1800);
+    }
+    render();
+  }catch(e){}
+}
+
+function _dailyTaskTitle(taskKey){
+  try{
+    const arr = state && state.dailyTasks && Array.isArray(state.dailyTasks.tasks) ? state.dailyTasks.tasks : [];
+    for(const t of arr){ if(String(t.key||"")===String(taskKey||"")) return String(t.title||""); }
+  }catch(e){}
+  return "";
+}
+
+async function dailyEvent(event, data, taskKey){
   try{
     if(!tgUserId) return;
+    const k = String(taskKey || event || "");
+
+    // UI feedback: show pending/ok/error прямо в Daily, чтобы было понятно засчиталось или нет
+    if(state && state.dailyOpen && k){
+      state.dailyEventUI = state.dailyEventUI || {};
+      state.dailyEventUI[k] = {status:"pending", at: Date.now()};
+      render();
+    }
+
     await apiPost("/api/daily/event", {telegram_id: tgUserId, event: event, data: (data||{})});
+
+    // Mark as OK (if Daily open) and show toast globally for clarity
+    if(state && state.dailyOpen && k){
+      state.dailyEventUI = state.dailyEventUI || {};
+      state.dailyEventUI[k] = {status:"ok", at: Date.now()};
+    }
+    if(k){
+      const title = _dailyTaskTitle(k);
+      toast("✅ Засчитано" + (title ? (": "+title) : ""));
+    }
 
     // If Daily sheet is open — refresh quickly so the user sees completion instantly.
     // Small delay gives backend time to commit.
@@ -4617,6 +4664,17 @@ async function dailyEvent(event, data){
       scheduleDailyRefresh(250);
     }
   }catch(e){
+    try{
+      const k = String(taskKey || event || "");
+      if(state && state.dailyOpen && k){
+        state.dailyEventUI = state.dailyEventUI || {};
+        state.dailyEventUI[k] = {status:"error", at: Date.now(), msg: (e && e.message) ? String(e.message) : ""};
+      }
+      if(k){
+        const title = _dailyTaskTitle(k);
+        toast("❌ Не засчиталось" + (title ? (": "+title) : "") + " — повтори");
+      }
+    }catch(_e){}
     // silent (must never break main UI)
   }
 }
@@ -4869,6 +4927,7 @@ function renderDailySheet(){
 
     const claimedTask = !!it.claimed;
     const doneTask = !!it.done;
+    const ev = (state && state.dailyEventUI) ? state.dailyEventUI[it.key] : null;
 
     if(claimedTask){
       btn.textContent = "Получено";
@@ -4881,9 +4940,18 @@ function renderDailySheet(){
       btn.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); claimDailyTask(it.key); });
     }else{
       // not done yet -> show action hint
-      btn.textContent = "Открыть";
-      btn.style.opacity = "0.9";
-      btn.addEventListener("click",(e)=>{
+      if(ev && ev.status==="pending"){
+        btn.textContent = "⏳";
+        btn.style.opacity = "0.65";
+        btn.style.pointerEvents = "none";
+      }else if(ev && ev.status==="ok"){
+        btn.textContent = "✅";
+        btn.style.opacity = "0.75";
+        btn.style.pointerEvents = "none";
+      }else{
+        btn.textContent = "Открыть";
+        btn.style.opacity = "0.9";
+        btn.addEventListener("click",(e)=>{
         e.stopPropagation();
         haptic();
         // UX как в Hamster: после тапа по заданию открываем нужный экран,
@@ -4893,10 +4961,10 @@ function renderDailySheet(){
         const later = (fn)=>{ try{ setTimeout(fn, 0); }catch(e){ try{ fn(); }catch(_e){} } };
         // lightweight helpers (do not change main UI logic)
         if(it.key==="open_channel"){
-          later(()=>{ dailyEvent('open_channel'); openLink("https://t.me/"+CHANNEL); });
+          later(()=>{ dailyEvent('open_channel', {}, 'open_channel'); openLink("https://t.me/"+CHANNEL); });
         }
         else if(it.key==="use_search"){
-          later(()=>{ state.tab="discover"; render(); dailyEvent('use_search'); });
+          later(()=>{ state.tab="discover"; render(); dailyEvent('use_search', {}, 'use_search'); });
         }
         else if(it.key==="open_inventory"){
           later(()=>{ openInventory(); /* внутри уже dailyEvent('open_inventory') */ });
@@ -4905,17 +4973,17 @@ function renderDailySheet(){
           later(()=>{ openПрофиль("main"); /* внутри уже dailyEvent('open_profile') */ });
         }
         else if(it.key==="open_miniapp"){
-          later(()=>{ dailyEvent('open_miniapp'); });
+          later(()=>{ dailyEvent('open_miniapp', {}, 'open_miniapp'); });
         }
         else if(it.key==="open_post"){
-          later(()=>{ state.tab="categories"; render(); /* дальше пользователь открывает посты */ });
+          later(()=>{ state.tab="categories"; render(); dailyEvent('open_post', {}, 'open_post'); /* дальше пользователь открывает посты */ });
         }
         else if(it.key==="spin_roulette"){
           later(()=>{ openПрофиль("roulette"); /* событие спина отметится сервером при реальном спине */ });
         }
         else{
           // manual confirm tasks (comment/reply/convert)
-          later(()=>{ dailyEvent(it.key); });
+          later(()=>{ dailyEvent(it.key, {}, it.key); });
         }
         // refresh tasks shortly
         clearTimeout(state.__dailyT);
@@ -4923,6 +4991,7 @@ function renderDailySheet(){
           try{ state.dailyTasks = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId)); render(); }catch(e){}
         }, 500);
       });
+      }
     }
 
     rr.appendChild(btn);
@@ -5937,6 +6006,28 @@ dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
 
       ensureSheets(app);
       renderBottomNav(app);
+
+      // Toast (used only for Daily progress feedback)
+      if(state.toast){
+        const t = el("div");
+        t.style.position = "fixed";
+        t.style.left = "50%";
+        t.style.bottom = "86px";
+        t.style.transform = "translateX(-50%)";
+        t.style.zIndex = "9999";
+        t.style.maxWidth = "92vw";
+        t.style.padding = "10px 14px";
+        t.style.borderRadius = "999px";
+        t.style.background = "rgba(0,0,0,0.55)";
+        t.style.border = "1px solid rgba(255,255,255,0.14)";
+        t.style.backdropFilter = "blur(10px)";
+        t.style.webkitBackdropFilter = "blur(10px)";
+        t.style.color = "rgba(255,255,255,0.92)";
+        t.style.fontSize = "13px";
+        t.style.fontWeight = "900";
+        t.textContent = state.toast;
+        app.appendChild(t);
+      }
 
       root.appendChild(app);
 
