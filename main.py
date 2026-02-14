@@ -524,6 +524,19 @@ async def init_db():
         # daily_task_logs compatibility: enrich existing table to new schema safely
         await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS is_claimed BOOLEAN NOT NULL DEFAULT FALSE;")
         await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'done';")
+
+        # Ensure defaults / NOT NULL even if columns already existed before (Railway schema drift)
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN status SET DEFAULT 'done';")
+        await _safe_exec(conn, "UPDATE daily_task_logs SET status='done' WHERE status IS NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN status SET NOT NULL;")
+
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN points SET DEFAULT 0;")
+        await _safe_exec(conn, "UPDATE daily_task_logs SET points=0 WHERE points IS NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN points SET NOT NULL;")
+
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN meta SET DEFAULT '{}'::jsonb;")
+        await _safe_exec(conn, "UPDATE daily_task_logs SET meta='{}'::jsonb WHERE meta IS NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN meta SET NOT NULL;")
         await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP NULL;")
         await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0;")
         await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;")
