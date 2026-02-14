@@ -4736,7 +4736,7 @@ async function dailyEvent(event, data, taskKey){
   if(!res || !res.ok){
     // show error only if Daily still active and task not done
     if(state.dailyOpen && state.dailyTrackEnabled && k && !(state.dailyTaskStatus?.[k]?.done)){
-      showToast(`❌ Не засчиталось (${res?.reason || "server_error"}) — повтори`);
+      toast(`❌ Не засчиталось (${res?.reason || "server_error"}) — повтори`);
       try{
         state.dailyEventUI = state.dailyEventUI || {};
         state.dailyEventUI[k] = {status:"fail", at: Date.now()};
@@ -4768,7 +4768,7 @@ async function dailyEvent(event, data, taskKey){
 
   // ✅ Toast only when it was actually counted now
   if(res.counted){
-    showToast(`✅ Засчитано: ${title || k}`);
+    toast(`✅ Засчитано: ${title || k}`);
     try{
       if(k){
         state.dailyEventUI = state.dailyEventUI || {};
