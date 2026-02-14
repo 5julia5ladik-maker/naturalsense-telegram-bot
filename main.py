@@ -7263,48 +7263,51 @@ async def daily_event_api(request: Request):
                 await session.commit()
 
             # NOTE: client events are best-effort; we still cap rewards on claim.
-            if ev == "open_miniapp":
-            counted = await _mark_daily_done(session, tid, day, "open_miniapp", payload.data or {})
-        elif ev == "open_channel":
-            counted = await _mark_daily_done(session, tid, day, "open_channel", payload.data or {})
-        elif ev == "use_search":
-            counted = await _mark_daily_done(session, tid, day, "use_search", payload.data or {})
-        elif ev == "open_post":
-            # progress task: need 3 opens
-            res = await session.execute(
-                select(DailyTaskLog).where(
-                    DailyTaskLog.telegram_id == tid,
-                    DailyTaskLog.day == day,
-                    DailyTaskLog.task_key == "open_post",
-                )
-            )
-            lg = res.scalar_one_or_none()
-            prev = 0
-            if lg and isinstance(lg.meta, dict):
-                prev = int(lg.meta.get("count", 0) or 0)
-            need = int(DAILY_TASKS.get("open_post", {}).get("need", 3))
-            if prev >= need:
-                await session.commit()
-                return {"ok": True, "counted": False, "task_key": "open_post"}
-            cnt = min(need, prev + 1)
-            counted = await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
-        elif ev == "open_inventory":
-            counted = await _mark_daily_done(session, tid, day, "open_inventory", payload.data or {})
-        elif ev == "open_profile":
-            counted = await _mark_daily_done(session, tid, day, "open_profile", payload.data or {})
-        elif ev == "spin_roulette":
-            counted = await _mark_daily_done(session, tid, day, "spin_roulette", payload.data or {})
-        elif ev == "convert_prize":
-            counted = await _mark_daily_done(session, tid, day, "convert_prize", payload.data or {})
-        elif ev == "claim_all":
-            counted = await _mark_daily_done(session, tid, day, "claim_all", payload.data or {})
-        else:
-            # Unknown event should never break UX
-            await session.commit()
-            return {"ok": True, "counted": False, "ignored": True, "reason": "unknown_event"}
+            data = data_raw or {}
+            counted = False
 
-        await session.commit()
-        return {"ok": True, "counted": bool(counted), "task_key": ev}
+            if ev == "open_miniapp":
+                counted = await _mark_daily_done(session, tid, day, "open_miniapp", data)
+            elif ev == "open_channel":
+                counted = await _mark_daily_done(session, tid, day, "open_channel", data)
+            elif ev == "use_search":
+                counted = await _mark_daily_done(session, tid, day, "use_search", data)
+            elif ev == "open_post":
+                # progress task: need 3 opens
+                res = await session.execute(
+                    select(DailyTaskLog).where(
+                        DailyTaskLog.telegram_id == tid,
+                        DailyTaskLog.day == day,
+                        DailyTaskLog.task_key == "open_post",
+                    )
+                )
+                lg = res.scalar_one_or_none()
+                prev = 0
+                if lg and isinstance(lg.meta, dict):
+                    prev = int(lg.meta.get("count", 0) or 0)
+                need = int(DAILY_TASKS.get("open_post", {}).get("need", 3))
+                if prev >= need:
+                    await session.commit()
+                    return {"ok": True, "counted": False, "task_key": "open_post"}
+                cnt = min(need, prev + 1)
+                counted = await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
+            elif ev == "open_inventory":
+                counted = await _mark_daily_done(session, tid, day, "open_inventory", data)
+            elif ev == "open_profile":
+                counted = await _mark_daily_done(session, tid, day, "open_profile", data)
+            elif ev == "spin_roulette":
+                counted = await _mark_daily_done(session, tid, day, "spin_roulette", data)
+            elif ev == "convert_prize":
+                counted = await _mark_daily_done(session, tid, day, "convert_prize", data)
+            elif ev == "claim_all":
+                counted = await _mark_daily_done(session, tid, day, "claim_all", data)
+            else:
+                # Unknown event should never break UX
+                await session.commit()
+                return {"ok": True, "counted": False, "ignored": True, "reason": "unknown_event"}
+
+            await session.commit()
+            return {"ok": True, "counted": bool(counted), "task_key": ev}
 
 
     except Exception as e:
