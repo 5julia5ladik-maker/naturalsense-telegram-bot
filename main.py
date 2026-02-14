@@ -3243,7 +3243,6 @@ def get_webapp_html() -> str:
         }
       }catch(e){}
     }
-    }
 
     function haptic(kind){
       try{ tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred && tg.HapticFeedback.impactOccurred(kind||"light"); }catch(e){}
