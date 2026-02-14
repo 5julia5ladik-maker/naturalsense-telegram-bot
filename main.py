@@ -4708,7 +4708,7 @@ function _dailyTaskTitle(taskKey){
   return "";
 }
 
-async function dailyEvent(event, data, taskKey){
+async async function dailyEvent(event, data, taskKey){
   const k = String(taskKey || event || "");
   const title = k ? _dailyTaskTitle(k) : "";
   const now = Date.now();
@@ -4785,6 +4785,19 @@ async function dailyEvent(event, data, taskKey){
 
 async function openDaily(){
   state.dailyOpen = true;
+        // очистка залипших "pending" (если страница перезагрузилась во время события)
+        try{
+          const now = Date.now();
+          Object.keys(state.dailyEventUI||{}).forEach((k)=>{
+            const ev = state.dailyEventUI[k];
+            if(!ev) return;
+            // если событию больше 30 секунд — сбрасываем
+            if(ev.status==="pending" && ev.t && (now-ev.t)>30000){ delete state.dailyEventUI[k]; }
+            // если уже выполнено — убираем UI-статус, чтобы не было ⏳
+            if(ev.status==="ok"){ /* оставляем ok, чтобы показывать ✅ */ }
+          });
+        }catch(e){}
+
   installDailyAutoRefreshOnce();
   state.dailyMsg = "";
   state.dailyBusy = false;
