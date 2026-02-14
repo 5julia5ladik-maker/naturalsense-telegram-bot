@@ -4876,17 +4876,36 @@ function renderDailySheet(){
       btn.addEventListener("click",(e)=>{
         e.stopPropagation();
         haptic();
+        // UX как в Hamster: после тапа по заданию открываем нужный экран,
+        // поэтому закрываем Daily-шторку, иначе она перекрывает всё и кажется что "ничего не произошло".
+        try{ closeDaily(); }catch(_e){}
+        // даём DOM тик, чтобы закрытие успело примениться
+        const later = (fn)=>{ try{ setTimeout(fn, 0); }catch(e){ try{ fn(); }catch(_e){} } };
         // lightweight helpers (do not change main UI logic)
-        if(it.key==="open_channel"){ dailyEvent('open_channel'); openLink("https://t.me/"+CHANNEL); }
-        else if(it.key==="use_search"){ state.tab="search"; render(); dailyEvent('use_search'); }
-        else if(it.key==="open_inventory"){ openInventory(); dailyEvent('open_inventory'); }
-        else if(it.key==="open_profile"){ openПрофиль("main"); dailyEvent('open_profile'); }
-        else if(it.key==="open_miniapp"){ dailyEvent('open_miniapp'); }
-        else if(it.key==="open_post"){ state.tab="categories"; render(); /* user opens posts manually */ }
-        else if(it.key==="spin_roulette"){ openПрофиль("roulette"); /* roulette api marks event */ }
+        if(it.key==="open_channel"){
+          later(()=>{ dailyEvent('open_channel'); openLink("https://t.me/"+CHANNEL); });
+        }
+        else if(it.key==="use_search"){
+          later(()=>{ state.tab="search"; render(); dailyEvent('use_search'); });
+        }
+        else if(it.key==="open_inventory"){
+          later(()=>{ openInventory(); /* внутри уже dailyEvent('open_inventory') */ });
+        }
+        else if(it.key==="open_profile"){
+          later(()=>{ openПрофиль("main"); /* внутри уже dailyEvent('open_profile') */ });
+        }
+        else if(it.key==="open_miniapp"){
+          later(()=>{ dailyEvent('open_miniapp'); });
+        }
+        else if(it.key==="open_post"){
+          later(()=>{ state.tab="categories"; render(); /* дальше пользователь открывает посты */ });
+        }
+        else if(it.key==="spin_roulette"){
+          later(()=>{ openПрофиль("roulette"); /* событие спина отметится сервером при реальном спине */ });
+        }
         else{
           // manual confirm tasks (comment/reply/convert)
-          dailyEvent(it.key);
+          later(()=>{ dailyEvent(it.key); });
         }
         // refresh tasks shortly
         clearTimeout(state.__dailyT);
