@@ -353,6 +353,8 @@ class DailyTaskLog(Base):
 
     # Backward-compat: some DBs have NOT NULL column is_done (used by older schema)
     is_done = Column(Boolean, nullable=False, default=True)
+    # Compatibility with older/current DB schemas: boolean flag
+    is_claimed = Column(Boolean, nullable=False, default=False)
 
     done_at = Column(DateTime, nullable=True)     # naive UTC
     claimed_at = Column(DateTime, nullable=True)  # naive UTC
@@ -506,11 +508,11 @@ async def init_db():
                 task_key VARCHAR NOT NULL,
                 status VARCHAR NOT NULL DEFAULT 'done',
         is_done BOOLEAN NOT NULL DEFAULT TRUE,
-                is_done BOOLEAN NOT NULL DEFAULT TRUE,
+        is_claimed BOOLEAN NOT NULL DEFAULT FALSE,
                 done_at TIMESTAMP NULL,
                 claimed_at TIMESTAMP NULL,
                 points INTEGER NOT NULL DEFAULT 0,
-                meta JSON DEFAULT '{}'::json
+                meta JSONB NOT NULL DEFAULT '{}'::jsonb
             );
             """,
         )
@@ -519,6 +521,15 @@ async def init_db():
         # daily_task_logs compatibility (older schemas expect is_done NOT NULL)
         await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS is_done BOOLEAN NOT NULL DEFAULT TRUE;")
         await _safe_exec(conn, "UPDATE daily_task_logs SET is_done = TRUE WHERE is_done IS NULL;")
+        # daily_task_logs compatibility: enrich existing table to new schema safely
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS is_claimed BOOLEAN NOT NULL DEFAULT FALSE;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'done';")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP NULL;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;")
+        # Backfill status/is_claimed from whichever exists
+        await _safe_exec(conn, "UPDATE daily_task_logs SET status = 'claimed' WHERE is_claimed = TRUE AND status <> 'claimed';")
+        await _safe_exec(conn, "UPDATE daily_task_logs SET is_claimed = TRUE WHERE status = 'claimed' AND is_claimed = FALSE;")
 
 
         # posts
@@ -568,11 +579,11 @@ async def init_db():
         task_key VARCHAR NOT NULL,
         status VARCHAR NOT NULL DEFAULT 'done',
         is_done BOOLEAN NOT NULL DEFAULT TRUE,
-                is_done BOOLEAN NOT NULL DEFAULT TRUE,
+        is_claimed BOOLEAN NOT NULL DEFAULT FALSE,
         done_at TIMESTAMP NULL,
         claimed_at TIMESTAMP NULL,
         points INTEGER NOT NULL DEFAULT 0,
-        meta JSON NULL
+        meta JSONB NOT NULL DEFAULT '{}'::jsonb
     );
     """,
 )
@@ -682,6 +693,10 @@ async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, ta
             except Exception:
                 pass
             existing.done_at = existing.done_at or now
+            try:
+                existing.is_claimed = False
+            except Exception:
+                pass
             if meta:
                 m = dict(existing.meta or {})
                 m.update(meta)
@@ -696,6 +711,7 @@ async def _mark_daily_done(session: AsyncSession, telegram_id: int, day: str, ta
             task_key=task_key,
             status="done",
             is_done=True,
+            is_claimed=False,
             done_at=now,
             points=0,
             meta=meta or {},
@@ -7273,6 +7289,7 @@ async def daily_claim_api(req: DailyClaimReq):
                 task_key=key,
                 status="claimed",
                 is_done=True,
+                is_claimed=True,
                 done_at=now,
                 claimed_at=now,
                 points=award,
@@ -7280,6 +7297,10 @@ async def daily_claim_api(req: DailyClaimReq):
             )
         else:
             lg.status = "claimed"
+            try:
+                lg.is_claimed = True
+            except Exception:
+                pass
             try:
                 lg.is_done = True
             except Exception:
