@@ -7091,15 +7091,15 @@ async def daily_tasks_api(telegram_id: int):
 
 @app.post("/api/daily/event")
 async def daily_event_api(request: Request):
-    """Best-effort event sink for Daily tasks.
-
-    Telegram WebApp can sometimes lose/alter POST bodies when the user opens external links
-    (channel/posts/search) and returns back. Strict Pydantic models then produce 422,
-    and the client shows "Не засчиталось".
-
-    We accept any JSON payload, support common aliases, and never fail hard.
     """
+    Best-effort event sink for Daily tasks.
 
+    GUARANTEE:
+      - NEVER returns 5xx to the client (always 200 with ok:true/false).
+      - Accepts loose JSON payloads and common aliases.
+      - Logs any server error with enough context for Railway logs.
+    """
+    # 1) Parse payload safely
     try:
         payload = await request.json()
         if not isinstance(payload, dict):
@@ -7107,59 +7107,74 @@ async def daily_event_api(request: Request):
     except Exception:
         payload = {}
 
-    # aliases for robustness
+    # 2) Extract fields (aliases)
     tid_raw = payload.get("telegram_id") or payload.get("telegramId") or payload.get("telegramID")
-    ev_raw = payload.get("event") or payload.get("type")
+    ev_raw = payload.get("event") or payload.get("type") or payload.get("key")
     data_raw = payload.get("data") if isinstance(payload.get("data"), dict) else {}
 
+    # 3) Validate user id
     try:
         tid = int(tid_raw)
     except Exception:
-        return {"ok": True, "ignored": True}
+        return {"ok": False, "reason": "missing_telegram_id"}
 
     day = _today_key()
     ev = (str(ev_raw or "")).strip().lower()
+    if not ev:
+        return {"ok": False, "reason": "missing_event"}
 
-    async with async_session_maker() as session:
-        user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
-        if not user:
-            # Mini App can be opened before /start in bot -> create minimal user
-            user = User(telegram_id=tid, points=10)
-            session.add(user)
+    # 4) Process without ever raising to client
+    try:
+        async with async_session_maker() as session:
+            user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
+            if not user:
+                # Mini App can be opened before /start in bot -> create minimal user
+                user = User(telegram_id=tid, points=10)
+                session.add(user)
+                await session.commit()
+
+            # NOTE: client events are best-effort; we still cap rewards on claim.
+            if ev == "open_miniapp":
+                await _mark_daily_done(session, tid, day, "open_miniapp")
+            elif ev == "open_channel":
+                await _mark_daily_done(session, tid, day, "open_channel")
+            elif ev == "use_search":
+                await _mark_daily_done(
+                    session,
+                    tid,
+                    day,
+                    "use_search",
+                    {"q": str((data_raw or {}).get("q", ""))[:64]},
+                )
+            elif ev == "open_inventory":
+                await _mark_daily_done(session, tid, day, "open_inventory")
+            elif ev == "open_profile":
+                await _mark_daily_done(session, tid, day, "open_profile")
+            elif ev == "comment_post":
+                await _mark_daily_done(session, tid, day, "comment_post")
+            elif ev == "reply_comment":
+                await _mark_daily_done(session, tid, day, "reply_comment")
+            elif ev == "spin_roulette":
+                await _mark_daily_done(session, tid, day, "spin_roulette")
+            elif ev == "convert_prize":
+                await _mark_daily_done(session, tid, day, "convert_prize")
+            elif ev == "open_post":
+                # count up to need (3)
+                logs = await _get_daily_logs(session, tid, day)
+                lg = logs.get("open_post")
+                cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
+                cnt = min(3, cnt + 1)
+                await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
+            else:
+                return {"ok": False, "reason": "unknown_event", "event": ev}
+
             await session.commit()
+            return {"ok": True}
 
-        # NOTE: client events are best-effort; we still cap rewards on claim.
-        if ev == "open_miniapp":
-            await _mark_daily_done(session, tid, day, "open_miniapp")
-        elif ev == "open_channel":
-            await _mark_daily_done(session, tid, day, "open_channel")
-        elif ev == "use_search":
-            await _mark_daily_done(session, tid, day, "use_search", {"q": str((data_raw or {}).get("q", ""))[:64]})
-        elif ev == "open_inventory":
-            await _mark_daily_done(session, tid, day, "open_inventory")
-        elif ev == "open_profile":
-            await _mark_daily_done(session, tid, day, "open_profile")
-        elif ev == "comment_post":
-            await _mark_daily_done(session, tid, day, "comment_post")
-        elif ev == "reply_comment":
-            await _mark_daily_done(session, tid, day, "reply_comment")
-        elif ev == "spin_roulette":
-            await _mark_daily_done(session, tid, day, "spin_roulette")
-        elif ev == "convert_prize":
-            await _mark_daily_done(session, tid, day, "convert_prize")
-        elif ev == "open_post":
-            # count up to need (3)
-            logs = await _get_daily_logs(session, tid, day)
-            lg = logs.get("open_post")
-            cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
-            cnt = min(3, cnt + 1)
-            await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
-        else:
-            # ignore unknown events
-            return {"ok": True, "ignored": True}
-
-        await session.commit()
-        return {"ok": True}
+    except Exception as e:
+        # never crash the client
+        logger.exception("daily_event_api failed: tid=%s ev=%s payload_keys=%s", tid, ev, list(payload.keys()))
+        return {"ok": False, "reason": "server_error"}
 
 
 @app.post("/api/daily/claim", response_model=DailyClaimResp)
