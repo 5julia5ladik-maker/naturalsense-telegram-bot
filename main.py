@@ -3995,6 +3995,7 @@ async function spinRouletteLux(){
       let resp = null, err = null;
       try{
         resp = await apiPost("/api/roulette/spin", {telegram_id: tgUserId});
+        try{ dailyEvent("spin_roulette"); }catch(e){}
       }catch(e){ err = e; }
 
       if(err || !resp){
