@@ -209,9 +209,9 @@ TICKET_CONVERT_RATE = 300          # 1 raffle ticket -> 300 points
 DIOR_PALETTE_CONVERT_VALUE = 3000  # 1 Dior palette -> 3000 points (главный приз)
 
 # -----------------------------------------------------------------------------
-# DAILY TASKS CONFIG (max 400/day)
+# DAILY TASKS CONFIG (max 600/day)
 # -----------------------------------------------------------------------------
-DAILY_MAX_POINTS_PER_DAY = 400
+DAILY_MAX_POINTS_PER_DAY = 600
 
 
 # -----------------------------------------------------------------------------
@@ -231,25 +231,24 @@ DAILY_LOGIN_CYCLE_LEN = len(DAILY_LOGIN_REWARDS)
 
 # Important: tasks are claimed manually ("Забрать"). Client only sends events; server validates and caps.
 DAILY_TASKS: list[dict[str, Any]] = [
-    {"key": "open_miniapp", "title": "Зайти в Mini App", "points": 20, "icon": "✨"},
-    {"key": "open_channel", "title": "Перейти в канал", "points": 30, "icon": "↩️"},
-    {"key": "use_search", "title": "Использовать поиск", "points": 30, "icon": "🔍"},
-    {"key": "open_post", "title": "Открыть 3 поста", "points": 60, "icon": "📰", "need": 3},
-    {"key": "open_inventory", "title": "Открыть Косметичку", "points": 20, "icon": "👜"},
-    {"key": "open_profile", "title": "Открыть Профиль", "points": 20, "icon": "👤"},
+    {"key": "open_miniapp", "title": "Зайти в Mini App", "points": 30, "icon": "✨"},
+    {"key": "open_channel", "title": "Перейти в канал", "points": 40, "icon": "↩️"},
+    {"key": "use_search", "title": "Использовать поиск", "points": 40, "icon": "🔍"},
+    {"key": "open_post", "title": "Открыть 3 поста", "points": 80, "icon": "📰", "need": 3},
+    {"key": "open_inventory", "title": "Открыть Косметичку", "points": 30, "icon": "👜"},
+    {"key": "open_profile", "title": "Открыть Профиль", "points": 30, "icon": "👤"},
 
     # Социальные (обязательные базовые daily)
-    {"key": "comment_post", "title": "Написать комментарий", "points": 50, "icon": "💬"},
-    {"key": "reply_comment", "title": "Ответить на комментарий", "points": 50, "icon": "↩️💬"},
+    {"key": "comment_post", "title": "Написать комментарий", "points": 80, "icon": "💬"},
 
     # Игровые
-    {"key": "spin_roulette", "title": "Крутить рулетку 1 раз", "points": 50, "icon": "🎡"},
-    {"key": "convert_prize", "title": "Конвертировать приз/билет", "points": 40, "icon": "🔁"},
+    {"key": "spin_roulette", "title": "Крутить рулетку 1 раз", "points": 80, "icon": "🎡"},
+    {"key": "convert_prize", "title": "Конвертировать приз/билет", "points": 70, "icon": "🔁"},
 
-    # Бонус дня (чтобы добить ровно до 400)
-    {"key": "bonus_day", "title": "Собрать все задания дня", "points": 30, "icon": "🎁", "special": True},
+    # Бонус дня (большой бонус за закрытие всех задач)
+    {"key": "bonus_day", "title": "Собрать все задания дня", "points": 120, "icon": "🎁", "special": True},
 ]
-# Total base (excluding bonus_day) = 370; with bonus_day = 400
+# Total base (excluding bonus_day) = 480; with bonus_day = 600
 
 
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
@@ -2305,11 +2304,8 @@ async def on_text_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def on_discussion_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Tracks comments in the linked discussion group to unlock Daily tasks:
+    Tracks comments in the linked discussion group to unlock Daily task:
     - comment_post: reply to the forwarded channel post (sender_chat == channel)
-    - reply_comment: reply to another user's comment
-    NOTE: Telegram does not provide a perfect "comment vs reply" signal in all cases,
-    but this logic is reliable for linked discussions.
     """
     msg = update.message
     if not msg or not msg.text:
@@ -2344,18 +2340,10 @@ async def on_discussion_message(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception:
         is_reply_to_channel_post = False
 
-    # Determine if it's a reply to another user's comment
-    is_reply_to_user_comment = False
-    try:
-        if (not is_reply_to_channel_post) and getattr(rt, "from_user", None) and int(rt.from_user.id) != uid:
-            is_reply_to_user_comment = True
-    except Exception:
-        is_reply_to_user_comment = False
-
-    if not (is_reply_to_channel_post or is_reply_to_user_comment):
+    if not is_reply_to_channel_post:
         return
 
-    task_key = "comment_post" if is_reply_to_channel_post else "reply_comment"
+    task_key = "comment_post"
     day = _today_key()
 
     async with async_session_maker() as session:
@@ -4579,7 +4567,7 @@ function renderБонусы(main){
       const t5 = el("div","tile");
       t5.addEventListener("click", ()=>{ haptic(); openDaily(); });
       t5.appendChild(el("div","tileTitle","🎯 Daily бонусы"));
-      t5.appendChild(el("div","tileSub","Задания на +400/день"));
+      t5.appendChild(el("div","tileSub","Задания на +600/день"));
 
             grid.appendChild(t1);grid.appendChild(t2);grid.appendChild(t3);grid.appendChild(t4);grid.appendChild(t5);
       wrap.appendChild(grid);
@@ -4949,7 +4937,7 @@ function renderDailySheet(){
   content.appendChild(top);
 
   // ----------------------------
-  // Daily tasks (+400/day)
+  // Daily tasks (+600/day)
   // ----------------------------
   const tasks = state.dailyTasks;
   const box = el("div","card2");
@@ -4965,7 +4953,7 @@ function renderDailySheet(){
 
   const tRight = el("div");
   tRight.style.textAlign="right";
-  tRight.appendChild(el("div",null,'<div style="font-size:13px;font-weight:900">+400/день</div>'));
+  tRight.appendChild(el("div",null,'<div style="font-size:13px;font-weight:900">+600/день</div>'));
   tRight.appendChild(el("div","sub","Выполняй и забирай"));
   tRow.appendChild(tRight);
 
@@ -7230,8 +7218,6 @@ async def daily_event_api(request: Request):
                 await _mark_daily_done(session, tid, day, "open_profile")
             elif ev == "comment_post":
                 await _mark_daily_done(session, tid, day, "comment_post")
-            elif ev == "reply_comment":
-                await _mark_daily_done(session, tid, day, "reply_comment")
             elif ev == "spin_roulette":
                 await _mark_daily_done(session, tid, day, "spin_roulette")
             elif ev == "convert_prize":
