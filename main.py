@@ -359,6 +359,7 @@ class DailyTaskLog(Base):
     done_at = Column(DateTime, nullable=True)     # naive UTC
     claimed_at = Column(DateTime, nullable=True)  # naive UTC
     points = Column(Integer, nullable=False, default=0)
+    points_claimed = Column(Integer, nullable=False, default=0)
     meta = Column(JSON, default=dict)
 
     __table_args__ = (
@@ -539,6 +540,8 @@ async def init_db():
         await _safe_exec(conn, "ALTER TABLE daily_task_logs ALTER COLUMN meta SET NOT NULL;")
         await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP NULL;")
         await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0;")
+        await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS points_claimed INTEGER NOT NULL DEFAULT 0;")
+        await _safe_exec(conn, "UPDATE daily_task_logs SET points_claimed = 0 WHERE points_claimed IS NULL;")
         await _safe_exec(conn, "ALTER TABLE daily_task_logs ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;")
         # Backfill status/is_claimed from whichever exists
         await _safe_exec(conn, "UPDATE daily_task_logs SET status = 'claimed' WHERE is_claimed = TRUE AND status <> 'claimed';")
@@ -7317,6 +7320,7 @@ async def daily_claim_api(req: DailyClaimReq):
                 done_at=now,
                 claimed_at=now,
                 points=award,
+                points_claimed=award,
                 meta={},
             )
         else:
