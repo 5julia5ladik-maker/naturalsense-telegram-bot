@@ -4545,29 +4545,76 @@ function renderБонусы(main){
 // -----------------------------------------------------------------------
 // DAILY TASKS (isolated module: must not break main UI)
 // -----------------------------------------------------------------------
+
+// Hard rule for UX: after any daily action, UI must refresh even if user leaves WebApp (openLink) and returns.
+// We therefore refresh:
+// 1) Debounced after each dailyEvent()
+// 2) On visibilitychange/focus when user comes back to the Mini App.
+
+async function refreshDailyIfOpen(reason){
+  try{
+    if(!state || !state.dailyOpen) return;
+    if(!tgUserId) return;
+    const [login, tasks] = await Promise.all([
+      apiGet("/api/daily/login?telegram_id="+encodeURIComponent(tgUserId)),
+      apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId)),
+    ]);
+    state.dailyLogin = login;
+    state.dailyTasks = tasks;
+    render();
+  }catch(e){
+    // silent
+  }
+}
+
+function scheduleDailyRefresh(delayMs){
+  try{
+    if(!state || !state.dailyOpen) return;
+    clearTimeout(state.__dailyRefreshT);
+    state.__dailyRefreshT = setTimeout(()=>{ refreshDailyIfOpen("scheduled"); }, Math.max(0, delayMs||0));
+  }catch(e){}
+}
+
+function installDailyAutoRefreshOnce(){
+  try{
+    if(state.__dailyAutoRefreshInstalled) return;
+    state.__dailyAutoRefreshInstalled = true;
+
+    document.addEventListener("visibilitychange", ()=>{
+      try{
+        if(document.visibilityState === "visible"){
+          // user returned from channel/search/post -> refresh immediately
+          scheduleDailyRefresh(0);
+        }
+      }catch(e){}
+    });
+
+    window.addEventListener("focus", ()=>{
+      // fallback for some Android builds
+      scheduleDailyRefresh(0);
+    });
+  }catch(e){}
+}
+
 async function dailyEvent(event, data){
   try{
     if(!tgUserId) return;
     await apiPost("/api/daily/event", {telegram_id: tgUserId, event: event, data: (data||{})});
 
-    // If Daily sheet is open — refresh tasks so the user sees completion instantly.
-    // 300ms delay gives the backend time to commit the event, but feels "instant" in UI.
+    // If Daily sheet is open — refresh quickly so the user sees completion instantly.
+    // Small delay gives backend time to commit.
     if(state && state.dailyOpen){
-      clearTimeout(state.__dailyRefreshT);
-      state.__dailyRefreshT = setTimeout(async ()=>{
-        try{
-          state.dailyTasks = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
-          render();
-        }catch(e){}
-      }, 300);
+      scheduleDailyRefresh(250);
     }
   }catch(e){
     // silent (must never break main UI)
   }
 }
 
+
 async function openDaily(){
   state.dailyOpen = true;
+  installDailyAutoRefreshOnce();
   state.dailyMsg = "";
   state.dailyBusy = false;
   state.dailyLogin = null;
