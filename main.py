@@ -211,7 +211,23 @@ DIOR_PALETTE_CONVERT_VALUE = 3000  # 1 Dior palette -> 3000 points (главны
 # -----------------------------------------------------------------------------
 # DAILY TASKS CONFIG (max 400/day)
 # -----------------------------------------------------------------------------
-DAILY_MAX_POINTS_PER_DAY = 600
+DAILY_MAX_POINTS_PER_DAY = 400
+
+
+# -----------------------------------------------------------------------------
+# DAILY LOGIN BONUS (Hamster-style calendar)
+# -----------------------------------------------------------------------------
+# Rewards for each day in the cycle. After the last day, the cycle repeats.
+# Can be overridden with env: DAILY_LOGIN_REWARDS="10,15,20,25,30,40,50,60,80,100"
+DAILY_LOGIN_REWARDS: list[int] = [
+    int(x.strip())
+    for x in os.getenv("DAILY_LOGIN_REWARDS", "50,80,110,150,200,300,500").split(",")
+    if x.strip().lstrip("-").isdigit()
+]
+if not DAILY_LOGIN_REWARDS:
+    DAILY_LOGIN_REWARDS = [50, 80, 110, 150, 200, 300, 500]
+
+DAILY_LOGIN_CYCLE_LEN = len(DAILY_LOGIN_REWARDS)
 
 # Important: tasks are claimed manually ("Забрать"). Client only sends events; server validates and caps.
 DAILY_TASKS: list[dict[str, Any]] = [
@@ -224,14 +240,16 @@ DAILY_TASKS: list[dict[str, Any]] = [
 
     # Социальные (обязательные базовые daily)
     {"key": "comment_post", "title": "Написать комментарий", "points": 50, "icon": "💬"},
+    {"key": "reply_comment", "title": "Ответить на комментарий", "points": 50, "icon": "↩️💬"},
 
     # Игровые
     {"key": "spin_roulette", "title": "Крутить рулетку 1 раз", "points": 50, "icon": "🎡"},
+    {"key": "convert_prize", "title": "Конвертировать приз/билет", "points": 40, "icon": "🔁"},
 
     # Бонус дня (чтобы добить ровно до 400)
-    {"key": "bonus_day", "title": "Собрать все задания дня", "points": 150, "icon": "🎁", "special": True},
+    {"key": "bonus_day", "title": "Собрать все задания дня", "points": 30, "icon": "🎁", "special": True},
 ]
-# Total base points are capped by DAILY_MAX_POINTS_PER_DAY (600). Bonus_day = 150.
+# Total base (excluding bonus_day) = 370; with bonus_day = 400
 
 
 PrizeType = Literal["points", "raffle_ticket", "physical_dior_palette"]
@@ -859,15 +877,19 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
             )
             return user, False, hours_left, 0
 
-        user.points = (user.points or 0) + DAILY_BONUS_POINTS
-
+        # Update streak (Hamster-style: keep streak if you claim daily, reset if you miss days)
         if last is None:
             user.daily_streak = 1
         else:
+            # <= 48h keeps streak (tolerant to time-of-day drift); otherwise reset
             if (now - last) <= timedelta(days=2):
                 user.daily_streak = (user.daily_streak or 0) + 1
             else:
                 user.daily_streak = 1
+
+        # Hamster-style calendar reward: depends on the current streak day inside the cycle.
+        award = int(DAILY_LOGIN_REWARDS[((max(1, int(user.daily_streak or 1)) - 1) % DAILY_LOGIN_CYCLE_LEN)])
+        user.points = int(user.points or 0) + award
 
         user.best_streak = max(user.best_streak or 0, user.daily_streak or 0)
         user.last_daily_bonus_at = now
@@ -880,10 +902,6 @@ async def add_daily_bonus_and_update_streak(telegram_id: int) -> tuple[Optional[
                 user.ref_active_at = now
 
         streak_bonus = 0
-        if user.daily_streak in STREAK_MILESTONES:
-            streak_bonus = STREAK_MILESTONES[user.daily_streak]
-            user.points = (user.points or 0) + streak_bonus
-
 
         # ------------------ REFERRAL: pay only for active invitee ------------------
         # 3 days streak => +REFERRAL_ACTIVE_BONUS_POINTS to inviter (once)
@@ -2246,6 +2264,7 @@ async def on_discussion_message(update: Update, context: ContextTypes.DEFAULT_TY
     """
     Tracks comments in the linked discussion group to unlock Daily tasks:
     - comment_post: reply to the forwarded channel post (sender_chat == channel)
+    - reply_comment: reply to another user's comment
     NOTE: Telegram does not provide a perfect "comment vs reply" signal in all cases,
     but this logic is reliable for linked discussions.
     """
@@ -2293,6 +2312,7 @@ async def on_discussion_message(update: Update, context: ContextTypes.DEFAULT_TY
     if not (is_reply_to_channel_post or is_reply_to_user_comment):
         return
 
+    task_key = "comment_post" if is_reply_to_channel_post else "reply_comment"
     day = _today_key()
 
     async with async_session_maker() as session:
@@ -4531,14 +4551,15 @@ async function dailyEvent(event, data){
     await apiPost("/api/daily/event", {telegram_id: tgUserId, event: event, data: (data||{})});
 
     // If Daily sheet is open — refresh tasks so the user sees completion instantly.
+    // 300ms delay gives the backend time to commit the event, but feels "instant" in UI.
     if(state && state.dailyOpen){
       clearTimeout(state.__dailyRefreshT);
       state.__dailyRefreshT = setTimeout(async ()=>{
         try{
-          state.daily = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
+          state.dailyTasks = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
           render();
         }catch(e){}
-      }, 450);
+      }, 300);
     }
   }catch(e){
     // silent (must never break main UI)
@@ -4548,41 +4569,83 @@ async function dailyEvent(event, data){
 async function openDaily(){
   state.dailyOpen = true;
   state.dailyMsg = "";
+  state.dailyBusy = false;
+  state.dailyLogin = null;
+  state.dailyTasks = null;
   render();
   try{
     if(!tgUserId) return;
-    // Ensure "Зайти в Mini App" is always recorded before loading the list.
-    try{ await dailyEvent('open_miniapp'); }catch(e){}
-    state.daily = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
+    try{ await dailyEvent('open_daily'); }catch(e){}
+    const [login, tasks] = await Promise.all([
+      apiGet("/api/daily/login?telegram_id="+encodeURIComponent(tgUserId)),
+      apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId)),
+    ]);
+    state.dailyLogin = login;
+    state.dailyTasks = tasks;
   }catch(e){
-    state.daily = null;
-    state.dailyMsg = "❌ Не удалось загрузить задания";
+    state.dailyLogin = null;
+    state.dailyTasks = null;
+    state.dailyMsg = "❌ Не удалось загрузить Daily";
   }
   render();
 }
+
 function closeDaily(){
   state.dailyOpen = false;
   state.dailyMsg = "";
   render();
 }
 
-async function claimDaily(taskKey){
+async function claimDailyLogin(){
   if(!tgUserId || state.dailyBusy) return;
   state.dailyBusy = true;
   state.dailyMsg = "";
   render();
   try{
-    const resp = await apiPost("/api/daily/claim", {telegram_id: tgUserId, task_key: taskKey});
+    await apiPost("/api/daily/login/claim", {telegram_id: tgUserId, task_key: "login"});
     await refreshUser();
-    state.daily = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
-    state.dailyMsg = resp.awarded ? ("✅ +" + resp.awarded + " бонусов") : "✅ Уже получено";
-    haptic("light");
+    const [login, tasks] = await Promise.all([
+      apiGet("/api/daily/login?telegram_id="+encodeURIComponent(tgUserId)),
+      apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId)),
+    ]);
+    state.dailyLogin = login;
+    state.dailyTasks = tasks;
+    state.dailyMsg = "✅ Бонус начислен!";
   }catch(e){
-    state.dailyMsg = "❌ "+(e.message||"Ошибка");
-  }finally{
-    state.dailyBusy = false;
-    render();
+    state.dailyMsg = "❌ Не удалось забрать бонус";
   }
+  state.dailyBusy = false;
+  render();
+}
+
+async function claimDailyTask(taskKey){
+  if(!tgUserId || state.dailyBusy) return;
+  state.dailyBusy = true;
+  state.dailyMsg = "";
+  render();
+  try{
+    await apiPost("/api/daily/claim", {telegram_id: tgUserId, task_key: taskKey});
+    await refreshUser();
+    state.dailyTasks = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId));
+    // bonus_day might affect UX; keep login status fresh too
+    try{ state.dailyLogin = await apiGet("/api/daily/login?telegram_id="+encodeURIComponent(tgUserId)); }catch(e){}
+  }catch(e){
+    state.dailyMsg = "❌ Не удалось получить награду";
+  }
+  state.dailyBusy = false;
+  render();
+}
+
+
+function _fmtTime(sec){
+  sec = Math.max(0, sec|0);
+  const h = Math.floor(sec/3600);
+  const m = Math.floor((sec%3600)/60);
+  const s = sec%60;
+  const hh = String(h).padStart(2,"0");
+  const mm = String(m).padStart(2,"0");
+  const ss = String(s).padStart(2,"0");
+  return hh+":"+mm+":"+ss;
 }
 
 function renderDailySheet(){
@@ -4594,6 +4657,7 @@ function renderDailySheet(){
   content.innerHTML = "";
   if(!state.dailyOpen) return;
 
+  // Header
   const hdr = el("div","row");
   hdr.style.alignItems="baseline";
   hdr.appendChild(el("div","h1","🎯 Daily бонусы"));
@@ -4602,71 +4666,196 @@ function renderDailySheet(){
   hdr.appendChild(close);
   content.appendChild(hdr);
 
-  if(state.daily && typeof state.daily.claimed_points==="number"){
-    content.appendChild(el("div","sub","Сегодня: "+esc(state.daily.claimed_points)+" / "+esc(state.daily.max_points)+" · осталось "+esc(state.daily.remaining_points)));
-  }else{
-    content.appendChild(el("div","sub","Ежедневные задания, чтобы набрать до 400 бонусов."));
-  }
-
-  if(state.dailyMsg){
-    const m = el("div","sub", esc(state.dailyMsg));
-    m.style.marginTop="10px";
-    content.appendChild(m);
-  }
-
-  if(!state.daily){
+  // Loading
+  if(!state.dailyLogin || !state.dailyTasks){
     const b = el("div","sub","Загрузка…");
     b.style.marginTop="12px";
     content.appendChild(b);
     return;
   }
 
+  // Message
+  if(state.dailyMsg){
+    const m = el("div","sub", esc(state.dailyMsg));
+    m.style.marginTop="10px";
+    content.appendChild(m);
+  }
+
+  // ----------------------------
+  // 7-day login streak (Hamster)
+  // ----------------------------
+  const login = state.dailyLogin;
+  const rewards = Array.isArray(login.rewards) ? login.rewards : [];
+  const cycleLen = rewards.length || 7;
+  const dayInCycle = login.day_in_cycle || 1;
+
+  const top = el("div","card2");
+  top.style.marginTop="12px";
+
+  const row = el("div","row");
+  const left = el("div");
+  left.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🔥 Серия: '+esc(login.streak||0)+' / 7</div>'));
+  left.appendChild(el("div","sub","Пропустил день — серия сбросится"));
+  row.appendChild(left);
+
+  const right = el("div");
+  right.style.textAlign="right";
+  if(login.can_claim){
+    right.appendChild(el("div",null,'<div style="font-size:13px;font-weight:900">✅ Сегодня доступно</div>'));
+    right.appendChild(el("div","sub","Забери награду"));
+  }else{
+    right.appendChild(el("div",null,'<div style="font-size:13px;font-weight:900">⏳ '+esc(_fmtTime(login.seconds_left||0))+'</div>'));
+    right.appendChild(el("div","sub","До следующего"));
+  }
+  row.appendChild(right);
+  top.appendChild(row);
+
+  // calendar (7 days) horizontal
+  const sc = el("div","hScroll");
+  sc.style.marginTop="12px";
+  sc.style.paddingBottom="2px";
+
+  for(let i=1;i<=cycleLen;i++){
+    const reward = rewards[i-1] || 0;
+    const card = el("div","miniCard");
+    card.style.minWidth = "108px";
+    card.style.cursor = "default";
+    card.style.textAlign = "center";
+    card.style.padding = "12px";
+    const isToday = (i===dayInCycle);
+    const isPast = (login.streak||0) >= i && !isToday;
+
+    if(isToday){
+      card.style.border = "1px solid rgba(255,255,255,0.22)";
+      card.style.background = "rgba(255,255,255,0.10)";
+    }else if(isPast){
+      card.style.opacity = "0.85";
+    }else{
+      card.style.opacity = "0.55";
+    }
+
+    card.appendChild(el("div","miniMeta","Day "+i));
+    card.appendChild(el("div",null,'<div style="font-size:15px;font-weight:900;margin-top:6px">💎 +'+esc(reward)+'</div>'));
+    card.appendChild(el("div","miniMeta", isToday ? (login.can_claim ? "Сегодня" : "Получено") : (isPast ? "✓" : "—")));
+    sc.appendChild(card);
+  }
+  top.appendChild(sc);
+
+  const cta = el("div","btn");
+  cta.style.marginTop="12px";
+  const can = !!login.can_claim && !state.dailyBusy;
+  cta.style.opacity = can ? "1" : "0.55";
+  cta.style.pointerEvents = can ? "auto" : "none";
+  cta.addEventListener("click", ()=>{ haptic(); claimDailyLogin(); });
+  const todayReward = rewards[(dayInCycle-1)] || 0;
+  cta.appendChild(el("div",null,'<div class="btnTitle">'+(can ? ("🎁 Забрать +"+esc(todayReward)) : "⏳ Жди таймер")+'</div><div class="btnSub">'+(can ? "Раз в 24 часа" : "Бонус можно брать раз в 24 часа")+'</div>'));
+  cta.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
+  top.appendChild(cta);
+
+  content.appendChild(top);
+
+  // ----------------------------
+  // Daily tasks (+400/day)
+  // ----------------------------
+  const tasks = state.dailyTasks;
+  const box = el("div","card2");
+  box.style.marginTop="12px";
+
+  const tRow = el("div","row");
+  const tLeft = el("div");
+  tLeft.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎯 Задания дня</div>'));
+  const claimed = parseInt(tasks.claimed_points||0,10)||0;
+  const remain = parseInt(tasks.remaining_points||0,10)||0;
+  tLeft.appendChild(el("div","sub","Получено сегодня: "+esc(claimed)+" • Осталось: "+esc(remain)));
+  tRow.appendChild(tLeft);
+
+  const tRight = el("div");
+  tRight.style.textAlign="right";
+  tRight.appendChild(el("div",null,'<div style="font-size:13px;font-weight:900">+400/день</div>'));
+  tRight.appendChild(el("div","sub","Выполняй и забирай"));
+  tRow.appendChild(tRight);
+
+  box.appendChild(tRow);
+
   const list = el("div");
-  list.style.marginTop="12px";
+  list.style.marginTop="10px";
   list.style.display="grid";
   list.style.gap="10px";
 
-  const tasks = Array.isArray(state.daily.tasks) ? state.daily.tasks : [];
-  for(const t of tasks){
-    const card = el("div","card2");
-    const row = el("div","row");
-    const left = el("div");
-    left.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">'+esc(t.icon||"🎯")+' '+esc(t.title)+'</div>'));
+  const taskItems = Array.isArray(tasks.tasks) ? tasks.tasks : [];
+  for(const it of taskItems){
+    const card = el("div","miniCard");
+    card.style.cursor = "default";
+    card.style.padding = "12px";
+
+    const rr = el("div","row");
+    rr.style.alignItems="center";
+
+    const meta = el("div");
+    meta.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">'+esc(it.icon||"🎯")+' '+esc(it.title||"")+'</div>'));
+
+    const need = parseInt(it.need||1,10)||1;
+    const prog = parseInt(it.progress||0,10)||0;
+
     let sub = "";
-    if((t.need||1) > 1){
-      sub = (t.progress||0) + " / " + t.need;
+    if(need>1){
+      sub = "Прогресс: "+prog+"/"+need+" • Награда: +"+esc(it.points||0);
     }else{
-      sub = t.claimed ? "Получено" : (t.done ? "Выполнено" : "Не выполнено");
+      sub = "Награда: +"+esc(it.points||0);
     }
-    left.appendChild(el("div","sub", esc(sub)));
-    row.appendChild(left);
+    meta.appendChild(el("div","miniMeta", esc(sub)));
+    rr.appendChild(meta);
 
-    const pill = el("div","pill","💎 +"+esc(t.points));
-    row.appendChild(pill);
+    const btn = el("div","pill");
+    btn.style.marginLeft="auto";
+    btn.style.cursor="pointer";
 
-    card.appendChild(row);
+    const claimedTask = !!it.claimed;
+    const doneTask = !!it.done;
 
-    const btnRow = el("div");
-    btnRow.style.marginTop="10px";
-    btnRow.style.display="grid";
-    btnRow.style.gridTemplateColumns="1fr";
-    btnRow.style.gap="8px";
+    if(claimedTask){
+      btn.textContent = "Получено";
+      btn.style.opacity = "0.7";
+      btn.style.cursor = "default";
+    }else if(doneTask){
+      btn.textContent = "Забрать";
+      btn.style.opacity = state.dailyBusy ? "0.55" : "1";
+      btn.style.pointerEvents = state.dailyBusy ? "none" : "auto";
+      btn.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); claimDailyTask(it.key); });
+    }else{
+      // not done yet -> show action hint
+      btn.textContent = "Открыть";
+      btn.style.opacity = "0.9";
+      btn.addEventListener("click",(e)=>{
+        e.stopPropagation();
+        haptic();
+        // lightweight helpers (do not change main UI logic)
+        if(it.key==="open_channel"){ dailyEvent('open_channel'); openLink("https://t.me/"+CHANNEL); }
+        else if(it.key==="use_search"){ state.tab="search"; render(); dailyEvent('use_search'); }
+        else if(it.key==="open_inventory"){ openInventory(); dailyEvent('open_inventory'); }
+        else if(it.key==="open_profile"){ openПрофиль("main"); dailyEvent('open_profile'); }
+        else if(it.key==="open_miniapp"){ dailyEvent('open_miniapp'); }
+        else if(it.key==="open_post"){ state.tab="categories"; render(); /* user opens posts manually */ }
+        else if(it.key==="spin_roulette"){ openПрофиль("roulette"); /* roulette api marks event */ }
+        else{
+          // manual confirm tasks (comment/reply/convert)
+          dailyEvent(it.key);
+        }
+        // refresh tasks shortly
+        clearTimeout(state.__dailyT);
+        state.__dailyT = setTimeout(async ()=>{
+          try{ state.dailyTasks = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId)); render(); }catch(e){}
+        }, 500);
+      });
+    }
 
-    const btn = el("div","btn");
-    const canClaim = !!t.done && !t.claimed;
-    btn.style.opacity = canClaim ? "1" : "0.55";
-    btn.style.pointerEvents = canClaim ? "auto" : "none";
-    btn.addEventListener("click", ()=>{ haptic(); claimDaily(t.key); });
-    btn.appendChild(el("div",null,'<div class="btnTitle">'+(t.claimed ? "✅ Получено" : (t.done ? "🎁 Забрать" : "🔒 Выполни чтобы забрать"))+'</div><div class="btnSub">'+(t.claimed ? "Награда уже начислена" : (t.done ? "Нажми, чтобы получить бонусы" : "Сначала выполни задание"))+'</div>'));
-    btn.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
-    btnRow.appendChild(btn);
-
-    card.appendChild(btnRow);
-
+    rr.appendChild(btn);
+    card.appendChild(rr);
     list.appendChild(card);
   }
 
-  content.appendChild(list);
+  box.appendChild(list);
+  content.appendChild(box);
 }
 
     function renderPostsSheet(){
@@ -4755,6 +4944,7 @@ function renderDailySheet(){
         try{
           const d = await apiPost("/api/inventory/convert_ticket", {telegram_id: tgUserId, qty: haveTickets});
           state.invMsg = "✅ Обмен выполнен: +"+d.added_points+" баллов";
+          try{ dailyEvent('convert_prize'); }catch(e){}
           await refreshUser();
           state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
           haptic("light");
@@ -4855,6 +5045,7 @@ function renderDailySheet(){
 
               state.busy=true; state.invMsg=""; renderInventorySheet();
               try{
+                const d = await apiPost("/api/inventory/convert_prize", {telegram_id: tgUserId, claim_code: code});
                 state.invMsg = "✅ Приз превращён в бонусы: +"+d.added_points+" баллов";
                 await refreshUser();
                 state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
@@ -6312,6 +6503,29 @@ class DailyTasksResp(BaseModel):
     tasks: list[DailyTaskItem]
 
 
+
+class DailyLoginStatusResp(BaseModel):
+    ok: bool = True
+    streak: int
+    best_streak: int
+    cycle_len: int
+    rewards: list[int]
+    day_in_cycle: int
+    can_claim: bool
+    seconds_left: int
+    last_claim_at: Optional[datetime] = None
+
+
+class DailyLoginClaimResp(BaseModel):
+    ok: bool = True
+    awarded: int
+    streak: int
+    best_streak: int
+    day_in_cycle: int
+    user_points: int
+    can_claim: bool
+    seconds_left: int
+
 class DailyEventReq(BaseModel):
     telegram_id: int
     event: str
@@ -6573,6 +6787,78 @@ async def inventory_api(telegram_id: int):
     }
 
 # -----------------------------------------------------------------------------
+# DAILY LOGIN BONUS API (Hamster-style calendar)
+# -----------------------------------------------------------------------------
+@app.get("/api/daily/login", response_model=DailyLoginStatusResp)
+async def daily_login_status_api(telegram_id: int):
+    tid = int(telegram_id)
+    now = _utcnow()
+    async with async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
+        if not user:
+            # Mini App can be opened before /start in bot -> create minimal user
+            user = User(telegram_id=tid, points=10, joined_at=now, last_seen_at=now)
+            session.add(user)
+            await session.commit()
+
+        last = user.last_daily_bonus_at
+        can_claim = True
+        seconds_left = 0
+        if last is not None and (now - last) < timedelta(days=1):
+            can_claim = False
+            seconds_left = max(0, int((timedelta(days=1) - (now - last)).total_seconds()))
+        streak = int(user.daily_streak or 0)
+        best = int(user.best_streak or 0)
+        day_in_cycle = ((max(1, streak) - 1) % DAILY_LOGIN_CYCLE_LEN) + 1 if streak > 0 else 1
+
+        return DailyLoginStatusResp(
+            ok=True,
+            streak=streak,
+            best_streak=best,
+            cycle_len=DAILY_LOGIN_CYCLE_LEN,
+            rewards=DAILY_LOGIN_REWARDS,
+            day_in_cycle=day_in_cycle,
+            can_claim=can_claim,
+            seconds_left=seconds_left,
+            last_claim_at=last,
+        )
+
+
+@app.post("/api/daily/login/claim", response_model=DailyLoginClaimResp)
+async def daily_login_claim_api(req: DailyClaimReq):
+    # NOTE: reuse existing request model if present; otherwise accept basic dict below.
+    tid = int(getattr(req, "telegram_id", None) or 0)
+    if tid <= 0:
+        raise HTTPException(status_code=400, detail="bad_telegram_id")
+
+    user, granted, hours_left, _streak_bonus = await add_daily_bonus_and_update_streak(tid)
+    if not user:
+        raise HTTPException(status_code=404, detail="user_not_found")
+
+    # Award is deterministic for the resulting streak day.
+    awarded = 0
+    if granted:
+        streak = int(user.daily_streak or 1)
+        awarded = int(DAILY_LOGIN_REWARDS[((streak - 1) % DAILY_LOGIN_CYCLE_LEN)])
+
+    seconds_left = 0 if granted else max(0, int(hours_left) * 3600)
+    streak = int(user.daily_streak or 0)
+    best = int(user.best_streak or 0)
+    day_in_cycle = ((max(1, streak) - 1) % DAILY_LOGIN_CYCLE_LEN) + 1 if streak > 0 else 1
+
+    return DailyLoginClaimResp(
+        ok=True,
+        awarded=awarded,
+        streak=streak,
+        best_streak=best,
+        day_in_cycle=day_in_cycle,
+        user_points=int(user.points or 0),
+        can_claim=bool(granted),
+        seconds_left=seconds_left,
+    )
+
+
+# -----------------------------------------------------------------------------
 # DAILY TASKS API
 # -----------------------------------------------------------------------------
 @app.get("/api/daily/tasks", response_model=DailyTasksResp)
@@ -6662,8 +6948,12 @@ async def daily_event_api(req: DailyEventReq):
             await _mark_daily_done(session, tid, day, "open_profile")
         elif ev == "comment_post":
             await _mark_daily_done(session, tid, day, "comment_post")
+        elif ev == "reply_comment":
+            await _mark_daily_done(session, tid, day, "reply_comment")
         elif ev == "spin_roulette":
             await _mark_daily_done(session, tid, day, "spin_roulette")
+        elif ev == "convert_prize":
+            await _mark_daily_done(session, tid, day, "convert_prize")
         elif ev == "open_post":
             # count up to need (3)
             logs = await _get_daily_logs(session, tid, day)
@@ -6831,6 +7121,8 @@ async def inventory_convert_ticket(req: ConvertTicketsReq):
     }
 
 
+@app.post("/api/inventory/convert_prize", response_model=ConvertPrizeResp)
+async def inventory_convert_prize(req: ConvertPrizeReq):
     tid = int(req.telegram_id)
     code = (req.claim_code or "").strip().upper()
     if not code:
