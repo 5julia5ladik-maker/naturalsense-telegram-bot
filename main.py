@@ -4563,7 +4563,7 @@ function renderБонусы(main){
 
 async function refreshDailyIfOpen(reason){
   try{
-    if(!state || !state.dailyOpen) return;
+    if(!state) return;
     if(!tgUserId) return;
     const [login, tasks] = await Promise.all([
       apiGet("/api/daily/login?telegram_id="+encodeURIComponent(tgUserId)),
@@ -4588,7 +4588,7 @@ async function refreshDailyIfOpen(reason){
 
 function scheduleDailyRefresh(delayMs){
   try{
-    if(!state || !state.dailyOpen) return;
+    if(!state) return;
     clearTimeout(state.__dailyRefreshT);
     state.__dailyRefreshT = setTimeout(()=>{ refreshDailyIfOpen("scheduled"); }, Math.max(0, delayMs||0));
   }catch(e){}
@@ -4955,32 +4955,32 @@ function renderDailySheet(){
         btn.addEventListener("click",(e)=>{
         e.stopPropagation();
         haptic();
-        // UX как в Hamster: после тапа по заданию открываем нужный экран,
-        // поэтому закрываем Daily-шторку, иначе она перекрывает всё и кажется что "ничего не произошло".
-        try{ closeDaily(); }catch(_e){}
-        // даём DOM тик, чтобы закрытие успело примениться
+        // Helper: run after DOM tick
         const later = (fn)=>{ try{ setTimeout(fn, 0); }catch(e){ try{ fn(); }catch(_e){} } };
+        // Close Daily only for actions that navigate away, BUT after we отправили event/обновили UI,
+        // иначе пользователь не видит подтверждение и кажется что "не засчиталось".
+        const closeDailySoft = ()=>{ try{ closeDaily(); }catch(_e){} };
         // lightweight helpers (do not change main UI logic)
         if(it.key==="open_channel"){
-          later(()=>{ dailyEvent('open_channel', {}, 'open_channel'); openLink("https://t.me/"+CHANNEL); });
+          later(()=>{ dailyEvent('open_channel', {}, 'open_channel'); closeDailySoft(); openLink("https://t.me/"+CHANNEL); });
         }
         else if(it.key==="use_search"){
-          later(()=>{ state.tab="discover"; render(); dailyEvent('use_search', {}, 'use_search'); });
+          later(()=>{ dailyEvent('use_search', {}, 'use_search'); state.tab="discover"; render(); closeDailySoft(); });
         }
         else if(it.key==="open_inventory"){
-          later(()=>{ openInventory(); /* внутри уже dailyEvent('open_inventory') */ });
+          later(()=>{ openInventory(); /* внутри уже dailyEvent('open_inventory') */ closeDailySoft(); });
         }
         else if(it.key==="open_profile"){
-          later(()=>{ openПрофиль("main"); /* внутри уже dailyEvent('open_profile') */ });
+          later(()=>{ openПрофиль("main"); /* внутри уже dailyEvent('open_profile') */ closeDailySoft(); });
         }
         else if(it.key==="open_miniapp"){
-          later(()=>{ dailyEvent('open_miniapp', {}, 'open_miniapp'); });
+          later(()=>{ dailyEvent('open_miniapp', {}, 'open_miniapp'); /* не закрываем: это просто отметка */ });
         }
         else if(it.key==="open_post"){
-          later(()=>{ state.tab="categories"; render(); dailyEvent('open_post', {}, 'open_post'); /* дальше пользователь открывает посты */ });
+          later(()=>{ dailyEvent('open_post', {}, 'open_post'); state.tab="categories"; render(); closeDailySoft(); /* дальше пользователь открывает посты */ });
         }
         else if(it.key==="spin_roulette"){
-          later(()=>{ openПрофиль("roulette"); /* событие спина отметится сервером при реальном спине */ });
+          later(()=>{ openПрофиль("roulette"); closeDailySoft(); /* событие спина отметится сервером при реальном спине */ });
         }
         else{
           // manual confirm tasks (comment/reply/convert)
