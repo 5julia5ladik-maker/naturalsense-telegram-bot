@@ -80,7 +80,7 @@ async def _http_get_text(url: str) -> tuple[int, str]:
 
 
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -4672,7 +4672,8 @@ async function dailyEvent(event, data, taskKey){
       }
       if(k){
         const title = _dailyTaskTitle(k);
-        toast("❌ Не засчиталось" + (title ? (": "+title) : "") + " — повтори");
+        const why = (e && e.message) ? String(e.message) : "";
+        toast("❌ Не засчиталось" + (title ? (": "+title) : "") + (why ? (" ("+why+")") : "") + " — повтори");
       }
     }catch(_e){}
     // silent (must never break main UI)
@@ -7089,10 +7090,35 @@ async def daily_tasks_api(telegram_id: int):
 
 
 @app.post("/api/daily/event")
-async def daily_event_api(req: DailyEventReq):
-    tid = int(req.telegram_id)
+async def daily_event_api(request: Request):
+    """Best-effort event sink for Daily tasks.
+
+    Telegram WebApp can sometimes lose/alter POST bodies when the user opens external links
+    (channel/posts/search) and returns back. Strict Pydantic models then produce 422,
+    and the client shows "Не засчиталось".
+
+    We accept any JSON payload, support common aliases, and never fail hard.
+    """
+
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception:
+        payload = {}
+
+    # aliases for robustness
+    tid_raw = payload.get("telegram_id") or payload.get("telegramId") or payload.get("telegramID")
+    ev_raw = payload.get("event") or payload.get("type")
+    data_raw = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+
+    try:
+        tid = int(tid_raw)
+    except Exception:
+        return {"ok": True, "ignored": True}
+
     day = _today_key()
-    ev = (req.event or "").strip().lower()
+    ev = (str(ev_raw or "")).strip().lower()
 
     async with async_session_maker() as session:
         user = (await session.execute(select(User).where(User.telegram_id == tid))).scalar_one_or_none()
@@ -7108,7 +7134,7 @@ async def daily_event_api(req: DailyEventReq):
         elif ev == "open_channel":
             await _mark_daily_done(session, tid, day, "open_channel")
         elif ev == "use_search":
-            await _mark_daily_done(session, tid, day, "use_search", {"q": (req.data or {}).get("q", "")[:64]})
+            await _mark_daily_done(session, tid, day, "use_search", {"q": str((data_raw or {}).get("q", ""))[:64]})
         elif ev == "open_inventory":
             await _mark_daily_done(session, tid, day, "open_inventory")
         elif ev == "open_profile":
