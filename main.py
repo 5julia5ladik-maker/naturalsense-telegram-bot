@@ -3468,7 +3468,38 @@ function esc(s){
     }
 
 
-    const tgUserId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
+    function extractTelegramId() {
+      const tgApp = window.Telegram && window.Telegram.WebApp;
+      // 1) Fast path: initDataUnsafe.user.id
+      try {
+        const id = tgApp && tgApp.initDataUnsafe && tgApp.initDataUnsafe.user ? tgApp.initDataUnsafe.user.id : null;
+        if (id) return String(id);
+      } catch (e) {}
+
+      // 2) Parse initData (querystring) and extract user JSON
+      try {
+        const init = (tgApp && tgApp.initData) ? String(tgApp.initData) : "";
+        if (init) {
+          const params = new URLSearchParams(init);
+          const userStr = params.get("user");
+          if (userStr) {
+            const user = JSON.parse(decodeURIComponent(userStr));
+            if (user && user.id) return String(user.id);
+          }
+        }
+      } catch (e) {}
+
+      // 3) Fallback: URL query params (if you ever pass telegram_id)
+      try {
+        const p = new URLSearchParams(window.location.search);
+        const id = p.get("telegram_id") || p.get("tg") || p.get("user_id");
+        if (id) return String(id);
+      } catch (e) {}
+
+      return null;
+    }
+
+    const tgUserId = extractTelegramId();
 
     // Data sets
     const JOURNAL_BLOCKS = [
