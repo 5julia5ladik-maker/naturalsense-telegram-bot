@@ -2616,18 +2616,18 @@ def get_webapp_html() -> str:
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
       --bg:#0c0f14;
-      --glowGold:rgba(230,193,128,0.16);
-      --glowGoldBottom:rgba(230,193,128,0.20);
+      --glowGold:rgba(120,170,255,0.18);
+      --glowGoldBottom:rgba(120,170,255,0.22);
       --glowWhite:rgba(255,255,255,0.06);
-      --card:rgba(255,255,255,0.08);
-      --card2:rgba(255,255,255,0.06);
+      --card:rgba(140,185,255,0.10);
+      --card2:rgba(140,185,255,0.08);
       --text:rgba(255,255,255,0.92);
       --muted:rgba(255,255,255,0.60);
       --gold:rgba(230,193,128,0.90);
-      --stroke:rgba(255,255,255,0.12);
-      --sheetOverlay:rgba(12,15,20,0.55);
-      --sheetCardBg:rgba(255,255,255,0.10);
-      --glassStroke:rgba(255,255,255,0.18);
+      --stroke:rgba(170,205,255,0.16);
+      --sheetOverlay:rgba(10,14,22,0.62);
+      --sheetCardBg:rgba(140,185,255,0.12);
+      --glassStroke:rgba(190,220,255,0.22);
       --glassShadow:rgba(0,0,0,0.45);
       --r-lg:22px;
       --r-md:16px;
@@ -2665,7 +2665,7 @@ def get_webapp_html() -> str:
 
     .card{
       border:1px solid var(--stroke);
-      background:linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05));
+      background:linear-gradient(180deg, rgba(140,185,255,0.12), rgba(140,185,255,0.06));
       border-radius:var(--r-lg);
       padding:14px;
       box-shadow:0 10px 30px rgba(0,0,0,0.35);
@@ -2681,8 +2681,8 @@ def get_webapp_html() -> str:
     .pill{
       display:inline-flex;align-items:center;gap:8px;
       padding:7px 10px;border-radius:999px;
-      border:1px solid rgba(230,193,128,0.25);
-      background:rgba(230,193,128,0.10);
+      border:1px solid rgba(140,190,255,0.28);
+      background:rgba(140,190,255,0.120);
       font-size:12px;font-weight:700;
       user-select:none;
     }
@@ -2818,7 +2818,7 @@ def get_webapp_html() -> str:
       background:rgba(255,255,255,0.05);
       display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;
     }
-    .navItemActive{border:1px solid rgba(230,193,128,0.35);background:rgba(230,193,128,0.12)}
+    .navItemActive{border:1px solid rgba(140,190,255,0.32);background:rgba(140,190,255,0.15)}
     .navIcon{font-size:18px;line-height:1}
     .navLabel{font-size:11px;color:var(--muted)}
     .navItemActive .navLabel{color:rgba(255,255,255,0.85)}
@@ -2859,7 +2859,7 @@ def get_webapp_html() -> str:
       cursor:pointer;user-select:none;font-size:13px;border:1px solid transparent;
       color:var(--muted);background:transparent;
     }
-    .segBtnActive{border:1px solid rgba(230,193,128,0.35);background:rgba(230,193,128,0.12);color:rgba(255,255,255,0.9);font-weight:750}
+    .segBtnActive{border:1px solid rgba(140,190,255,0.32);background:rgba(140,190,255,0.15);color:rgba(255,255,255,0.9);font-weight:750}
     .hidden{display:none!important}
 
     /* Splash loader */
@@ -2885,7 +2885,7 @@ def get_webapp_html() -> str:
     .nsMark:before{
       content:"";
       position:absolute; inset:-40%;
-      background:conic-gradient(from 180deg, transparent, rgba(230,193,128,0.35), transparent 60%);
+      background:conic-gradient(from 180deg, transparent, rgba(140,190,255,0.32), transparent 60%);
       animation:nsSpin 1.6s linear infinite;
       opacity:.9;
       z-index:0;
@@ -2902,8 +2902,8 @@ def get_webapp_html() -> str:
     .nsRing{
       position:absolute; inset:0;
       border-radius:999px;
-      border:1px solid rgba(230,193,128,0.30);
-      filter:drop-shadow(0 10px 40px rgba(230,193,128,0.12));
+      border:1px solid rgba(140,190,255,0.28);
+      filter:drop-shadow(0 10px 40px rgba(140,190,255,0.15));
       animation:nsPulse 1.4s ease-in-out infinite;
       pointer-events:none;
     }
@@ -2932,9 +2932,9 @@ def get_webapp_html() -> str:
     mark.hl{
       padding:0 3px;
       border-radius:6px;
-      background:rgba(230,193,128,0.22);
+      background:rgba(140,190,255,0.20);
       color:rgba(255,255,255,0.95);
-      border:1px solid rgba(230,193,128,0.25);
+      border:1px solid rgba(140,190,255,0.28);
     }
 
     /* --- Premium "Личный кабинет" card (Quiet luxury, no gold) --- */
@@ -3246,7 +3246,7 @@ def get_webapp_html() -> str:
       setVar("--card2", "rgba(255,255,255,0.06)");
 
       // subtle, stable background glows (keep dark, avoid brown cast)
-      setVar("--glowGold", "rgba(230,193,128,0.10)");
+      setVar("--glowGold", "rgba(140,190,255,0.120)");
       setVar("--glowWhite", "rgba(255,255,255,0.05)");
 
       setVar("--sheetOverlay", hexToRgba(bg,0.55));
@@ -4237,7 +4237,7 @@ async function spinRouletteLux(){
       const glow = el("div");
       glow.style.position="absolute";
       glow.style.inset="-2px";
-      glow.style.background="radial-gradient(600px 300px at 10% 0%, rgba(230,193,128,0.26), transparent 60%)";
+      glow.style.background="radial-gradient(600px 300px at 10% 0%, rgba(120,170,255,0.22), transparent 60%)";
       glow.style.pointerEvents="none";
       hero.appendChild(glow);
 
@@ -5239,8 +5239,8 @@ function renderDailySheet(){
         list.style.gap="10px";
         for(const p of prizes){
           const pc = el("div","card2");
-          pc.style.border="1px solid rgba(230,193,128,0.22)";
-          pc.style.background="rgba(230,193,128,0.08)";
+          pc.style.border="1px solid rgba(140,190,255,0.20)";
+          pc.style.background="rgba(140,190,255,0.10)";
           pc.style.padding="14px";
 
           const title = el("div",null,'<div style="font-size:14px;font-weight:950">'+esc(p.prize_label||"✨ Dior Palette")+'</div>');
