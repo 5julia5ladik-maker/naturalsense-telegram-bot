@@ -2892,6 +2892,16 @@ def get_webapp_html() -> str:
       border:1px solid rgba(255,255,255,0.14);
       background:rgba(8,18,30,0.38);
     }
+
+    /* In prize details sheet the status badge must NOT be absolute (otherwise it overlaps Close) */
+    #prizeContent .statusBadge{
+      position:static;
+      top:auto; right:auto;
+      z-index:auto;
+      max-width:100%;
+      margin-top:12px;
+      align-self:flex-start;
+    }
     .prizeHero{
       width:100%;
       border-radius:18px;
@@ -5503,11 +5513,11 @@ content.appendChild(bal);
       // UI-only mapping (do NOT touch backend logic/db labels)
       const raw = String((p && p.prize_label) ? p.prize_label : "").trim();
       const low = raw.toLowerCase();
-      // If backend stores generic label like "главный приз" -> show a premium product name
-      if(low === "главный приз" || low.startsWith("главный приз")){
-        return "Dior Backstage — палетка";
+      // If backend stores generic label like "главный приз" (sometimes with emoji) -> show a premium name
+      if(low.includes("главный приз")){
+        return "Палетка Dior";
       }
-      return raw || "Dior Backstage — палетка";
+      return raw || "Палетка Dior";
     }
 
 
