@@ -2615,20 +2615,20 @@ def get_webapp_html() -> str:
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
-      --bg:#0b141d;
-      --glowGold:rgba(120,170,255,0.16);
-      --glowGoldBottom:rgba(120,170,255,0.20);
-      --glowWhite:rgba(255,255,255,0.04);
-      --card:rgba(140,185,255,0.10);
-      --card2:rgba(140,185,255,0.08);
+      --bg:#102232;
+      --glowGold:rgba(120,170,255,0.22);
+      --glowGoldBottom:rgba(120,170,255,0.28);
+      --glowWhite:rgba(255,255,255,0.06);
+      --card:rgba(140,185,255,0.14);
+      --card2:rgba(140,185,255,0.12);
       --text:rgba(255,255,255,0.92);
       --muted:rgba(255,255,255,0.60);
       --gold:rgba(230,193,128,0.90);
-      --stroke:rgba(170,205,255,0.16);
-      --sheetOverlay:rgba(8,14,22,0.60);
-      --sheetCardBg:rgba(140,185,255,0.12);
-      --glassStroke:rgba(190,220,255,0.22);
-      --glassShadow:rgba(0,0,0,0.45);
+      --stroke:rgba(170,205,255,0.20);
+      --sheetOverlay:rgba(10,18,28,0.52);
+      --sheetCardBg:rgba(140,185,255,0.16);
+      --glassStroke:rgba(190,220,255,0.28);
+      --glassShadow:rgba(0,0,0,0.38);
       --r-lg:22px;
       --r-md:16px;
       --r-sm:14px;
@@ -2650,8 +2650,8 @@ def get_webapp_html() -> str:
       position:fixed; inset:0;
       pointer-events:none;
       background:
-        radial-gradient(1200px 820px at 50% 48%, rgba(0,0,0,0) 58%, rgba(0,0,0,0.55) 100%),
-        linear-gradient(to bottom, rgba(0,0,0,0.30), rgba(0,0,0,0.00) 38%, rgba(0,0,0,0.55));
+        radial-gradient(1200px 820px at 50% 48%, rgba(0,0,0,0) 58%, rgba(0,0,0,0.45) 100%),
+        linear-gradient(to bottom, rgba(0,0,0,0.22), rgba(0,0,0,0.00) 38%, rgba(0,0,0,0.45));
       z-index:0;
     }
 #root{min-height:100vh;position:relative;z-index:1}
@@ -2951,7 +2951,7 @@ def get_webapp_html() -> str:
   box-shadow:
     0 14px 34px rgba(0,0,0,0.42),
     inset 0 1px 0 rgba(255,255,255,0.08),
-    inset 0 0 0 1px rgba(0,0,0,0.30);
+    inset 0 0 0 1px rgba(0,0,0,0.22);
   overflow:hidden;
 }
 /* subtle premium frame (no gold) */
