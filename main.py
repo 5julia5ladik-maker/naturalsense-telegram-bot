@@ -2795,6 +2795,111 @@ def get_webapp_html() -> str:
     .thumbNS .mark{font-size:18px}
     .thumbNS .brand{font-size:12px;color:rgba(255,255,255,0.72);font-weight:800}
 
+
+    /* Inventory prizes (premium 2x2 grid) */
+    .invPrizeGrid{
+      margin-top:12px;
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0,1fr));
+      gap:12px;
+    }
+    .prizeTile{
+      position:relative;
+      border-radius:20px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,0.10);
+      background:linear-gradient(180deg, rgba(8,18,30,0.18), rgba(8,18,30,0.06));
+      box-shadow:0 10px 28px rgba(8,18,30,0.22);
+      cursor:pointer;
+      user-select:none;
+      aspect-ratio:1/1;
+      display:flex;
+      flex-direction:column;
+    }
+    .prizeTile:active{transform:scale(0.985)}
+    .prizeImgWrap{
+      position:relative;
+      margin:10px;
+      border-radius:16px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,0.10);
+      background:rgba(255,255,255,0.04);
+      flex:1;
+    }
+    .prizeImg{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+      filter:saturate(1.05) contrast(1.04);
+      transform:scale(1.01);
+    }
+    .prizeMeta{
+      padding:0 12px 12px 12px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .prizeTitle{
+      font-size:13px;
+      font-weight:950;
+      letter-spacing:.2px;
+      color:rgba(255,255,255,0.92);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .prizeCode{
+      font-size:11.5px;
+      color:rgba(255,255,255,0.62);
+    }
+    .statusBadge{
+      position:absolute;
+      top:10px;
+      right:10px;
+      z-index:3;
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      padding:7px 10px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:950;
+      letter-spacing:.18px;
+      backdrop-filter:blur(14px) saturate(170%);
+      -webkit-backdrop-filter:blur(14px) saturate(170%);
+      box-shadow:0 8px 22px rgba(8,18,30,0.20);
+      user-select:none;
+      max-width:88%;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .badgeGold{
+      color:rgba(255,255,255,0.92);
+      border:1px solid rgba(230,193,128,0.42);
+      background:linear-gradient(180deg, rgba(230,193,128,0.20), rgba(230,193,128,0.10));
+    }
+    .badgeSilver{
+      color:rgba(255,255,255,0.90);
+      border:1px solid rgba(235,245,255,0.22);
+      background:linear-gradient(180deg, rgba(235,245,255,0.14), rgba(235,245,255,0.07));
+    }
+    .badgeDark{
+      color:rgba(255,255,255,0.88);
+      border:1px solid rgba(255,255,255,0.14);
+      background:rgba(8,18,30,0.38);
+    }
+    .prizeHero{
+      width:100%;
+      border-radius:18px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,0.12);
+      background:rgba(255,255,255,0.04);
+      aspect-ratio:16/11;
+    }
+    .prizeHero img{width:100%;height:100%;object-fit:cover;display:block}
+
     /* Bottom nav */
     .bottomNav{
       position:fixed;left:0;right:0;bottom:0;
@@ -5254,7 +5359,7 @@ content.appendChild(bal);
       tCard.appendChild(convBtn);
       content.appendChild(tCard);
 
-      // Prizes list (convert only in vanilla, claim stays in bot)
+      // Prizes (premium 2x2 grid; actions only inside prize modal)
       const pCard = el("div","card2");
       pCard.style.marginTop="12px";
       pCard.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎁 Призы</div>'));
@@ -5263,105 +5368,37 @@ content.appendChild(bal);
       if(prizes.length===0){
         pCard.appendChild(el("div","sub","Пока нет призов."));
       }else{
-        const list = el("div");
-        list.style.marginTop="10px";
-        list.style.display="grid";
-        list.style.gap="10px";
+        const grid = el("div","invPrizeGrid");
         for(const p of prizes){
-          const pc = el("div","card2");
-          pc.style.border="1px solid rgba(140,190,255,0.20)";
-          pc.style.background="rgba(140,190,255,0.10)";
-          pc.style.padding="14px";
+          const tile = el("div","prizeTile");
 
-          const title = el("div",null,'<div style="font-size:14px;font-weight:950">'+esc(p.prize_label||"✨ Dior Palette")+'</div>');
-          pc.appendChild(title);
+          const b = prizeStatusBadge(p.status);
+          const badge = el("div", "statusBadge "+b.cls, esc(b.text));
+          tile.appendChild(badge);
 
-          // meta + status
-          const st = String(p.status||"draft").trim() || "draft";
-          const stMap = {
-            "draft":"Доступно",
-            "awaiting_contact":"Нужны данные",
-            "submitted":"Заявка отправлена",
-            "approved":"Подтверждено",
-            "fulfilled":"Отправлено",
-            "rejected":"Отклонено",
-            "closed":"Закрыто"
-          };
-          const stLabel = stMap[st] || st;
+          const imgWrap = el("div","prizeImgWrap");
+          const img = document.createElement("img");
+          img.className = "prizeImg";
+          img.alt = "Dior palette";
+          img.src = diorThumbDataUri();
+          imgWrap.appendChild(img);
+          tile.appendChild(imgWrap);
 
-          const meta = el("div","sub", 'Код: '+esc(p.claim_code||"-")+' • '+esc(stLabel));
-          meta.style.marginTop="6px";
-          pc.appendChild(meta);
+          const meta = el("div","prizeMeta");
+          meta.appendChild(el("div","prizeTitle", esc(p.prize_label || "✨ Dior Palette")));
+          const code = String(p.claim_code||"").trim() || "-";
+          meta.appendChild(el("div","prizeCode", "Код: "+esc(code)));
+          tile.appendChild(meta);
 
-          const canAct = (st==="draft" || st==="awaiting_contact");
+          tile.addEventListener("click", ()=>{
+            haptic("light");
+            openPrizeSheet(p);
+          });
 
-          if(!canAct){
-            const statusPill = el("div",null,'<div style="margin-top:12px;display:inline-flex;gap:8px;align-items:center;padding:10px 12px;border-radius:999px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.10);color:rgba(255,255,255,0.88);font-weight:900;font-size:12px">🟡 '+esc(stLabel)+'</div>');
-            pc.appendChild(statusPill);
-          }else{
-            // Action zone (Variant A): primary + secondary
-            const actions = el("div");
-            actions.style.marginTop="12px";
-            actions.style.display="grid";
-            actions.style.gap="10px";
-
-            const claimBtn = el("div","btn");
-            claimBtn.style.justifyContent="center";
-            claimBtn.style.fontWeight="950";
-            claimBtn.style.border="1px solid rgba(235,245,255,0.22)";
-            claimBtn.style.background="rgba(235,245,255,0.10)";
-            claimBtn.innerHTML = (st==='awaiting_contact' ? '✍️ Продолжить оформление' : '🎁 Забрать приз');
-            claimBtn.addEventListener("click", ()=>{
-              haptic();
-              const cid = p.claim_id;
-              const code = String(p.claim_code||"").trim();
-              const label = String(p.prize_label||"Приз");
-              if(cid){
-                openClaimForm(cid, code, label);
-              }else if(state.botUsername && tg && tg.openTelegramLink && code){
-                tg.openTelegramLink("https://t.me/"+state.botUsername+"?start=claim_"+encodeURIComponent(code));
-              }else{
-                alert("/claim "+code);
-              }
-            });
-
-            const convLink = el("div",null,'<div style="text-align:center;font-weight:900;font-size:12.5px;color:rgba(255,255,255,0.78);padding:10px 12px;border-radius:16px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);cursor:pointer">💎 Конвертировать • +'+esc(diorValue)+'</div>');
-            convLink.style.opacity = state.busy ? 0.6 : 1;
-            convLink.style.cursor = state.busy ? "not-allowed" : "pointer";
-            convLink.addEventListener("click", async ()=>{
-              const code = String(p.claim_code||"").trim();
-              if(!code || state.busy) return;
-
-              const ok = await askConfirm(
-                "Конвертировать приз?",
-                "Вы получите +"+diorValue+" баллов. После конвертации забрать приз будет нельзя.",
-                "Да, конвертировать"
-              );
-              if(!ok) return;
-
-              state.busy=true; state.invMsg=""; renderInventorySheet();
-              try{
-                const d = await apiPost("/api/inventory/convert_prize", {telegram_id: tgUserId, claim_code: code});
-                state.invMsg = "✅ Приз превращён в бонусы: +"+d.added_points+" баллов";
-                await refreshUser();
-                state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
-                haptic("light");
-              }catch(e){
-                state.invMsg = "❌ "+(e.message||"Ошибка");
-              }finally{
-                state.busy=false;
-                renderInventorySheet();
-              }
-            });
-
-            actions.appendChild(claimBtn);
-            actions.appendChild(convLink);
-            pc.appendChild(actions);
-          }
-
-          list.appendChild(pc);
+          grid.appendChild(tile);
         }
-        pCard.appendChild(list);
+        pCard.appendChild(grid);
+        pCard.appendChild(el("div","sub","Тапни на приз, чтобы открыть детали."));
       }
       content.appendChild(pCard);
 
@@ -5371,6 +5408,208 @@ content.appendChild(bal);
         content.appendChild(m);
       }
     }
+
+
+    function prizeStatusBadge(st){
+      st = String(st||"draft").trim() || "draft";
+      // 3 premium states (no colored dots)
+      if(st==="submitted"){
+        return {cls:"badgeGold", text:"✉️ Заявка отправлена"};
+      }
+      if(st==="approved" || st==="fulfilled"){
+        return {cls:"badgeSilver", text:"✔ Получен"};
+      }
+      if(st==="rejected"){
+        return {cls:"badgeDark", text:"⚡ Отклонено"};
+      }
+      if(st==="closed"){
+        return {cls:"badgeSilver", text:"✔ Закрыто"};
+      }
+      // draft / awaiting_contact / unknown -> needs action
+      return {cls:"badgeDark", text:"⚡ Ожидает действия"};
+    }
+
+    function diorThumbDataUri(){
+      // Inline premium SVG (stable inside Telegram; no external image requests)
+      const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="900" viewBox="0 0 900 900">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a1624"/>
+      <stop offset="0.5" stop-color="#10263a"/>
+      <stop offset="1" stop-color="#09121c"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f1d6a7" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#caa26a" stop-opacity="0.95"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="40%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="900" height="900" rx="56" fill="url(#bg)"/>
+  <rect x="0" y="0" width="900" height="900" rx="56" fill="url(#glow)"/>
+
+  <!-- palette body -->
+  <rect x="140" y="190" width="620" height="520" rx="52" fill="#0b0f14" opacity="0.62"/>
+  <rect x="152" y="202" width="596" height="496" rx="46" fill="#0c151f" opacity="0.72"/>
+  <rect x="165" y="215" width="570" height="470" rx="42" fill="#0a1119" opacity="0.82" stroke="#ffffff" stroke-opacity="0.10" stroke-width="2"/>
+
+  <!-- pans -->
+  <g>
+    <circle cx="280" cy="360" r="74" fill="#e6c180" opacity="0.20" stroke="#f1d6a7" stroke-opacity="0.25" stroke-width="2"/>
+    <circle cx="450" cy="360" r="74" fill="#aacdff" opacity="0.16" stroke="#ffffff" stroke-opacity="0.18" stroke-width="2"/>
+    <circle cx="620" cy="360" r="74" fill="#e6c180" opacity="0.18" stroke="#f1d6a7" stroke-opacity="0.22" stroke-width="2"/>
+    <circle cx="365" cy="520" r="74" fill="#aacdff" opacity="0.14" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2"/>
+    <circle cx="535" cy="520" r="74" fill="#e6c180" opacity="0.16" stroke="#f1d6a7" stroke-opacity="0.20" stroke-width="2"/>
+  </g>
+
+  <!-- Dior mark -->
+  <text x="450" y="655" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+        font-size="56" letter-spacing="6" fill="url(#gold)">DIOR</text>
+  <text x="450" y="700" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+        font-size="22" letter-spacing="2" fill="#ffffff" opacity="0.40">5 COULEURS</text>
+</svg>`.trim();
+      return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    }
+
+    function openPrizeSheet(p){
+      state.prizeSelected = p || null;
+      state.prizeOpen = true;
+      renderPrizeSheet();
+    }
+    function closePrizeSheet(){
+      state.prizeOpen = false;
+      state.prizeSelected = null;
+      renderPrizeSheet();
+    }
+
+    function renderPrizeSheet(){
+      const overlay = document.getElementById("prizeOverlay");
+      if(!overlay) return;
+      overlay.classList.toggle("open", !!state.prizeOpen);
+      const content = document.getElementById("prizeContent");
+      if(!content) return;
+      content.innerHTML = "";
+      if(!state.prizeOpen) return;
+
+      const p = state.prizeSelected || {};
+      const hdr = el("div","row"); hdr.style.alignItems="baseline";
+      hdr.appendChild(el("div","h1","🎁 Приз"));
+      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
+      close.addEventListener("click", ()=>{ haptic(); closePrizeSheet(); });
+      hdr.appendChild(close);
+      content.appendChild(hdr);
+
+      const hero = el("div","prizeHero");
+      hero.style.marginTop="12px";
+      const img = document.createElement("img");
+      img.alt = "Dior palette";
+      img.src = diorThumbDataUri();
+      hero.appendChild(img);
+      content.appendChild(hero);
+
+      content.appendChild(el("div",null,'<div style="margin-top:12px;font-size:16px;font-weight:950">'+esc(p.prize_label||"✨ Dior Palette")+'</div>'));
+
+      const code = String(p.claim_code||"").trim() || "-";
+      const codeBox = el("div","card2");
+      codeBox.style.marginTop="10px";
+      codeBox.style.display="flex";
+      codeBox.style.justifyContent="space-between";
+      codeBox.style.alignItems="center";
+      codeBox.style.gap="10px";
+      codeBox.innerHTML = '<div><div style="font-size:12px;color:rgba(255,255,255,0.62)">Код</div><div style="margin-top:6px;font-size:14px;font-weight:950;letter-spacing:.3px">'+esc(code)+'</div></div>';
+      const copy = el("div","pill","📎 Копировать");
+      copy.style.cursor="pointer";
+      copy.addEventListener("click", async ()=>{
+        try{
+          await navigator.clipboard.writeText(code);
+          state.invMsg = "✅ Код скопирован";
+          haptic("light");
+        }catch(e){
+          state.invMsg = "ℹ️ Не удалось скопировать";
+        }
+        try{ renderInventorySheet(); }catch(e){}
+      });
+      codeBox.appendChild(copy);
+      content.appendChild(codeBox);
+
+      const b = prizeStatusBadge(p.status);
+      content.appendChild(el("div",null,'<div style="margin-top:12px" class="statusBadge '+esc(b.cls)+'">'+esc(b.text)+'</div>'));
+
+      const stRaw = String(p.status||"draft").trim() || "draft";
+      const canAct = (stRaw==="draft" || stRaw==="awaiting_contact");
+      if(canAct){
+        const actions = el("div");
+        actions.style.marginTop="14px";
+        actions.style.display="grid";
+        actions.style.gap="10px";
+
+        const claimBtn = el("div","btn");
+        claimBtn.style.justifyContent="center";
+        claimBtn.style.fontWeight="950";
+        claimBtn.style.border="1px solid rgba(235,245,255,0.22)";
+        claimBtn.style.background="rgba(235,245,255,0.10)";
+        claimBtn.innerHTML = (stRaw==='awaiting_contact' ? '✍️ Продолжить оформление' : '🎁 Забрать приз');
+        claimBtn.addEventListener("click", ()=>{
+          haptic();
+          const cid = p.claim_id;
+          const label = String(p.prize_label||"Приз");
+          if(cid){
+            openClaimForm(cid, code, label);
+          }else if(state.botUsername && tg && tg.openTelegramLink && code && code!=="-"){
+            tg.openTelegramLink("https://t.me/"+state.botUsername+"?start=claim_"+encodeURIComponent(code));
+          }else{
+            alert("/claim "+code);
+          }
+        });
+
+        const diorValue = Number((state.inventory||{}).dior_convert_value || 0) || 0;
+        const convBtn = el("div",null,'<div style="text-align:center;font-weight:900;font-size:12.5px;color:rgba(255,255,255,0.78);padding:12px 12px;border-radius:16px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);cursor:pointer">💎 Конвертировать • +'+esc(diorValue)+'</div>');
+        convBtn.style.opacity = state.busy ? 0.6 : 1;
+        convBtn.style.cursor = state.busy ? "not-allowed" : "pointer";
+        convBtn.addEventListener("click", async ()=>{
+          const code2 = String(p.claim_code||"").trim();
+          if(!code2 || state.busy) return;
+
+          const ok = await askConfirm(
+            "Конвертировать приз?",
+            "Вы получите +"+diorValue+" баллов. После конвертации забрать приз будет нельзя.",
+            "Да, конвертировать"
+          );
+          if(!ok) return;
+
+          state.busy=true; state.invMsg=""; renderPrizeSheet();
+          try{
+            const d = await apiPost("/api/inventory/convert_prize", {telegram_id: tgUserId, claim_code: code2});
+            state.invMsg = "✅ Приз превращён в бонусы: +"+d.added_points+" баллов";
+            await refreshUser();
+            state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
+            haptic("light");
+            closePrizeSheet();
+          }catch(e){
+            state.invMsg = "❌ "+(e.message||"Ошибка");
+          }finally{
+            state.busy=false;
+            try{ renderInventorySheet(); }catch(e){}
+            try{ renderPrizeSheet(); }catch(e){}
+          }
+        });
+
+        actions.appendChild(claimBtn);
+        actions.appendChild(convBtn);
+        content.appendChild(actions);
+      }
+
+      if(state.invMsg){
+        const m = el("div","card2", esc(state.invMsg));
+        m.style.marginTop="12px";
+        content.appendChild(m);
+      }
+    }
+
 
     function renderRouletteOddsSheet(){
       const overlay = document.getElementById("oddsOverlay");
@@ -6184,6 +6423,7 @@ dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
 
       renderPostsSheet();
       renderInventorySheet();
+      renderPrizeSheet();
       renderRouletteOddsSheet();
       renderПрофильSheet();
       renderDailySheet();
