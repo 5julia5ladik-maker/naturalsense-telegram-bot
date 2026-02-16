@@ -2616,6 +2616,9 @@ def get_webapp_html() -> str:
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
       --bg:#0c0f14;
+      --glowGold:rgba(230,193,128,0.16);
+      --glowGoldBottom:rgba(230,193,128,0.20);
+      --glowWhite:rgba(255,255,255,0.06);
       --card:rgba(255,255,255,0.08);
       --card2:rgba(255,255,255,0.06);
       --text:rgba(255,255,255,0.92);
@@ -2633,13 +2636,25 @@ def get_webapp_html() -> str:
     body{
       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
       background:
-        radial-gradient(1200px 800px at 20% 10%, rgba(230,193,128,0.18), transparent 60%),
-        radial-gradient(900px 600px at 80% 0%, rgba(255,255,255,0.06), transparent 55%),
+        radial-gradient(1100px 760px at 18% 8%, var(--glowGold), transparent 66%),
+        radial-gradient(920px 620px at 82% 0%, var(--glowWhite), transparent 60%),
+        radial-gradient(920px 540px at 50% 108%, var(--glowGoldBottom), transparent 62%),
         var(--bg);
+      background-attachment:fixed;
       color:var(--text);
       overflow-x:hidden;
+      position:relative;
     }
-    #root{min-height:100vh}
+    body::before{
+      content:"";
+      position:fixed; inset:0;
+      pointer-events:none;
+      background:
+        radial-gradient(1200px 820px at 50% 48%, rgba(0,0,0,0) 58%, rgba(0,0,0,0.55) 100%),
+        linear-gradient(to bottom, rgba(0,0,0,0.30), rgba(0,0,0,0.00) 38%, rgba(0,0,0,0.55));
+      z-index:0;
+    }
+#root{min-height:100vh;position:relative;z-index:1}
     .safePadBottom{padding-bottom:92px}
     .container{max-width:560px;margin:0 auto;padding:16px 16px 24px}
 
@@ -3229,6 +3244,10 @@ def get_webapp_html() -> str:
       setVar("--stroke", "rgba(255,255,255,0.12)");
       setVar("--card", "rgba(255,255,255,0.08)");
       setVar("--card2", "rgba(255,255,255,0.06)");
+
+      // subtle, stable background glows (keep dark, avoid brown cast)
+      setVar("--glowGold", "rgba(230,193,128,0.10)");
+      setVar("--glowWhite", "rgba(255,255,255,0.05)");
 
       setVar("--sheetOverlay", hexToRgba(bg,0.55));
       setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
