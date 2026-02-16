@@ -2817,6 +2817,8 @@ def get_webapp_html() -> str:
       flex-direction:column;
     }
     .prizeTile:active{transform:scale(0.985)}
+    .prizeTile > *{pointer-events:none}
+    .prizeTile{pointer-events:auto}
     .prizeImgWrap{
       position:relative;
       margin:10px;
@@ -5435,42 +5437,64 @@ content.appendChild(bal);
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="900" viewBox="0 0 900 900">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0a1624"/>
-      <stop offset="0.5" stop-color="#10263a"/>
-      <stop offset="1" stop-color="#09121c"/>
+      <stop offset="0" stop-color="#07121f"/>
+      <stop offset="0.55" stop-color="#0c2033"/>
+      <stop offset="1" stop-color="#06101a"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
     <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f1d6a7" stop-opacity="0.95"/>
-      <stop offset="1" stop-color="#caa26a" stop-opacity="0.95"/>
+      <stop offset="0" stop-color="#f3dbb3" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#c79b5c" stop-opacity="0.95"/>
     </linearGradient>
-    <radialGradient id="glow" cx="40%" cy="30%" r="70%">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.08"/>
+    <radialGradient id="glow" cx="35%" cy="28%" r="78%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
       <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </radialGradient>
   </defs>
 
-  <rect x="0" y="0" width="900" height="900" rx="56" fill="url(#bg)"/>
-  <rect x="0" y="0" width="900" height="900" rx="56" fill="url(#glow)"/>
+  <rect x="0" y="0" width="900" height="900" rx="58" fill="url(#bg)"/>
+  <rect x="0" y="0" width="900" height="900" rx="58" fill="url(#glow)"/>
 
-  <!-- palette body -->
-  <rect x="140" y="190" width="620" height="520" rx="52" fill="#0b0f14" opacity="0.62"/>
-  <rect x="152" y="202" width="596" height="496" rx="46" fill="#0c151f" opacity="0.72"/>
-  <rect x="165" y="215" width="570" height="470" rx="42" fill="#0a1119" opacity="0.82" stroke="#ffffff" stroke-opacity="0.10" stroke-width="2"/>
+  <!-- compact -->
+  <rect x="110" y="165" width="680" height="570" rx="62" fill="#090c10" opacity="0.66"/>
+  <rect x="128" y="183" width="644" height="534" rx="54" fill="#0b141d" opacity="0.78" stroke="#ffffff" stroke-opacity="0.10" stroke-width="2"/>
 
-  <!-- pans -->
-  <g>
-    <circle cx="280" cy="360" r="74" fill="#e6c180" opacity="0.20" stroke="#f1d6a7" stroke-opacity="0.25" stroke-width="2"/>
-    <circle cx="450" cy="360" r="74" fill="#aacdff" opacity="0.16" stroke="#ffffff" stroke-opacity="0.18" stroke-width="2"/>
-    <circle cx="620" cy="360" r="74" fill="#e6c180" opacity="0.18" stroke="#f1d6a7" stroke-opacity="0.22" stroke-width="2"/>
-    <circle cx="365" cy="520" r="74" fill="#aacdff" opacity="0.14" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2"/>
-    <circle cx="535" cy="520" r="74" fill="#e6c180" opacity="0.16" stroke="#f1d6a7" stroke-opacity="0.20" stroke-width="2"/>
+  <!-- pans (9) -->
+  <g transform="translate(185,255)">
+    <defs>
+      <linearGradient id="pan" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+        <stop offset="1" stop-color="#000000" stop-opacity="0.10"/>
+      </linearGradient>
+    </defs>
+
+    <!-- row 1 -->
+    <rect x="0" y="0" width="150" height="120" rx="30" fill="#d9b58c" opacity="0.18" stroke="#f3dbb3" stroke-opacity="0.20" stroke-width="2"/>
+    <rect x="175" y="0" width="150" height="120" rx="30" fill="#c8a178" opacity="0.18" stroke="#f3dbb3" stroke-opacity="0.16" stroke-width="2"/>
+    <rect x="350" y="0" width="150" height="120" rx="30" fill="#b58c68" opacity="0.16" stroke="#ffffff" stroke-opacity="0.12" stroke-width="2"/>
+
+    <!-- row 2 -->
+    <rect x="0" y="145" width="150" height="120" rx="30" fill="#e8d2b5" opacity="0.16" stroke="#ffffff" stroke-opacity="0.14" stroke-width="2"/>
+    <rect x="175" y="145" width="150" height="120" rx="30" fill="#aacdff" opacity="0.12" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2"/>
+    <rect x="350" y="145" width="150" height="120" rx="30" fill="#9dbbe6" opacity="0.10" stroke="#ffffff" stroke-opacity="0.14" stroke-width="2"/>
+
+    <!-- row 3 -->
+    <rect x="0" y="290" width="150" height="120" rx="30" fill="#d9b58c" opacity="0.14" stroke="#f3dbb3" stroke-opacity="0.18" stroke-width="2"/>
+    <rect x="175" y="290" width="150" height="120" rx="30" fill="#0f141b" opacity="0.22" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2"/>
+    <rect x="350" y="290" width="150" height="120" rx="30" fill="#e6c180" opacity="0.12" stroke="#f3dbb3" stroke-opacity="0.16" stroke-width="2"/>
+
+    <!-- subtle sheen -->
+    <rect x="-10" y="-10" width="520" height="440" rx="46" fill="url(#glass)"/>
   </g>
 
-  <!-- Dior mark -->
-  <text x="450" y="655" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
-        font-size="56" letter-spacing="6" fill="url(#gold)">DIOR</text>
-  <text x="450" y="700" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
-        font-size="22" letter-spacing="2" fill="#ffffff" opacity="0.40">5 COULEURS</text>
+  <!-- mark -->
+  <text x="450" y="690" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+        font-size="52" letter-spacing="7" fill="url(#gold)">DIOR</text>
+  <text x="450" y="730" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+        font-size="18" letter-spacing="4" fill="#ffffff" opacity="0.45">BACKSTAGE</text>
 </svg>`.trim();
       return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
     }
