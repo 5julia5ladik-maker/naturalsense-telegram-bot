@@ -6730,6 +6730,51 @@ class BuyTicketResp(BaseModel):
 
 # -----------------------------------------------------------------------------
 # DAILY TASKS API (Mini App)
+
+
+# -----------------------------------------------------------------------------
+# DAILY EVENTS NORMALIZATION (anti 'unknown_event' due to key mismatch)
+# -----------------------------------------------------------------------------
+def _normalize_daily_event(ev_raw: str) -> str:
+    """Normalize client event keys to server canonical keys.
+
+    We accept common aliases and tolerate separators/casing differences to avoid
+    'unknown_event' when the Mini App and backend drift.
+    """
+    ev = (ev_raw or "").strip().lower()
+    if not ev:
+        return ""
+
+    # Normalize separators: spaces, dashes, dots -> underscore
+    ev = re.sub(r"[^a-z0-9]+", "_", ev).strip("_")
+
+    # Common aliases -> canonical keys used in DAILY_TASKS
+    aliases = {
+        "open_mini_app": "open_miniapp",
+        "open_miniapp_app": "open_miniapp",
+        "mini_app_open": "open_miniapp",
+        "miniapp_open": "open_miniapp",
+        "app_open": "open_miniapp",
+        "open_app": "open_miniapp",
+        "open_channel_btn": "open_channel",
+        "channel_open": "open_channel",
+        "go_channel": "open_channel",
+        "search_used": "use_search",
+        "use_search_btn": "use_search",
+        "open_search": "use_search",
+        "inventory_open": "open_inventory",
+        "profile_open": "open_profile",
+        "roulette_spin": "spin_roulette",
+        "spin": "spin_roulette",
+        "convert": "convert_prize",
+    }
+    ev = aliases.get(ev, ev)
+
+    # Any variant like open_post_1/open_post_2/post_opened -> open_post counter
+    if ev.startswith("open_post") or ev.startswith("post_open"):
+        ev = "open_post"
+
+    return ev
 # -----------------------------------------------------------------------------
 class DailyTaskItem(BaseModel):
     key: str
@@ -7168,15 +7213,13 @@ async def daily_tasks_api(telegram_id: int):
         )
 
 
+
 @app.post("/api/daily/event")
 async def daily_event_api(request: Request):
-    """
-    Best-effort event sink for Daily tasks.
+    """Best-effort event sink for Daily tasks.
 
-    GUARANTEE:
-      - NEVER returns 5xx to the client (always 200 with ok:true/false).
-      - Accepts loose JSON payloads and common aliases.
-      - Logs any server error with enough context for Railway logs.
+    Goal: never break UX because of a mismatched event key between Mini App and backend.
+    We normalize/alias event keys and, if the key exists in DAILY_TASKS, we accept it.
     """
     # 1) Parse payload safely
     try:
@@ -7198,7 +7241,7 @@ async def daily_event_api(request: Request):
         return {"ok": False, "reason": "missing_telegram_id"}
 
     day = _today_key()
-    ev = (str(ev_raw or "")).strip().lower()
+    ev = _normalize_daily_event(str(ev_raw or ""))
     if not ev:
         return {"ok": False, "reason": "missing_event"}
 
@@ -7212,64 +7255,34 @@ async def daily_event_api(request: Request):
                 session.add(user)
                 await session.commit()
 
-            # NOTE: client events are best-effort; we still cap rewards on claim.
-            # NOTE: client events are best-effort; we still cap rewards on claim.
-            # Keep server tolerant: accept aliases and any current DAILY_TASKS keys.
             task_map = _daily_tasks_map()
 
-            # normalize common aliases (backward compatibility)
-            alias = {
-                "openminiapp": "open_miniapp",
-                "open_mini_app": "open_miniapp",
-                "miniapp_open": "open_miniapp",
-                "miniapp": "open_miniapp",
-                "openchannel": "open_channel",
-                "open-channel": "open_channel",
-                "channel_open": "open_channel",
-                "usesearch": "use_search",
-                "use-search": "use_search",
-                "search_used": "use_search",
-                "openinventory": "open_inventory",
-                "open-inventory": "open_inventory",
-                "openprofile": "open_profile",
-                "open-profile": "open_profile",
-                "openpost": "open_post",
-                "open-post": "open_post",
-                "roulette_spin": "spin_roulette",
-                "spin-roulette": "spin_roulette",
-                "convert": "convert_prize",
-                "convert-prize": "convert_prize",
-            }
-            evn = alias.get(ev, ev)
+            # Special counter task
+            if ev == "open_post":
+                cfg = task_map.get("open_post") or {"need": 3}
+                need = int(cfg.get("need", 3))
+                logs = await _get_daily_logs(session, tid, day)
+                lg = logs.get("open_post")
+                cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
+                cnt = min(need, cnt + 1)
+                await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
 
-            # If event matches a known task key, handle generically.
-            if evn in task_map:
-                if evn == "use_search":
-                    await _mark_daily_done(
-                        session,
-                        tid,
-                        day,
-                        "use_search",
-                        {"q": str((data_raw or {}).get("q", ""))[:64]},
-                    )
-                elif evn == "open_post":
-                    # count up to need (3)
-                    logs = await _get_daily_logs(session, tid, day)
-                    lg = logs.get("open_post")
-                    cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
-                    cnt = min(3, cnt + 1)
-                    await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
-                else:
-                    await _mark_daily_done(session, tid, day, evn)
+            # Known tasks (accept any key from DAILY_TASKS)
+            elif ev in task_map:
+                meta: dict[str, Any] | None = None
+                if ev == "use_search":
+                    meta = {"q": str((data_raw or {}).get("q", ""))[:64]}
+                await _mark_daily_done(session, tid, day, ev, meta)
+
             else:
-                # Unknown event -> return a stable error for UI, and log for debugging.
-                logger.warning("daily_event_api unknown_event: tid=%s ev=%s (normalized=%s)", tid, ev, evn)
-                return {"ok": False, "reason": "unknown_event", "event": evn}
+                # Helpful log for diagnosing drift
+                logger.warning("daily_event_api unknown_event: tid=%s ev=%s raw=%s keys=%s", tid, ev, ev_raw, list(payload.keys()))
+                return {"ok": False, "reason": "unknown_event", "event": ev}
 
             await session.commit()
             return {"ok": True}
 
-    except Exception as e:
+    except Exception:
         # never crash the client
         logger.exception("daily_event_api failed: tid=%s ev=%s payload_keys=%s", tid, ev, list(payload.keys()))
         return {"ok": False, "reason": "server_error"}
