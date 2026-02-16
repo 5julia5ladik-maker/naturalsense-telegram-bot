@@ -2615,17 +2615,17 @@ def get_webapp_html() -> str:
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
-      --bg:#0c0f14;
-      --glowGold:rgba(120,170,255,0.18);
-      --glowGoldBottom:rgba(120,170,255,0.22);
-      --glowWhite:rgba(255,255,255,0.06);
+      --bg:#0b141d;
+      --glowGold:rgba(120,170,255,0.16);
+      --glowGoldBottom:rgba(120,170,255,0.20);
+      --glowWhite:rgba(255,255,255,0.04);
       --card:rgba(140,185,255,0.10);
       --card2:rgba(140,185,255,0.08);
       --text:rgba(255,255,255,0.92);
       --muted:rgba(255,255,255,0.60);
       --gold:rgba(230,193,128,0.90);
       --stroke:rgba(170,205,255,0.16);
-      --sheetOverlay:rgba(10,14,22,0.62);
+      --sheetOverlay:rgba(8,14,22,0.60);
       --sheetCardBg:rgba(140,185,255,0.12);
       --glassStroke:rgba(190,220,255,0.22);
       --glassShadow:rgba(0,0,0,0.45);
@@ -3202,12 +3202,22 @@ def get_webapp_html() -> str:
 
   <script>
   (function(){
+    // Hard cache-buster for Telegram WebView: ensure new CSS/JS is always loaded after deploy.
+    try{
+      const u = new URL(window.location.href);
+      if(!u.searchParams.get("v")){
+        u.searchParams.set("v", String(Date.now()));
+        window.location.replace(u.toString());
+        return;
+      }
+    }catch(e){}
+
     const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
 
     const CHANNEL = "__CHANNEL__";
     const BOT_USERNAME = "__BOT_USERNAME__"; // может быть пустым
 
-    const DEFAULT_BG = "#0c0f14";
+    const DEFAULT_BG = '#0b141d';
 
     function showSplash(){
       const s = document.getElementById("nsSplash");
@@ -3233,25 +3243,29 @@ def get_webapp_html() -> str:
 
     function applyTelegramTheme(){
       // IMPORTANT: ignore Telegram day/light theme completely.
-      // We keep the Mini App in the same "obsidian glass" dark palette always (pixel-to-pixel).
+      // Palette is fixed to "cold glass" (soft blue-grey) to match your reference 1:1.
       const bg = DEFAULT_BG;
       const text = "rgba(255,255,255,0.92)";
-      const muted = "rgba(255,255,255,0.60)";
+      const muted = "rgba(255,255,255,0.58)";
 
       setVar("--bg", bg);
       setVar("--text", text);
       setVar("--muted", muted);
-      setVar("--stroke", "rgba(255,255,255,0.12)");
-      setVar("--card", "rgba(255,255,255,0.08)");
-      setVar("--card2", "rgba(255,255,255,0.06)");
 
-      // subtle, stable background glows (keep dark, avoid brown cast)
-      setVar("--glowGold", "rgba(140,190,255,0.120)");
-      setVar("--glowWhite", "rgba(255,255,255,0.05)");
+      // cold-glass surfaces
+      setVar("--stroke", "rgba(170,205,255,0.16)");
+      setVar("--card", "rgba(140,185,255,0.10)");
+      setVar("--card2", "rgba(140,185,255,0.08)");
 
-      setVar("--sheetOverlay", hexToRgba(bg,0.55));
-      setVar("--sheetCardBg", "rgba(255,255,255,0.10)");
-      setVar("--glassStroke", "rgba(255,255,255,0.18)");
+      // background haze (top + bottom), no warm/amber cast
+      setVar("--glowGold", "rgba(120,170,255,0.16)");
+      setVar("--glowGoldBottom", "rgba(120,170,255,0.20)");
+      setVar("--glowWhite", "rgba(255,255,255,0.04)");
+
+      // sheets / modals
+      setVar("--sheetOverlay", "rgba(8,14,22,0.60)");
+      setVar("--sheetCardBg", "rgba(140,185,255,0.12)");
+      setVar("--glassStroke", "rgba(190,220,255,0.22)");
       setVar("--glassShadow", "rgba(0,0,0,0.45)");
 
       try{
@@ -6235,6 +6249,7 @@ async def root():
 async def webapp():
     return HTMLResponse(
         get_webapp_html(),
+        headers={"Cache-Control":"no-store, no-cache, must-revalidate, max-age=0","Pragma":"no-cache"},
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
