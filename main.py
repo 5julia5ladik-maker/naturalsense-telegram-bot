@@ -2615,20 +2615,20 @@ def get_webapp_html() -> str:
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
-      --bg:#102232;
+      --bg:#13283a;
       --glowGold:rgba(120,170,255,0.22);
       --glowGoldBottom:rgba(120,170,255,0.28);
       --glowWhite:rgba(255,255,255,0.06);
-      --card:rgba(140,185,255,0.14);
-      --card2:rgba(140,185,255,0.12);
+      --card:rgba(140,185,255,0.16);
+      --card2:rgba(140,185,255,0.14);
       --text:rgba(255,255,255,0.92);
       --muted:rgba(255,255,255,0.60);
       --gold:rgba(230,193,128,0.90);
       --stroke:rgba(170,205,255,0.20);
-      --sheetOverlay:rgba(10,18,28,0.52);
+      --sheetOverlay:rgba(12,24,38,0.38);
       --sheetCardBg:rgba(140,185,255,0.16);
       --glassStroke:rgba(190,220,255,0.28);
-      --glassShadow:rgba(0,0,0,0.38);
+      --glassShadow:rgba(8,18,30,0.228);
       --r-lg:22px;
       --r-md:16px;
       --r-sm:14px;
@@ -2650,8 +2650,8 @@ def get_webapp_html() -> str:
       position:fixed; inset:0;
       pointer-events:none;
       background:
-        radial-gradient(1200px 820px at 50% 48%, rgba(0,0,0,0) 58%, rgba(0,0,0,0.45) 100%),
-        linear-gradient(to bottom, rgba(0,0,0,0.22), rgba(0,0,0,0.00) 38%, rgba(0,0,0,0.45));
+        radial-gradient(1200px 820px at 50% 48%, rgba(8,18,30,0.0) 58%, rgba(8,18,30,0.27) 100%),
+        linear-gradient(to bottom, rgba(8,18,30,0.132), rgba(8,18,30,0.0) 38%, rgba(8,18,30,0.27));
       z-index:0;
     }
 #root{min-height:100vh;position:relative;z-index:1}
@@ -2668,7 +2668,7 @@ def get_webapp_html() -> str:
       background:linear-gradient(180deg, rgba(140,185,255,0.12), rgba(140,185,255,0.06));
       border-radius:var(--r-lg);
       padding:14px;
-      box-shadow:0 10px 30px rgba(0,0,0,0.35);
+      box-shadow:0 10px 30px rgba(8,18,30,0.21);
       position:relative;
       overflow:hidden;
     }
@@ -2750,7 +2750,7 @@ def get_webapp_html() -> str:
       transform:scale(1.02);
       filter:saturate(1.05) contrast(1.02);
     }
-    .thumbOverlay{position:absolute;inset:0;background:linear-gradient(180deg, rgba(0,0,0,0.00) 35%, rgba(0,0,0,0.72) 100%);pointer-events:none}
+    .thumbOverlay{position:absolute;inset:0;background:linear-gradient(180deg, rgba(8,18,30,0.0) 35%, rgba(8,18,30,0.432) 100%);pointer-events:none}
     .thumbBadge{
       position:absolute;left:10px;bottom:10px;
       padding:6px 10px;border-radius:999px;
@@ -2782,7 +2782,7 @@ def get_webapp_html() -> str:
       content:"";
       position:absolute;inset:0;
       background:
-        repeating-linear-gradient(0deg, rgba(0,0,0,0.035), rgba(0,0,0,0.035) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 3px),
+        repeating-linear-gradient(0deg, rgba(8,18,30,0.021), rgba(8,18,30,0.021) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 3px),
         radial-gradient(120px 120px at 40% 30%, rgba(255,255,255,0.55), rgba(255,255,255,0) 70%),
         radial-gradient(140px 140px at 70% 70%, rgba(255,255,255,0.35), rgba(255,255,255,0) 72%);
       opacity:0.12;
@@ -2876,7 +2876,7 @@ def get_webapp_html() -> str:
       width:74px; height:74px; border-radius:24px;
       border:1px solid rgba(255,255,255,0.14);
       background:linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.05));
-      box-shadow:0 18px 60px rgba(0,0,0,0.55);
+      box-shadow:0 18px 60px rgba(8,18,30,0.33);
       display:flex; align-items:center; justify-content:center;
       font-weight:950; letter-spacing:1px; font-size:22px;
       position:relative; overflow:hidden;
@@ -2949,9 +2949,9 @@ def get_webapp_html() -> str:
     linear-gradient(180deg, rgba(28,34,48,0.90), rgba(12,15,22,0.92));
   border:1px solid rgba(255,255,255,0.10);
   box-shadow:
-    0 14px 34px rgba(0,0,0,0.42),
+    0 14px 34px rgba(8,18,30,0.252),
     inset 0 1px 0 rgba(255,255,255,0.08),
-    inset 0 0 0 1px rgba(0,0,0,0.22);
+    inset 0 0 0 1px rgba(8,18,30,0.132);
   overflow:hidden;
 }
 /* subtle premium frame (no gold) */
@@ -2980,7 +2980,7 @@ def get_webapp_html() -> str:
   background:
     radial-gradient(320px 240px at 18% 22%, rgba(255,255,255,0.06), transparent 62%),
     radial-gradient(320px 240px at 84% 26%, rgba(140,170,255,0.07), transparent 64%),
-    linear-gradient(135deg, rgba(255,255,255,0.06), transparent 40%, rgba(0,0,0,0.26)),
+    linear-gradient(135deg, rgba(255,255,255,0.06), transparent 40%, rgba(8,18,30,0.156)),
     repeating-linear-gradient(90deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 8px);
   opacity:0.70;
   pointer-events:none;
@@ -2996,7 +2996,7 @@ def get_webapp_html() -> str:
   font-weight:900;
   letter-spacing:0.35px;
   font-size:13px;
-  text-shadow:0 1px 0 rgba(0,0,0,0.55);
+  text-shadow:0 1px 0 rgba(8,18,30,0.33);
 }
 .cabinetMain{
   position:relative;
@@ -3009,7 +3009,7 @@ def get_webapp_html() -> str:
   font-size:18px;
   font-weight:950;
   color:rgba(255,255,255,0.96);
-  text-shadow:0 1px 0 rgba(0,0,0,0.65);
+  text-shadow:0 1px 0 rgba(8,18,30,0.39);
 }
 .cabinetTier{
   margin-top:6px;
@@ -3044,14 +3044,14 @@ def get_webapp_html() -> str:
   background:
     radial-gradient(220px 120px at 30% 0%, rgba(140,170,255,0.16), transparent 60%),
     linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 18px rgba(0,0,0,0.36);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 18px rgba(8,18,30,0.216);
   font-size:13px;
   font-weight:950;
   color:rgba(255,255,255,0.94);
   white-space:nowrap;
 }
 .cabinetBalanceGem{
-  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.45));
+  filter: drop-shadow(0 2px 6px rgba(8,18,30,0.27));
 }
 
 .cabinetStats{
@@ -3093,17 +3093,17 @@ def get_webapp_html() -> str:
     .rouletteWrap{margin-top:12px}
     .wheelStage{display:flex;flex-direction:column;align-items:center;gap:10px}
     .wheelBox{position:relative; width:min(78vw, 360px); aspect-ratio: 1 / 1; border-radius:999px;
-      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 42%, rgba(0,0,0,0.0) 70%),
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 42%, rgba(8,18,30,0.0) 70%),
                   rgba(255,255,255,0.03);
       border: 1px solid rgba(255,255,255,0.10);
-      box-shadow: 0 18px 40px rgba(0,0,0,0.55);
+      box-shadow: 0 18px 40px rgba(8,18,30,0.33);
       overflow:hidden;
     }
     .wheelCanvas{width:100%; height:100%; display:block}
     .wheelCenter{position:absolute; inset:28%; border-radius:999px;
       background: rgba(255,255,255,0.06);
       border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 10px 22px rgba(0,0,0,0.35);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 10px 22px rgba(8,18,30,0.21);
       display:flex; align-items:center; justify-content:center;
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
@@ -3117,7 +3117,7 @@ def get_webapp_html() -> str:
       border-left:10px solid transparent;
       border-right:10px solid transparent;
       border-bottom:28px solid rgba(235,245,255,0.86);
-      filter: drop-shadow(0 12px 20px rgba(0,0,0,0.62));
+      filter: drop-shadow(0 12px 20px rgba(8,18,30,0.372));
     }
     /* wheelPointerDot removed: pointer should be arrow only */
     .microHud{margin-top:10px; font-size:12px; color: rgba(255,255,255,0.62); text-align:center}
@@ -3136,8 +3136,8 @@ def get_webapp_html() -> str:
       color: rgba(255,255,255,0.86);
       font-size:12px;
     }
-    .resultSheetOverlay{position:fixed; inset:0; background: rgba(0,0,0,0.0); pointer-events:none; transition:background 180ms ease; z-index:10050}
-    .resultSheetOverlay.on{background: rgba(0,0,0,0.22); pointer-events:auto}
+    .resultSheetOverlay{position:fixed; inset:0; background: rgba(8,18,30,0.0); pointer-events:none; transition:background 180ms ease; z-index:10050}
+    .resultSheetOverlay.on{background: rgba(8,18,30,0.132); pointer-events:auto}
     /* Dior: subtle cold sparkle (quiet luxury) */
     .resultSheetOverlay.on.dior::before{
       content:"";
@@ -3165,7 +3165,7 @@ def get_webapp_html() -> str:
     .resultCard{max-width:520px; margin:0 auto; border-radius:22px; padding:14px 14px 12px 14px;
       background: rgba(255,255,255,0.07);
       border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+      box-shadow: 0 18px 50px rgba(8,18,30,0.36);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
     }
@@ -3266,7 +3266,7 @@ def get_webapp_html() -> str:
       setVar("--sheetOverlay", "rgba(8,14,22,0.60)");
       setVar("--sheetCardBg", "rgba(140,185,255,0.12)");
       setVar("--glassStroke", "rgba(190,220,255,0.22)");
-      setVar("--glassShadow", "rgba(0,0,0,0.45)");
+      setVar("--glassShadow", "rgba(8,18,30,0.27)");
 
       try{
         if(tg){
@@ -6153,7 +6153,7 @@ dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
         t.style.maxWidth = "92vw";
         t.style.padding = "10px 14px";
         t.style.borderRadius = "999px";
-        t.style.background = "rgba(0,0,0,0.55)";
+        t.style.background = "rgba(8,18,30,0.33)";
         t.style.border = "1px solid rgba(255,255,255,0.14)";
         t.style.backdropFilter = "blur(10px)";
         t.style.webkitBackdropFilter = "blur(10px)";
@@ -6483,7 +6483,7 @@ async def api_tag_card(tag: str, v: str | None = None):
     </linearGradient>
   </defs>
   <rect x="0" y="0" width="1280" height="720" fill="url(#g)"/>
-  <rect x="72" y="72" width="1136" height="576" rx="44" fill="rgba(255,255,255,0.80)" stroke="rgba(0,0,0,0.10)" stroke-width="2"/>
+  <rect x="72" y="72" width="1136" height="576" rx="44" fill="rgba(255,255,255,0.80)" stroke="rgba(8,18,30,0.06)" stroke-width="2"/>
   <text x="120" y="240" fill="{accent_hex}" font-family="Arial" font-size="36" font-weight="700">#{html.escape(t)}</text>
   <text x="120" y="340" fill="#101418" font-family="Arial" font-size="64" font-weight="800">NS•Natural Sense</text>
   <text x="120" y="420" fill="rgba(16,20,24,0.72)" font-family="Arial" font-size="30" font-weight="600">{html.escape(subtitle)}</text>
