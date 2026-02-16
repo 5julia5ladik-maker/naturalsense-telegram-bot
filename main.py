@@ -6249,7 +6249,7 @@ async def root():
 async def webapp():
     return HTMLResponse(
         get_webapp_html(),
-        headers={"Cache-Control":"no-store, no-cache, must-revalidate, max-age=0","Pragma":"no-cache"},
+        # cache-control headers set below
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
