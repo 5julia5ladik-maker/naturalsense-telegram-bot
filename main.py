@@ -4678,10 +4678,32 @@ function _dailyTaskTitle(taskKey){
   return "";
 }
 
+function _isDailyTaskDone(taskKey){
+  try{
+    const arr = state && state.dailyTasks && Array.isArray(state.dailyTasks.tasks) ? state.dailyTasks.tasks : [];
+    const k = String(taskKey||"");
+    if(!k) return false;
+    for(const t of arr){
+      if(!t) continue;
+      if(String(t.key||"")===k){
+        return !!(t.done || t.claimed);
+      }
+    }
+  }catch(e){}
+  return false;
+}
+
 async function dailyEvent(event, data, taskKey){
   const k = String(taskKey || event || "");
   const title = k ? _dailyTaskTitle(k) : "";
   const now = Date.now();
+  // If the task is already completed/claimed, do NOTHING (no request, no toast, no pending)
+  try{
+    if(k && _isDailyTaskDone(k)){
+      return;
+    }
+  }catch(e){}
+
 
   // Always set pending (even if Daily sheet closes right after click)
   try{
@@ -6730,51 +6752,6 @@ class BuyTicketResp(BaseModel):
 
 # -----------------------------------------------------------------------------
 # DAILY TASKS API (Mini App)
-
-
-# -----------------------------------------------------------------------------
-# DAILY EVENTS NORMALIZATION (anti 'unknown_event' due to key mismatch)
-# -----------------------------------------------------------------------------
-def _normalize_daily_event(ev_raw: str) -> str:
-    """Normalize client event keys to server canonical keys.
-
-    We accept common aliases and tolerate separators/casing differences to avoid
-    'unknown_event' when the Mini App and backend drift.
-    """
-    ev = (ev_raw or "").strip().lower()
-    if not ev:
-        return ""
-
-    # Normalize separators: spaces, dashes, dots -> underscore
-    ev = re.sub(r"[^a-z0-9]+", "_", ev).strip("_")
-
-    # Common aliases -> canonical keys used in DAILY_TASKS
-    aliases = {
-        "open_mini_app": "open_miniapp",
-        "open_miniapp_app": "open_miniapp",
-        "mini_app_open": "open_miniapp",
-        "miniapp_open": "open_miniapp",
-        "app_open": "open_miniapp",
-        "open_app": "open_miniapp",
-        "open_channel_btn": "open_channel",
-        "channel_open": "open_channel",
-        "go_channel": "open_channel",
-        "search_used": "use_search",
-        "use_search_btn": "use_search",
-        "open_search": "use_search",
-        "inventory_open": "open_inventory",
-        "profile_open": "open_profile",
-        "roulette_spin": "spin_roulette",
-        "spin": "spin_roulette",
-        "convert": "convert_prize",
-    }
-    ev = aliases.get(ev, ev)
-
-    # Any variant like open_post_1/open_post_2/post_opened -> open_post counter
-    if ev.startswith("open_post") or ev.startswith("post_open"):
-        ev = "open_post"
-
-    return ev
 # -----------------------------------------------------------------------------
 class DailyTaskItem(BaseModel):
     key: str
@@ -7213,13 +7190,15 @@ async def daily_tasks_api(telegram_id: int):
         )
 
 
-
 @app.post("/api/daily/event")
 async def daily_event_api(request: Request):
-    """Best-effort event sink for Daily tasks.
+    """
+    Best-effort event sink for Daily tasks.
 
-    Goal: never break UX because of a mismatched event key between Mini App and backend.
-    We normalize/alias event keys and, if the key exists in DAILY_TASKS, we accept it.
+    GUARANTEE:
+      - NEVER returns 5xx to the client (always 200 with ok:true/false).
+      - Accepts loose JSON payloads and common aliases.
+      - Logs any server error with enough context for Railway logs.
     """
     # 1) Parse payload safely
     try:
@@ -7241,7 +7220,7 @@ async def daily_event_api(request: Request):
         return {"ok": False, "reason": "missing_telegram_id"}
 
     day = _today_key()
-    ev = _normalize_daily_event(str(ev_raw or ""))
+    ev = (str(ev_raw or "")).strip().lower()
     if not ev:
         return {"ok": False, "reason": "missing_event"}
 
@@ -7255,34 +7234,45 @@ async def daily_event_api(request: Request):
                 session.add(user)
                 await session.commit()
 
-            task_map = _daily_tasks_map()
-
-            # Special counter task
-            if ev == "open_post":
-                cfg = task_map.get("open_post") or {"need": 3}
-                need = int(cfg.get("need", 3))
+            # NOTE: client events are best-effort; we still cap rewards on claim.
+            if ev == "open_miniapp":
+                await _mark_daily_done(session, tid, day, "open_miniapp")
+            elif ev == "open_channel":
+                await _mark_daily_done(session, tid, day, "open_channel")
+            elif ev == "use_search":
+                await _mark_daily_done(
+                    session,
+                    tid,
+                    day,
+                    "use_search",
+                    {"q": str((data_raw or {}).get("q", ""))[:64]},
+                )
+            elif ev == "open_inventory":
+                await _mark_daily_done(session, tid, day, "open_inventory")
+            elif ev == "open_profile":
+                await _mark_daily_done(session, tid, day, "open_profile")
+            elif ev == "comment_post":
+                await _mark_daily_done(session, tid, day, "comment_post")
+            elif ev == "reply_comment":
+                await _mark_daily_done(session, tid, day, "reply_comment")
+            elif ev == "spin_roulette":
+                await _mark_daily_done(session, tid, day, "spin_roulette")
+            elif ev == "convert_prize":
+                await _mark_daily_done(session, tid, day, "convert_prize")
+            elif ev == "open_post":
+                # count up to need (3)
                 logs = await _get_daily_logs(session, tid, day)
                 lg = logs.get("open_post")
                 cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
-                cnt = min(need, cnt + 1)
+                cnt = min(3, cnt + 1)
                 await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
-
-            # Known tasks (accept any key from DAILY_TASKS)
-            elif ev in task_map:
-                meta: dict[str, Any] | None = None
-                if ev == "use_search":
-                    meta = {"q": str((data_raw or {}).get("q", ""))[:64]}
-                await _mark_daily_done(session, tid, day, ev, meta)
-
             else:
-                # Helpful log for diagnosing drift
-                logger.warning("daily_event_api unknown_event: tid=%s ev=%s raw=%s keys=%s", tid, ev, ev_raw, list(payload.keys()))
                 return {"ok": False, "reason": "unknown_event", "event": ev}
 
             await session.commit()
             return {"ok": True}
 
-    except Exception:
+    except Exception as e:
         # never crash the client
         logger.exception("daily_event_api failed: tid=%s ev=%s payload_keys=%s", tid, ev, list(payload.keys()))
         return {"ok": False, "reason": "server_error"}
