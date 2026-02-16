@@ -7316,8 +7316,14 @@ async def daily_event_api(request: Request):
                 cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
                 cnt = min(3, cnt + 1)
                 await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
+            elif ev in {"open_daily", "open_daily_bonus", "open_daily_modal", "open_daily_popup", "daily_open"}:
+                # Opening the Daily UI should never trigger errors/toasts; it's a pure UI action.
+                # Treat as no-op.
+                pass
             else:
-                return {"ok": False, "reason": "unknown_event", "event": ev}
+                # Unknown events must not produce user-visible errors; ignore silently (best-effort sink).
+                logger.info("daily_event_api: ignore unknown event tid=%s ev=%s", tid, ev)
+                pass
 
             await session.commit()
             return {"ok": True}
