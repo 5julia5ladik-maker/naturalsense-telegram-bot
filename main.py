@@ -7213,39 +7213,58 @@ async def daily_event_api(request: Request):
                 await session.commit()
 
             # NOTE: client events are best-effort; we still cap rewards on claim.
-            if ev == "open_miniapp":
-                await _mark_daily_done(session, tid, day, "open_miniapp")
-            elif ev == "open_channel":
-                await _mark_daily_done(session, tid, day, "open_channel")
-            elif ev == "use_search":
-                await _mark_daily_done(
-                    session,
-                    tid,
-                    day,
-                    "use_search",
-                    {"q": str((data_raw or {}).get("q", ""))[:64]},
-                )
-            elif ev == "open_inventory":
-                await _mark_daily_done(session, tid, day, "open_inventory")
-            elif ev == "open_profile":
-                await _mark_daily_done(session, tid, day, "open_profile")
-            elif ev == "comment_post":
-                await _mark_daily_done(session, tid, day, "comment_post")
-            elif ev == "reply_comment":
-                await _mark_daily_done(session, tid, day, "reply_comment")
-            elif ev == "spin_roulette":
-                await _mark_daily_done(session, tid, day, "spin_roulette")
-            elif ev == "convert_prize":
-                await _mark_daily_done(session, tid, day, "convert_prize")
-            elif ev == "open_post":
-                # count up to need (3)
-                logs = await _get_daily_logs(session, tid, day)
-                lg = logs.get("open_post")
-                cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
-                cnt = min(3, cnt + 1)
-                await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
+            # NOTE: client events are best-effort; we still cap rewards on claim.
+            # Keep server tolerant: accept aliases and any current DAILY_TASKS keys.
+            task_map = _daily_tasks_map()
+
+            # normalize common aliases (backward compatibility)
+            alias = {
+                "openminiapp": "open_miniapp",
+                "open_mini_app": "open_miniapp",
+                "miniapp_open": "open_miniapp",
+                "miniapp": "open_miniapp",
+                "openchannel": "open_channel",
+                "open-channel": "open_channel",
+                "channel_open": "open_channel",
+                "usesearch": "use_search",
+                "use-search": "use_search",
+                "search_used": "use_search",
+                "openinventory": "open_inventory",
+                "open-inventory": "open_inventory",
+                "openprofile": "open_profile",
+                "open-profile": "open_profile",
+                "openpost": "open_post",
+                "open-post": "open_post",
+                "roulette_spin": "spin_roulette",
+                "spin-roulette": "spin_roulette",
+                "convert": "convert_prize",
+                "convert-prize": "convert_prize",
+            }
+            evn = alias.get(ev, ev)
+
+            # If event matches a known task key, handle generically.
+            if evn in task_map:
+                if evn == "use_search":
+                    await _mark_daily_done(
+                        session,
+                        tid,
+                        day,
+                        "use_search",
+                        {"q": str((data_raw or {}).get("q", ""))[:64]},
+                    )
+                elif evn == "open_post":
+                    # count up to need (3)
+                    logs = await _get_daily_logs(session, tid, day)
+                    lg = logs.get("open_post")
+                    cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
+                    cnt = min(3, cnt + 1)
+                    await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
+                else:
+                    await _mark_daily_done(session, tid, day, evn)
             else:
-                return {"ok": False, "reason": "unknown_event", "event": ev}
+                # Unknown event -> return a stable error for UI, and log for debugging.
+                logger.warning("daily_event_api unknown_event: tid=%s ev=%s (normalized=%s)", tid, ev, evn)
+                return {"ok": False, "reason": "unknown_event", "event": evn}
 
             await session.commit()
             return {"ok": True}
