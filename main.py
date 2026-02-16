@@ -2862,6 +2862,41 @@ def get_webapp_html() -> str:
     .segBtnActive{border:1px solid rgba(140,190,255,0.32);background:rgba(140,190,255,0.15);color:rgba(255,255,255,0.9);font-weight:750}
     .hidden{display:none!important}
 
+    /* ---------------------------------------------------------------------
+       PREMIUM REWARD ANIMATION (Coin Trail + Anchor fallback)
+       --------------------------------------------------------------------- */
+    .nsRewardLayer{position:fixed;inset:0;pointer-events:none;z-index:15000}
+    .nsCoin{
+      position:fixed;
+      width:10px;height:10px;border-radius:999px;
+      background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.75), rgba(140,190,255,0.40) 42%, rgba(140,190,255,0.10) 72%, rgba(140,190,255,0.0) 100%);
+      filter:blur(0.2px);
+      opacity:0.0;
+      transform:translate3d(0,0,0) scale(1);
+      will-change:transform,opacity;
+    }
+    .nsAbsorbPulse{animation:nsAbsorb .28s ease-out 1}
+    @keyframes nsAbsorb{0%{transform:scale(1)}60%{transform:scale(1.06)}100%{transform:scale(1)}}
+
+    .nsBalanceAnchor{
+      position:fixed;top:14px;right:14px;
+      padding:9px 10px;border-radius:999px;
+      border:1px solid rgba(190,220,255,0.26);
+      background:rgba(18,22,30,0.50);
+      backdrop-filter:blur(18px) saturate(180%);
+      -webkit-backdrop-filter:blur(18px) saturate(180%);
+      box-shadow:0 10px 34px rgba(8,18,30,0.26);
+      display:flex;align-items:center;gap:8px;
+      color:rgba(255,255,255,0.90);
+      font-size:12px;font-weight:850;
+      opacity:0;transform:translateY(-6px);
+      transition:opacity .22s ease, transform .22s ease;
+      z-index:15001;
+    }
+    .nsBalanceAnchor.show{opacity:1;transform:translateY(0)}
+    .nsBalanceAnchor .k{opacity:0.72;font-weight:900;letter-spacing:.2px}
+    .nsBalanceAnchor .v{opacity:0.95;font-weight:950}
+
     /* Splash loader */
     .nsSplash{
       position:fixed; inset:0; z-index:100000;
@@ -3280,6 +3315,174 @@ def get_webapp_html() -> str:
     function haptic(kind){
       try{ tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred && tg.HapticFeedback.impactOccurred(kind||"light"); }catch(e){}
     }
+
+    // ---------------------------------------------------------------------
+    // PREMIUM REWARD ANIMATION (Coin Trail)
+    // - Works even when balance is not visible (uses temporary anchor chip)
+    // - Never changes backend logic; purely visual.
+    // ---------------------------------------------------------------------
+    let _rewardLayer = null;
+    let _rewardAnchor = null;
+    let _rewardQueue = [];
+    let _rewardRunning = false;
+    let _rewardMergeT = null;
+    let _pendingDelta = 0;
+    let _lastActionEl = null;
+
+    function _ensureRewardLayer(){
+      if(_rewardLayer) return _rewardLayer;
+      _rewardLayer = document.createElement('div');
+      _rewardLayer.className = 'nsRewardLayer';
+      document.body.appendChild(_rewardLayer);
+      return _rewardLayer;
+    }
+    function _isVisible(el){
+      if(!el) return false;
+      const r = el.getBoundingClientRect();
+      if(r.width<=0 || r.height<=0) return false;
+      if(r.bottom<0 || r.top>window.innerHeight) return false;
+      const st = window.getComputedStyle(el);
+      if(st.display==='none' || st.visibility==='hidden' || Number(st.opacity||'1')<=0.01) return false;
+      return true;
+    }
+    function _findBalanceTarget(){
+      const els = Array.from(document.querySelectorAll('[data-balance-target="1"]'));
+      for(const el of els){
+        if(_isVisible(el)) return el;
+      }
+      return null;
+    }
+    function _showAnchorChip(delta){
+      if(_rewardAnchor && _rewardAnchor.parentNode){
+        try{ _rewardAnchor.querySelector('.v').textContent = '+'+fmtNum(delta); }catch(e){}
+      }else{
+        _rewardAnchor = document.createElement('div');
+        _rewardAnchor.className = 'nsBalanceAnchor';
+        _rewardAnchor.innerHTML = '<span class="k">Баллы</span><span class="v">+'+fmtNum(delta)+'</span>';
+        document.body.appendChild(_rewardAnchor);
+      }
+      requestAnimationFrame(()=>{ try{ _rewardAnchor.classList.add('show'); }catch(e){} });
+      return _rewardAnchor;
+    }
+    function _hideAnchorChipSoon(){
+      if(!_rewardAnchor) return;
+      const a = _rewardAnchor;
+      setTimeout(()=>{
+        try{ a.classList.remove('show'); }catch(e){}
+        setTimeout(()=>{ try{ a.parentNode && a.parentNode.removeChild(a); }catch(e){} }, 260);
+      }, 950);
+    }
+    function _centerOf(el){
+      const r = el.getBoundingClientRect();
+      return {x: r.left + r.width/2, y: r.top + r.height/2};
+    }
+    function _easeOutQuint(t){ return 1 - Math.pow(1-t, 5); }
+    function _bezier2(p0, p1, p2, t){
+      const u = 1-t;
+      return {
+        x: u*u*p0.x + 2*u*t*p1.x + t*t*p2.x,
+        y: u*u*p0.y + 2*u*t*p1.y + t*t*p2.y,
+      };
+    }
+
+    function _coinTrailOnce(delta, sourceEl){
+      const layer = _ensureRewardLayer();
+      let targetEl = _findBalanceTarget();
+      let usedAnchor = false;
+      if(!targetEl){
+        targetEl = _showAnchorChip(delta);
+        usedAnchor = true;
+      }
+
+      const tgt = _centerOf(targetEl);
+      let src;
+      if(sourceEl && _isVisible(sourceEl)){
+        src = _centerOf(sourceEl);
+      }else{
+        src = {x: window.innerWidth*0.5, y: Math.min(window.innerHeight*0.72, window.innerHeight-120)};
+      }
+
+      // Arc control point
+      const bend = (Math.random()*2-1) * 24;
+      const cp = { x: (src.x + tgt.x)/2 + bend, y: Math.min(src.y, tgt.y) - (110 + Math.random()*40) };
+
+      const count = 4 + Math.floor(Math.random()*2);
+      const startAt = performance.now();
+      const dur = 320 + Math.floor(Math.random()*120);
+      const coins = [];
+      for(let i=0;i<count;i++){
+        const c = document.createElement('div');
+        c.className = 'nsCoin';
+        const s = 8 + (i%2?2:0);
+        c.style.width = s+'px';
+        c.style.height = s+'px';
+        c.style.left = (src.x - s/2)+'px';
+        c.style.top = (src.y - s/2)+'px';
+        layer.appendChild(c);
+        coins.push({el:c, delay:i*28 + Math.random()*18, size:s});
+      }
+
+      return new Promise((resolve)=>{
+        function frame(now){
+          const tAll = now - startAt;
+          let alive = false;
+          for(const c of coins){
+            const local = tAll - c.delay;
+            if(local < 0){ alive = true; continue; }
+            const tt = Math.min(1, local / dur);
+            const e = _easeOutQuint(tt);
+            const p = _bezier2(src, cp, tgt, e);
+            const wob = Math.sin((tt*3.6 + c.delay*0.01)) * 1.6;
+            const x = p.x + wob;
+            const y = p.y;
+            const fadeIn = Math.min(1, tt/0.18);
+            const fadeOut = tt>0.76 ? (1-((tt-0.76)/0.24)) : 1;
+            const op = 0.92 * fadeIn * Math.max(0, fadeOut);
+            const sc = 1 - (tt>0.82 ? (tt-0.82)/0.18 * 0.55 : 0);
+            c.el.style.opacity = String(op);
+            c.el.style.transform = 'translate3d('+(x - src.x)+'px,'+(y - src.y)+'px,0) scale('+sc+')';
+            if(tt < 1) alive = true;
+          }
+
+          if(alive){
+            requestAnimationFrame(frame);
+          }else{
+            for(const c of coins){ try{ c.el.parentNode && c.el.parentNode.removeChild(c.el); }catch(e){} }
+            try{ targetEl.classList.add('nsAbsorbPulse'); setTimeout(()=>{ try{ targetEl.classList.remove('nsAbsorbPulse'); }catch(e){} }, 320); }catch(e){}
+            try{ if(tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred){ tg.HapticFeedback.notificationOccurred('success'); } }catch(e){}
+            if(usedAnchor) _hideAnchorChipSoon();
+            resolve(true);
+          }
+        }
+        requestAnimationFrame(frame);
+      });
+    }
+
+    function _startRewardRunner(){
+      if(_rewardRunning) return;
+      _rewardRunning = true;
+      (async ()=>{
+        while(_rewardQueue.length){
+          const job = _rewardQueue.shift();
+          try{ await _coinTrailOnce(job.delta, job.sourceEl); }catch(e){}
+          await new Promise(r=>setTimeout(r, 120));
+        }
+        _rewardRunning = false;
+      })();
+    }
+
+    function queueReward(delta, sourceEl){
+      const d = Number(delta||0) || 0;
+      if(d<=0) return;
+      _pendingDelta += d;
+      if(_rewardMergeT) clearTimeout(_rewardMergeT);
+      _rewardMergeT = setTimeout(()=>{
+        const sum = _pendingDelta;
+        _pendingDelta = 0;
+        _rewardQueue.push({delta: sum, sourceEl: sourceEl || _lastActionEl});
+        _startRewardRunner();
+      }, 380);
+    }
     function openLink(url){
       if(!url) return;
       try{
@@ -3379,6 +3582,16 @@ function esc(s){
       msg:"",
       busy:false
     };
+
+    // Track last interaction element (source point for Coin Trail animation)
+    try{
+      document.addEventListener('click', (e)=>{
+        try{
+          const t = e && e.target ? e.target : null;
+          _lastActionEl = t && t.closest ? (t.closest('.btn,.tile,.navItem,.miniCard,.pill') || t) : t;
+        }catch(_e){}
+      }, true);
+    }catch(e){}
     // -------------------------------------------------------------------------
     // SEARCH UI (fix input bug: do not recreate input on each keypress)
     // -------------------------------------------------------------------------
@@ -3587,7 +3800,18 @@ function esc(s){
     async function refreshUser(){
       if(!tgUserId) return;
       try{
-        state.user = await apiGet("/api/user/"+encodeURIComponent(tgUserId));
+        const prev = (state.user && typeof state.user.points === 'number')
+          ? Number(state.user.points||0)
+          : (typeof state._pointsLast === 'number' ? Number(state._pointsLast||0) : null);
+        const u = await apiGet("/api/user/"+encodeURIComponent(tgUserId));
+        state.user = u;
+        const cur = (u && typeof u.points !== 'undefined') ? Number(u.points||0) : null;
+        if(cur !== null && !Number.isNaN(cur)) state._pointsLast = cur;
+        // Do not animate on the very first load
+        if(prev !== null && cur !== null && !Number.isNaN(cur)){
+          const delta = cur - prev;
+          if(delta > 0) queueReward(delta, _lastActionEl);
+        }
       }catch(e){}
     }
     async function loadBotUsername(){
@@ -4265,7 +4489,9 @@ async function spinRouletteLux(){
       topRow.appendChild(left);
 
       if(state.user){
-        topRow.appendChild(el("div","pill","💎 "+esc(state.user.points)+" · "+esc(tierLabel(state.user.tier))));
+        const bp = el("div","pill","💎 <span class=\"nsBalNum\">"+esc(state.user.points)+"</span> · "+esc(tierLabel(state.user.tier)));
+        bp.setAttribute('data-balance-target','1');
+        topRow.appendChild(bp);
       }
       inner.appendChild(topRow);
 
@@ -4585,7 +4811,11 @@ function renderБонусы(main){
       tl.appendChild(el("div","h1","Бонусы"));
       tl.appendChild(el("div","sub","Рулетка · Билеты · Косметичка"));
       top.appendChild(tl);
-      if(state.user) top.appendChild(el("div","pill","💎 "+esc(state.user.points)+" баллов"));
+      if(state.user){
+        const bp = el("div","pill","💎 <span class=\"nsBalNum\">"+esc(state.user.points)+"</span> баллов");
+        bp.setAttribute('data-balance-target','1');
+        top.appendChild(bp);
+      }
       wrap.appendChild(top);
 
       const grid = el("div","grid");
@@ -5193,7 +5423,7 @@ function renderDailySheet(){
       const r1 = el("div","row");
       const left = el("div");
       left.appendChild(el("div",null,'<div style="font-size:13px;color:var(--muted)">Баланс</div>'));
-      left.appendChild(el("div",null,'<div style="margin-top:6px;font-size:16px;font-weight:900">💎 '+esc(state.user ? state.user.points : 0)+' баллов</div>'));
+      left.appendChild(el("div",null,'<div data-balance-target="1" style="margin-top:6px;font-size:16px;font-weight:900">💎 <span class="nsBalNum">'+esc(state.user ? state.user.points : 0)+'</span> баллов</div>'));
       r1.appendChild(left);
       r1.appendChild(el("div","pill", esc(tierLabel(state.user ? state.user.tier : "free"))));
       bal.appendChild(r1);
@@ -5462,7 +5692,7 @@ info.innerHTML =
     '</div>'+
     '<div class="cabinetBalanceRow">'+
       '<div class="cabinetBalanceLabel">Balance</div>'+
-      '<div class="cabinetBalancePill"><span class="cabinetBalanceGem">💎</span>'+esc(state.user.points)+'</div>'+
+      '<div class="cabinetBalancePill" data-balance-target="1"><span class="cabinetBalanceGem">💎</span><span class="nsBalNum">'+esc(state.user.points)+'</span></div>'+
     '</div>'+
     '<div class="cabinetStats">'+
       '<div class="cabinetStat">'+
