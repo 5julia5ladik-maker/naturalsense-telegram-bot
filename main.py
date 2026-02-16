@@ -5387,7 +5387,7 @@ content.appendChild(bal);
           tile.appendChild(imgWrap);
 
           const meta = el("div","prizeMeta");
-          meta.appendChild(el("div","prizeTitle", esc(p.prize_label || "✨ Dior Palette")));
+          meta.appendChild(el("div","prizeTitle", esc(prizeDisplayLabel(p))));
           const code = String(p.claim_code||"").trim() || "-";
           meta.appendChild(el("div","prizeCode", "Код: "+esc(code)));
           tile.appendChild(meta);
@@ -5499,6 +5499,18 @@ content.appendChild(bal);
       return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
     }
 
+    function prizeDisplayLabel(p){
+      // UI-only mapping (do NOT touch backend logic/db labels)
+      const raw = String((p && p.prize_label) ? p.prize_label : "").trim();
+      const low = raw.toLowerCase();
+      // If backend stores generic label like "главный приз" -> show a premium product name
+      if(low === "главный приз" || low.startsWith("главный приз")){
+        return "Dior Backstage — палетка";
+      }
+      return raw || "Dior Backstage — палетка";
+    }
+
+
     function openPrizeSheet(p){
       state.prizeSelected = p || null;
       state.prizeOpen = true;
@@ -5535,7 +5547,7 @@ content.appendChild(bal);
       hero.appendChild(img);
       content.appendChild(hero);
 
-      content.appendChild(el("div",null,'<div style="margin-top:12px;font-size:16px;font-weight:950">'+esc(p.prize_label||"✨ Dior Palette")+'</div>'));
+      content.appendChild(el("div",null,'<div style="margin-top:12px;font-size:16px;font-weight:950">'+esc(prizeDisplayLabel(p))+'</div>'));
 
       const code = String(p.claim_code||"").trim() || "-";
       const codeBox = el("div","card2");
@@ -6373,6 +6385,15 @@ if(state.profileView==="history"){
       iS.appendChild(el("div","sheetHandle"));
       const iC = el("div"); iC.id="invContent";
       iS.appendChild(iC); iO.appendChild(iS); root.appendChild(iO);
+
+      // Prize modal (per-item details)
+      const zO = el("div","sheetOverlay"); zO.id="prizeOverlay";
+      zO.addEventListener("click", (e)=>{ if(e.target===zO){ haptic(); closePrizeSheet(); }});
+      const zS = el("div","sheet");
+      zS.addEventListener("click",(e)=>e.stopPropagation());
+      zS.appendChild(el("div","sheetHandle"));
+      const zC = el("div"); zC.id="prizeContent";
+      zS.appendChild(zC); zO.appendChild(zS); root.appendChild(zO);
 
       // Профиль
       const prO = el("div","sheetOverlay"); prO.id="profileOverlay";
