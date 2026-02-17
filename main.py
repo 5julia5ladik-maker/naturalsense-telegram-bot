@@ -2615,20 +2615,25 @@ def get_webapp_html() -> str:
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
-      --bg:#18364e;
-      --glowGold:rgba(120,170,255,0.32);
-      --glowGoldBottom:rgba(120,170,255,0.38);
-      --glowWhite:rgba(255,255,255,0.08);
-      --card:rgba(140,185,255,0.22);
-      --card2:rgba(140,185,255,0.20);
+      /* Theme (tuned): slightly darker vs previous "x2 brighter", still no pure black */
+      --bg:#152f44;
+      --glowGold:rgba(120,170,255,0.28);
+      --glowGoldBottom:rgba(120,170,255,0.33);
+      --glowWhite:rgba(255,255,255,0.07);
+      --card:rgba(140,185,255,0.20);
+      --card2:rgba(140,185,255,0.18);
       --text:rgba(255,255,255,0.92);
       --muted:rgba(255,255,255,0.60);
       --gold:rgba(230,193,128,0.90);
       --stroke:rgba(170,205,255,0.26);
-      --sheetOverlay:rgba(18,38,58,0.28);
-      --sheetCardBg:rgba(140,185,255,0.22);
-      --glassStroke:rgba(190,220,255,0.34);
-      --glassShadow:rgba(10,26,42,0.15);
+      --sheetOverlay:rgba(18,38,58,0.26);
+      --sheetCardBg:rgba(140,185,255,0.20);
+      --glassStroke:rgba(190,220,255,0.32);
+      --glassShadow:rgba(12,32,52,0.14);
+      /* Premium sheen (subtle highlights, no layout changes) */
+      --sheen:rgba(255,255,255,0.09);
+      --sheen2:rgba(140,190,255,0.12);
+      --sheenGold:rgba(230,193,128,0.10);
       --r-lg:22px;
       --r-md:16px;
       --r-sm:14px;
@@ -2650,8 +2655,8 @@ def get_webapp_html() -> str:
       position:fixed; inset:0;
       pointer-events:none;
       background:
-        radial-gradient(1200px 820px at 50% 48%, rgba(10,26,42,0.0) 58%, rgba(10,26,42,0.16) 100%),
-        linear-gradient(to bottom, rgba(10,26,42,0.08), rgba(10,26,42,0.0) 38%, rgba(10,26,42,0.16));
+        radial-gradient(1200px 820px at 50% 48%, rgba(12,32,52,0.0) 58%, rgba(12,32,52,0.14) 100%),
+        linear-gradient(to bottom, rgba(12,32,52,0.07), rgba(12,32,52,0.0) 38%, rgba(12,32,52,0.14));
       z-index:0;
     }
 #root{min-height:100vh;position:relative;z-index:1}
@@ -2668,9 +2673,32 @@ def get_webapp_html() -> str:
       background:linear-gradient(180deg, rgba(140,185,255,0.12), rgba(140,185,255,0.06));
       border-radius:var(--r-lg);
       padding:14px;
-      box-shadow:0 10px 30px rgba(10,26,42,0.14);
+      box-shadow:0 10px 30px rgba(12,32,52,0.14);
       position:relative;
       overflow:hidden;
+    }
+    /* Premium highlights (subtle, glassy) */
+    .card::before{
+      content:"";
+      position:absolute;
+      inset:-1px;
+      pointer-events:none;
+      background:
+        radial-gradient(780px 340px at 18% 0%, var(--sheen), transparent 62%),
+        radial-gradient(900px 520px at 85% 8%, var(--sheen2), transparent 60%),
+        linear-gradient(135deg, transparent 0%, rgba(255,255,255,0.06) 12%, transparent 28%),
+        linear-gradient(180deg, var(--sheenGold), transparent 55%);
+      mix-blend-mode:screen;
+      opacity:.85;
+    }
+    .card::after{
+      content:"";
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+      border-radius:var(--r-lg);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,0.10);
+      opacity:.8;
     }
     .card2{
       border:1px solid var(--stroke);
@@ -2697,6 +2725,16 @@ def get_webapp_html() -> str:
       align-items:center;
       cursor:pointer;
       user-select:none;
+      position:relative;
+      overflow:hidden;
+    }
+    .btn::before{
+      content:"";
+      position:absolute;
+      inset:-1px;
+      pointer-events:none;
+      background:linear-gradient(135deg, rgba(255,255,255,0.08), transparent 44%);
+      opacity:.55;
     }
     .btn:active{transform:translateY(1px)}
     .btnTitle{font-size:15px;font-weight:750}
@@ -2924,7 +2962,7 @@ def get_webapp_html() -> str:
       width:min(560px, calc(100% - 24px));
       display:flex;gap:10px;padding:10px;
       border-radius:22px;border:1px solid var(--glassStroke);
-      background:rgba(18,22,30,0.55);
+      background:rgba(20,40,62,0.55);
       backdrop-filter:blur(22px) saturate(180%);
       -webkit-backdrop-filter:blur(22px) saturate(180%);
       box-shadow:0 12px 40px var(--glassShadow);
@@ -2960,6 +2998,18 @@ def get_webapp_html() -> str:
       box-shadow:0 12px 40px var(--glassShadow);
       padding:14px 14px 10px;
       max-height:84vh;overflow:auto;
+      position:relative;
+    }
+    .sheet::before{
+      content:"";
+      position:absolute;
+      inset:-1px;
+      pointer-events:none;
+      background:
+        radial-gradient(900px 420px at 20% 0%, rgba(255,255,255,0.08), transparent 62%),
+        radial-gradient(820px 520px at 90% 18%, rgba(140,190,255,0.12), transparent 60%);
+      mix-blend-mode:screen;
+      opacity:.75;
     }
     .sheetHandle{width:46px;height:5px;border-radius:999px;background:rgba(255,255,255,0.22);margin:0 auto 10px}
     .input{
@@ -3010,7 +3060,7 @@ def get_webapp_html() -> str:
     .nsMark:after{
       content:"";
       position:absolute; inset:1px; border-radius:23px;
-      background:rgba(12,15,20,0.88);
+      background:rgba(14,28,44,0.86);
       backdrop-filter:blur(16px) saturate(180%);
       -webkit-backdrop-filter:blur(16px) saturate(180%);
       z-index:1;
@@ -3334,7 +3384,7 @@ def get_webapp_html() -> str:
     const CHANNEL = "__CHANNEL__";
     const BOT_USERNAME = "__BOT_USERNAME__"; // может быть пустым
 
-    const DEFAULT_BG = '#18364e';
+    const DEFAULT_BG = '#152f44';
 
     function showSplash(){
       const s = document.getElementById("nsSplash");
@@ -3371,19 +3421,19 @@ def get_webapp_html() -> str:
 
       // cold-glass surfaces
       setVar("--stroke", "rgba(170,205,255,0.26)");
-      setVar("--card", "rgba(140,185,255,0.22)");
-      setVar("--card2", "rgba(140,185,255,0.20)");
+      setVar("--card", "rgba(140,185,255,0.20)");
+      setVar("--card2", "rgba(140,185,255,0.18)");
 
       // background haze (top + bottom), no warm/amber cast
-      setVar("--glowGold", "rgba(120,170,255,0.30)");
-      setVar("--glowGoldBottom", "rgba(120,170,255,0.36)");
+      setVar("--glowGold", "rgba(120,170,255,0.28)");
+      setVar("--glowGoldBottom", "rgba(120,170,255,0.33)");
       setVar("--glowWhite", "rgba(255,255,255,0.07)");
 
       // sheets / modals
-      setVar("--sheetOverlay", "rgba(18,38,58,0.32)");
-      setVar("--sheetCardBg", "rgba(140,185,255,0.22)");
-      setVar("--glassStroke", "rgba(190,220,255,0.34)");
-      setVar("--glassShadow", "rgba(10,26,42,0.16)");
+      setVar("--sheetOverlay", "rgba(18,38,58,0.26)");
+      setVar("--sheetCardBg", "rgba(140,185,255,0.20)");
+      setVar("--glassStroke", "rgba(190,220,255,0.32)");
+      setVar("--glassShadow", "rgba(12,32,52,0.14)");
 
       try{
         if(tg){
