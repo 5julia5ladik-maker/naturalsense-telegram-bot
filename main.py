@@ -2615,20 +2615,20 @@ def get_webapp_html() -> str:
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
-      --bg:#234a6a;
-      --glowGold:rgba(150,195,255,0.42);
-      --glowGoldBottom:rgba(150,195,255,0.48);
-      --glowWhite:rgba(255,255,255,0.10);
-      --card:rgba(170,210,255,0.30);
-      --card2:rgba(170,210,255,0.26);
+      --bg:#18364e;
+      --glowGold:rgba(120,170,255,0.32);
+      --glowGoldBottom:rgba(120,170,255,0.38);
+      --glowWhite:rgba(255,255,255,0.08);
+      --card:rgba(140,185,255,0.22);
+      --card2:rgba(140,185,255,0.20);
       --text:rgba(255,255,255,0.92);
-      --muted:rgba(255,255,255,0.70);
+      --muted:rgba(255,255,255,0.60);
       --gold:rgba(230,193,128,0.90);
-      --stroke:rgba(200,230,255,0.30);
-      --sheetOverlay:rgba(15,30,46,0.20);
-      --sheetCardBg:rgba(170,210,255,0.30);
-      --glassStroke:rgba(210,235,255,0.40);
-      --glassShadow:rgba(8,18,30,0.12);
+      --stroke:rgba(170,205,255,0.26);
+      --sheetOverlay:rgba(18,38,58,0.28);
+      --sheetCardBg:rgba(140,185,255,0.22);
+      --glassStroke:rgba(190,220,255,0.34);
+      --glassShadow:rgba(10,26,42,0.15);
       --r-lg:22px;
       --r-md:16px;
       --r-sm:14px;
@@ -2650,8 +2650,8 @@ def get_webapp_html() -> str:
       position:fixed; inset:0;
       pointer-events:none;
       background:
-        radial-gradient(1200px 820px at 50% 48%, rgba(8,18,30,0.0) 58%, rgba(8,18,30,0.27) 100%),
-        linear-gradient(to bottom, rgba(8,18,30,0.132), rgba(8,18,30,0.0) 38%, rgba(8,18,30,0.27));
+        radial-gradient(1200px 820px at 50% 48%, rgba(10,26,42,0.0) 58%, rgba(10,26,42,0.16) 100%),
+        linear-gradient(to bottom, rgba(10,26,42,0.08), rgba(10,26,42,0.0) 38%, rgba(10,26,42,0.16));
       z-index:0;
     }
 #root{min-height:100vh;position:relative;z-index:1}
@@ -2668,7 +2668,7 @@ def get_webapp_html() -> str:
       background:linear-gradient(180deg, rgba(140,185,255,0.12), rgba(140,185,255,0.06));
       border-radius:var(--r-lg);
       padding:14px;
-      box-shadow:0 10px 30px rgba(8,18,30,0.21);
+      box-shadow:0 10px 30px rgba(10,26,42,0.14);
       position:relative;
       overflow:hidden;
     }
@@ -2750,7 +2750,7 @@ def get_webapp_html() -> str:
       transform:scale(1.02);
       filter:saturate(1.05) contrast(1.02);
     }
-    .thumbOverlay{position:absolute;inset:0;background:linear-gradient(180deg, rgba(8,18,30,0.0) 35%, rgba(8,18,30,0.22) 100%);pointer-events:none}
+    .thumbOverlay{position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,26,42,0.0) 35%, rgba(10,26,42,0.20) 100%);pointer-events:none}
     .thumbBadge{
       position:absolute;left:10px;bottom:10px;
       padding:6px 10px;border-radius:999px;
@@ -2794,6 +2794,123 @@ def get_webapp_html() -> str:
     .thumbNS{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:10px}
     .thumbNS .mark{font-size:18px}
     .thumbNS .brand{font-size:12px;color:rgba(255,255,255,0.72);font-weight:800}
+
+
+    /* Inventory prizes (premium 2x2 grid) */
+    .invPrizeGrid{
+      margin-top:12px;
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0,1fr));
+      gap:12px;
+    }
+    .prizeTile{
+      position:relative;
+      border-radius:20px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,0.10);
+      background:linear-gradient(180deg, rgba(10,26,42,0.12), rgba(10,26,42,0.04));
+      box-shadow:0 10px 28px rgba(10,26,42,0.16);
+      cursor:pointer;
+      user-select:none;
+      aspect-ratio:1/1;
+      display:flex;
+      flex-direction:column;
+    }
+    .prizeTile:active{transform:scale(0.985)}
+    .prizeTile > *{pointer-events:none}
+    .prizeTile{pointer-events:auto}
+    .prizeImgWrap{
+      position:relative;
+      margin:10px;
+      border-radius:16px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,0.10);
+      background:rgba(255,255,255,0.04);
+      flex:1;
+    }
+    .prizeImg{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+      filter:saturate(1.05) contrast(1.04);
+      transform:scale(1.01);
+    }
+    .prizeMeta{
+      padding:0 12px 12px 12px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .prizeTitle{
+      font-size:13px;
+      font-weight:950;
+      letter-spacing:.2px;
+      color:rgba(255,255,255,0.92);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .prizeCode{
+      font-size:11.5px;
+      color:rgba(255,255,255,0.62);
+    }
+    .statusBadge{
+      position:absolute;
+      top:10px;
+      right:10px;
+      z-index:3;
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      padding:7px 10px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:950;
+      letter-spacing:.18px;
+      backdrop-filter:blur(14px) saturate(170%);
+      -webkit-backdrop-filter:blur(14px) saturate(170%);
+      box-shadow:0 8px 22px rgba(10,26,42,0.14);
+      user-select:none;
+      max-width:88%;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .badgeGold{
+      color:rgba(255,255,255,0.92);
+      border:1px solid rgba(230,193,128,0.42);
+      background:linear-gradient(180deg, rgba(230,193,128,0.20), rgba(230,193,128,0.10));
+    }
+    .badgeSilver{
+      color:rgba(255,255,255,0.90);
+      border:1px solid rgba(235,245,255,0.22);
+      background:linear-gradient(180deg, rgba(235,245,255,0.14), rgba(235,245,255,0.07));
+    }
+    .badgeDark{
+      color:rgba(255,255,255,0.88);
+      border:1px solid rgba(255,255,255,0.14);
+      background:rgba(8,18,30,0.38);
+    }
+
+    /* In prize details sheet the status badge must NOT be absolute (otherwise it overlaps Close) */
+    #prizeContent .statusBadge{
+      position:static;
+      top:auto; right:auto;
+      z-index:auto;
+      max-width:100%;
+      margin-top:12px;
+      align-self:flex-start;
+    }
+    .prizeHero{
+      width:100%;
+      border-radius:18px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,0.12);
+      background:rgba(255,255,255,0.04);
+      aspect-ratio:16/11;
+    }
+    .prizeHero img{width:100%;height:100%;object-fit:cover;display:block}
 
     /* Bottom nav */
     .bottomNav{
@@ -2876,7 +2993,7 @@ def get_webapp_html() -> str:
       width:74px; height:74px; border-radius:24px;
       border:1px solid rgba(255,255,255,0.14);
       background:linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.05));
-      box-shadow:0 18px 60px rgba(8,18,30,0.17);
+      box-shadow:0 18px 60px rgba(10,26,42,0.18);
       display:flex; align-items:center; justify-content:center;
       font-weight:950; letter-spacing:1px; font-size:22px;
       position:relative; overflow:hidden;
@@ -2949,9 +3066,9 @@ def get_webapp_html() -> str:
     linear-gradient(180deg, rgba(28,34,48,0.90), rgba(12,15,22,0.92));
   border:1px solid rgba(255,255,255,0.10);
   box-shadow:
-    0 14px 34px rgba(8,18,30,0.252),
+    0 14px 34px rgba(10,26,42,0.18),
     inset 0 1px 0 rgba(255,255,255,0.08),
-    inset 0 0 0 1px rgba(8,18,30,0.132);
+    inset 0 0 0 1px rgba(10,26,42,0.08);
   overflow:hidden;
 }
 /* subtle premium frame (no gold) */
@@ -2980,7 +3097,7 @@ def get_webapp_html() -> str:
   background:
     radial-gradient(320px 240px at 18% 22%, rgba(255,255,255,0.06), transparent 62%),
     radial-gradient(320px 240px at 84% 26%, rgba(140,170,255,0.07), transparent 64%),
-    linear-gradient(135deg, rgba(255,255,255,0.06), transparent 40%, rgba(8,18,30,0.156)),
+    linear-gradient(135deg, rgba(255,255,255,0.06), transparent 40%, rgba(10,26,42,0.10)),
     repeating-linear-gradient(90deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 8px);
   opacity:0.70;
   pointer-events:none;
@@ -2996,7 +3113,7 @@ def get_webapp_html() -> str:
   font-weight:900;
   letter-spacing:0.35px;
   font-size:13px;
-  text-shadow:0 1px 0 rgba(8,18,30,0.17);
+  text-shadow:0 1px 0 rgba(10,26,42,0.18);
 }
 .cabinetMain{
   position:relative;
@@ -3009,7 +3126,7 @@ def get_webapp_html() -> str:
   font-size:18px;
   font-weight:950;
   color:rgba(255,255,255,0.96);
-  text-shadow:0 1px 0 rgba(8,18,30,0.20);
+  text-shadow:0 1px 0 rgba(8,18,30,0.39);
 }
 .cabinetTier{
   margin-top:6px;
@@ -3044,14 +3161,14 @@ def get_webapp_html() -> str:
   background:
     radial-gradient(220px 120px at 30% 0%, rgba(140,170,255,0.16), transparent 60%),
     linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 18px rgba(8,18,30,0.216);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 18px rgba(10,26,42,0.16);
   font-size:13px;
   font-weight:950;
   color:rgba(255,255,255,0.94);
   white-space:nowrap;
 }
 .cabinetBalanceGem{
-  filter: drop-shadow(0 2px 6px rgba(8,18,30,0.27));
+  filter: drop-shadow(0 2px 6px rgba(10,26,42,0.16));
 }
 
 .cabinetStats{
@@ -3093,17 +3210,17 @@ def get_webapp_html() -> str:
     .rouletteWrap{margin-top:12px}
     .wheelStage{display:flex;flex-direction:column;align-items:center;gap:10px}
     .wheelBox{position:relative; width:min(78vw, 360px); aspect-ratio: 1 / 1; border-radius:999px;
-      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 42%, rgba(8,18,30,0.0) 70%),
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 42%, rgba(10,26,42,0.0) 70%),
                   rgba(255,255,255,0.03);
       border: 1px solid rgba(255,255,255,0.10);
-      box-shadow: 0 18px 40px rgba(8,18,30,0.17);
+      box-shadow: 0 18px 40px rgba(10,26,42,0.18);
       overflow:hidden;
     }
     .wheelCanvas{width:100%; height:100%; display:block}
     .wheelCenter{position:absolute; inset:28%; border-radius:999px;
       background: rgba(255,255,255,0.06);
       border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 10px 22px rgba(8,18,30,0.21);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 10px 22px rgba(10,26,42,0.14);
       display:flex; align-items:center; justify-content:center;
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
@@ -3117,7 +3234,7 @@ def get_webapp_html() -> str:
       border-left:10px solid transparent;
       border-right:10px solid transparent;
       border-bottom:28px solid rgba(235,245,255,0.86);
-      filter: drop-shadow(0 12px 20px rgba(8,18,30,0.19));
+      filter: drop-shadow(0 12px 20px rgba(10,26,42,0.22));
     }
     /* wheelPointerDot removed: pointer should be arrow only */
     .microHud{margin-top:10px; font-size:12px; color: rgba(255,255,255,0.62); text-align:center}
@@ -3136,8 +3253,8 @@ def get_webapp_html() -> str:
       color: rgba(255,255,255,0.86);
       font-size:12px;
     }
-    .resultSheetOverlay{position:fixed; inset:0; background: rgba(8,18,30,0.0); pointer-events:none; transition:background 180ms ease; z-index:10050}
-    .resultSheetOverlay.on{background: rgba(8,18,30,0.132); pointer-events:auto}
+    .resultSheetOverlay{position:fixed; inset:0; background: rgba(10,26,42,0.0); pointer-events:none; transition:background 180ms ease; z-index:10050}
+    .resultSheetOverlay.on{background: rgba(10,26,42,0.08); pointer-events:auto}
     /* Dior: subtle cold sparkle (quiet luxury) */
     .resultSheetOverlay.on.dior::before{
       content:"";
@@ -3165,7 +3282,7 @@ def get_webapp_html() -> str:
     .resultCard{max-width:520px; margin:0 auto; border-radius:22px; padding:14px 14px 12px 14px;
       background: rgba(255,255,255,0.07);
       border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: 0 18px 50px rgba(8,18,30,0.18);
+      box-shadow: 0 18px 50px rgba(10,26,42,0.22);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
     }
@@ -3217,7 +3334,7 @@ def get_webapp_html() -> str:
     const CHANNEL = "__CHANNEL__";
     const BOT_USERNAME = "__BOT_USERNAME__"; // может быть пустым
 
-    const DEFAULT_BG = '#0b141d';
+    const DEFAULT_BG = '#18364e';
 
     function showSplash(){
       const s = document.getElementById("nsSplash");
@@ -3253,20 +3370,20 @@ def get_webapp_html() -> str:
       setVar("--muted", muted);
 
       // cold-glass surfaces
-      setVar("--stroke", "rgba(170,205,255,0.16)");
-      setVar("--card", "rgba(140,185,255,0.10)");
-      setVar("--card2", "rgba(140,185,255,0.08)");
+      setVar("--stroke", "rgba(170,205,255,0.26)");
+      setVar("--card", "rgba(140,185,255,0.22)");
+      setVar("--card2", "rgba(140,185,255,0.20)");
 
       // background haze (top + bottom), no warm/amber cast
-      setVar("--glowGold", "rgba(120,170,255,0.16)");
-      setVar("--glowGoldBottom", "rgba(120,170,255,0.20)");
-      setVar("--glowWhite", "rgba(255,255,255,0.04)");
+      setVar("--glowGold", "rgba(120,170,255,0.30)");
+      setVar("--glowGoldBottom", "rgba(120,170,255,0.36)");
+      setVar("--glowWhite", "rgba(255,255,255,0.07)");
 
       // sheets / modals
-      setVar("--sheetOverlay", "rgba(8,14,22,0.60)");
-      setVar("--sheetCardBg", "rgba(140,185,255,0.12)");
-      setVar("--glassStroke", "rgba(190,220,255,0.22)");
-      setVar("--glassShadow", "rgba(8,18,30,0.27)");
+      setVar("--sheetOverlay", "rgba(18,38,58,0.32)");
+      setVar("--sheetCardBg", "rgba(140,185,255,0.22)");
+      setVar("--glassStroke", "rgba(190,220,255,0.34)");
+      setVar("--glassShadow", "rgba(10,26,42,0.16)");
 
       try{
         if(tg){
@@ -4916,6 +5033,19 @@ function renderDailySheet(){
   hdr.appendChild(close);
   content.appendChild(hdr);
 
+// Balance (premium)
+const bal = el("div","card2");
+bal.style.marginTop="12px";
+const br = el("div","row");
+const bl = el("div");
+bl.appendChild(el("div",null,'<div style="font-size:13px;color:var(--muted)">Баланс</div>'));
+bl.appendChild(el("div",null,'<div style="margin-top:6px;font-size:16px;font-weight:900">💎 '+esc(state.user ? state.user.points : 0)+' баллов</div>'));
+br.appendChild(bl);
+br.appendChild(el("div","pill", esc(tierLabel(state.user ? state.user.tier : "free"))));
+bal.appendChild(br);
+content.appendChild(bal);
+
+
   // Loading
   if(!state.dailyLogin || !state.dailyTasks){
     const b = el("div","sub","Загрузка…");
@@ -4975,6 +5105,12 @@ function renderDailySheet(){
     const isToday = (i===dayInCycle);
     const isPast = (login.streak||0) >= i && !isToday;
 
+    // Tap today card to claim (no separate button)
+    if(isToday && login.can_claim){
+      card.style.cursor = state.dailyBusy ? "not-allowed" : "pointer";
+      card.addEventListener("click", ()=>{ if(!state.dailyBusy){ haptic(); claimDailyLogin(); } });
+    }
+
     if(isToday){
       card.style.border = "1px solid rgba(255,255,255,0.22)";
       card.style.background = "rgba(255,255,255,0.10)";
@@ -4986,21 +5122,10 @@ function renderDailySheet(){
 
     card.appendChild(el("div","miniMeta","Day "+i));
     card.appendChild(el("div",null,'<div style="font-size:15px;font-weight:900;margin-top:6px">💎 +'+esc(reward)+'</div>'));
-    card.appendChild(el("div","miniMeta", isToday ? (login.can_claim ? "Сегодня" : "Получено") : (isPast ? "✓" : "—")));
+    card.appendChild(el("div","miniMeta", isToday ? (login.can_claim ? "Забрать" : "Получено") : (isPast ? "✓" : "—")));
     sc.appendChild(card);
   }
   top.appendChild(sc);
-
-  const cta = el("div","btn");
-  cta.style.marginTop="12px";
-  const can = !!login.can_claim && !state.dailyBusy;
-  cta.style.opacity = can ? "1" : "0.55";
-  cta.style.pointerEvents = can ? "auto" : "none";
-  cta.addEventListener("click", ()=>{ haptic(); claimDailyLogin(); });
-  const todayReward = rewards[(dayInCycle-1)] || 0;
-  cta.appendChild(el("div",null,'<div class="btnTitle">'+(can ? ("🎁 Забрать +"+esc(todayReward)) : "⏳ Жди таймер")+'</div><div class="btnSub">'+(can ? "Раз в 24 часа" : "Бонус можно брать раз в 24 часа")+'</div>'));
-  cta.appendChild(el("div",null,'<div style="opacity:0.85">›</div>'));
-  top.appendChild(cta);
 
   content.appendChild(top);
 
@@ -5034,105 +5159,113 @@ function renderDailySheet(){
 
   const taskItems = Array.isArray(tasks.tasks) ? tasks.tasks : [];
   for(const it of taskItems){
-    const card = el("div","miniCard");
-    card.style.cursor = "default";
-    card.style.padding = "12px";
+      const card = el("div","miniCard");
+      card.style.padding = "12px";
 
-    const rr = el("div","row");
-    rr.style.alignItems="center";
+      const rr = el("div","row");
+      rr.style.alignItems="center";
 
-    const meta = el("div");
-    meta.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">'+esc(it.icon||"🎯")+' '+esc(it.title||"")+'</div>'));
+      const meta = el("div");
+      meta.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">'+esc(it.icon||"🎯")+' '+esc(it.title||"")+'</div>'));
 
-    const need = parseInt(it.need||1,10)||1;
-    const prog = parseInt(it.progress||0,10)||0;
+      const need = parseInt(it.need||1,10)||1;
+      const prog = parseInt(it.progress||0,10)||0;
 
-    let sub = "";
-    if(need>1){
-      sub = "Прогресс: "+prog+"/"+need+" • Награда: +"+esc(it.points||0);
-    }else{
-      sub = "Награда: +"+esc(it.points||0);
-    }
-    meta.appendChild(el("div","miniMeta", esc(sub)));
-    rr.appendChild(meta);
-
-    const btn = el("div","pill");
-    btn.style.marginLeft="auto";
-    btn.style.cursor="pointer";
-
-    const claimedTask = !!it.claimed;
-    const doneTask = !!it.done;
-    const ev = (state && state.dailyEventUI) ? state.dailyEventUI[it.key] : null;
-
-    if(claimedTask){
-      btn.textContent = "Получено";
-      btn.style.opacity = "0.7";
-      btn.style.cursor = "default";
-    }else if(doneTask){
-      btn.textContent = "Забрать";
-      btn.style.opacity = state.dailyBusy ? "0.55" : "1";
-      btn.style.pointerEvents = state.dailyBusy ? "none" : "auto";
-      btn.addEventListener("click",(e)=>{ e.stopPropagation(); haptic(); claimDailyTask(it.key); });
-    }else{
-      // not done yet -> show action hint
-      if(ev && ev.status==="pending"){
-        btn.textContent = "⏳";
-        btn.style.opacity = "0.65";
-        btn.style.pointerEvents = "none";
-      }else if(ev && ev.status==="ok"){
-        btn.textContent = "✅";
-        btn.style.opacity = "0.75";
-        btn.style.pointerEvents = "none";
+      let sub = "";
+      if(need>1){
+        sub = "Прогресс: "+prog+"/"+need+" • Награда: +"+esc(it.points||0);
       }else{
-        btn.textContent = "Открыть";
-        btn.style.opacity = "0.9";
-        btn.addEventListener("click",(e)=>{
-        e.stopPropagation();
-        haptic();
-        // Helper: run after DOM tick
-        const later = (fn)=>{ try{ setTimeout(fn, 0); }catch(e){ try{ fn(); }catch(_e){} } };
-        // Close Daily only for actions that navigate away, BUT after we отправили event/обновили UI,
-        // иначе пользователь не видит подтверждение и кажется что "не засчиталось".
-        const closeDailySoft = ()=>{ try{ closeDaily(); }catch(_e){} };
-        // lightweight helpers (do not change main UI logic)
-        if(it.key==="open_channel"){
-          later(()=>{ dailyEvent('open_channel', {}, 'open_channel'); closeDailySoft(); openLink("https://t.me/"+CHANNEL); });
-        }
-        else if(it.key==="use_search"){
-          later(()=>{ dailyEvent('use_search', {}, 'use_search'); state.tab="discover"; render(); closeDailySoft(); });
-        }
-        else if(it.key==="open_inventory"){
-          later(()=>{ openInventory(); /* внутри уже dailyEvent('open_inventory') */ closeDailySoft(); });
-        }
-        else if(it.key==="open_profile"){
-          later(()=>{ openПрофиль("main"); /* внутри уже dailyEvent('open_profile') */ closeDailySoft(); });
-        }
-        else if(it.key==="open_miniapp"){
-          later(()=>{ dailyEvent('open_miniapp', {}, 'open_miniapp'); /* не закрываем: это просто отметка */ });
-        }
-        else if(it.key==="open_post"){
-          later(()=>{ dailyEvent('open_post', {}, 'open_post'); state.tab="categories"; render(); closeDailySoft(); /* дальше пользователь открывает посты */ });
-        }
-        else if(it.key==="spin_roulette"){
-          later(()=>{ openПрофиль("roulette"); closeDailySoft(); /* событие спина отметится сервером при реальном спине */ });
-        }
-        else{
-          // manual confirm tasks (comment/reply/convert)
-          later(()=>{ dailyEvent(it.key, {}, it.key); });
-        }
-        // refresh tasks shortly
+        sub = "Награда: +"+esc(it.points||0);
+      }
+      meta.appendChild(el("div","miniMeta", esc(sub)));
+      rr.appendChild(meta);
+
+      const btn = el("div","pill");
+      btn.style.marginLeft="auto";
+      btn.style.cursor = "default";
+
+      const claimedTask = !!it.claimed;
+      const doneTask = !!it.done;
+      const ev = (state && state.dailyEventUI) ? state.dailyEventUI[it.key] : null;
+
+      // helpers (same logic as before, just without "button" UI)
+      const later = (fn)=>{ try{ setTimeout(fn, 0); }catch(e){ try{ fn(); }catch(_e){} } };
+      const closeDailySoft = ()=>{ try{ closeDaily(); }catch(_e){} };
+      const refreshTasksSoon = ()=>{
         clearTimeout(state.__dailyT);
         state.__dailyT = setTimeout(async ()=>{
           try{ state.dailyTasks = await apiGet("/api/daily/tasks?telegram_id="+encodeURIComponent(tgUserId)); render(); }catch(e){}
         }, 500);
-      });
-      }
-    }
+      };
 
-    rr.appendChild(btn);
-    card.appendChild(rr);
-    list.appendChild(card);
-  }
+      if(claimedTask){
+        btn.textContent = "Получено";
+        btn.style.opacity = "0.7";
+        card.style.cursor = "default";
+      }else if(doneTask){
+        btn.textContent = "Забрать";
+        btn.style.opacity = state.dailyBusy ? "0.55" : "1";
+        card.style.cursor = state.dailyBusy ? "not-allowed" : "pointer";
+        card.style.opacity = state.dailyBusy ? "0.75" : "1";
+        card.addEventListener("click", ()=>{
+          if(state.dailyBusy) return;
+          haptic();
+          claimDailyTask(it.key);
+        });
+      }else{
+        // not done yet -> show action hint
+        if(ev && ev.status==="pending"){
+          btn.textContent = "⏳";
+          btn.style.opacity = "0.65";
+          card.style.cursor = "default";
+        }else if(ev && ev.status==="ok"){
+          btn.textContent = "✅";
+          btn.style.opacity = "0.75";
+          card.style.cursor = "default";
+        }else{
+          btn.textContent = "Открыть";
+          btn.style.opacity = "0.9";
+          card.style.cursor = "pointer";
+          card.addEventListener("click", ()=>{
+            haptic();
+
+            // Close Daily only for actions that navigate away, BUT after we отправили event/обновили UI,
+            // иначе пользователь не видит подтверждение и кажется что "не засчиталось".
+            if(it.key==="open_channel"){
+              later(()=>{ dailyEvent('open_channel', {}, 'open_channel'); closeDailySoft(); openLink("https://t.me/"+CHANNEL); });
+            }
+            else if(it.key==="use_search"){
+              later(()=>{ dailyEvent('use_search', {}, 'use_search'); state.tab="discover"; render(); closeDailySoft(); });
+            }
+            else if(it.key==="open_inventory"){
+              later(()=>{ openInventory(); /* внутри уже dailyEvent('open_inventory') */ closeDailySoft(); });
+            }
+            else if(it.key==="open_profile"){
+              later(()=>{ openПрофиль("main"); /* внутри уже dailyEvent('open_profile') */ closeDailySoft(); });
+            }
+            else if(it.key==="open_miniapp"){
+              later(()=>{ dailyEvent('open_miniapp', {}, 'open_miniapp'); /* не закрываем: это просто отметка */ });
+            }
+            else if(it.key==="open_post"){
+              later(()=>{ dailyEvent('open_post', {}, 'open_post'); state.tab="categories"; render(); closeDailySoft(); /* дальше пользователь открывает посты */ });
+            }
+            else if(it.key==="spin_roulette"){
+              later(()=>{ openПрофиль("roulette"); closeDailySoft(); /* событие спина отметится сервером при реальном спине */ });
+            }
+            else{
+              // manual confirm tasks (comment/reply/convert)
+              later(()=>{ dailyEvent(it.key, {}, it.key); });
+            }
+
+            refreshTasksSoon();
+          });
+        }
+      }
+
+      rr.appendChild(btn);
+      card.appendChild(rr);
+      list.appendChild(card);
+    }
 
   box.appendChild(list);
   content.appendChild(box);
@@ -5238,7 +5371,7 @@ function renderDailySheet(){
       tCard.appendChild(convBtn);
       content.appendChild(tCard);
 
-      // Prizes list (convert only in vanilla, claim stays in bot)
+      // Prizes (premium 2x2 grid; actions only inside prize modal)
       const pCard = el("div","card2");
       pCard.style.marginTop="12px";
       pCard.appendChild(el("div",null,'<div style="font-size:14px;font-weight:900">🎁 Призы</div>'));
@@ -5247,105 +5380,37 @@ function renderDailySheet(){
       if(prizes.length===0){
         pCard.appendChild(el("div","sub","Пока нет призов."));
       }else{
-        const list = el("div");
-        list.style.marginTop="10px";
-        list.style.display="grid";
-        list.style.gap="10px";
+        const grid = el("div","invPrizeGrid");
         for(const p of prizes){
-          const pc = el("div","card2");
-          pc.style.border="1px solid rgba(140,190,255,0.20)";
-          pc.style.background="rgba(140,190,255,0.10)";
-          pc.style.padding="14px";
+          const tile = el("div","prizeTile");
 
-          const title = el("div",null,'<div style="font-size:14px;font-weight:950">'+esc(p.prize_label||"✨ Dior Palette")+'</div>');
-          pc.appendChild(title);
+          const b = prizeStatusBadge(p.status);
+          const badge = el("div", "statusBadge "+b.cls, esc(b.text));
+          tile.appendChild(badge);
 
-          // meta + status
-          const st = String(p.status||"draft").trim() || "draft";
-          const stMap = {
-            "draft":"Доступно",
-            "awaiting_contact":"Нужны данные",
-            "submitted":"Заявка отправлена",
-            "approved":"Подтверждено",
-            "fulfilled":"Отправлено",
-            "rejected":"Отклонено",
-            "closed":"Закрыто"
-          };
-          const stLabel = stMap[st] || st;
+          const imgWrap = el("div","prizeImgWrap");
+          const img = document.createElement("img");
+          img.className = "prizeImg";
+          img.alt = "Dior palette";
+          img.src = diorThumbDataUri();
+          imgWrap.appendChild(img);
+          tile.appendChild(imgWrap);
 
-          const meta = el("div","sub", 'Код: '+esc(p.claim_code||"-")+' • '+esc(stLabel));
-          meta.style.marginTop="6px";
-          pc.appendChild(meta);
+          const meta = el("div","prizeMeta");
+          meta.appendChild(el("div","prizeTitle", esc(prizeDisplayLabel(p))));
+          const code = String(p.claim_code||"").trim() || "-";
+          meta.appendChild(el("div","prizeCode", "Код: "+esc(code)));
+          tile.appendChild(meta);
 
-          const canAct = (st==="draft" || st==="awaiting_contact");
+          tile.addEventListener("click", ()=>{
+            haptic("light");
+            openPrizeSheet(p);
+          });
 
-          if(!canAct){
-            const statusPill = el("div",null,'<div style="margin-top:12px;display:inline-flex;gap:8px;align-items:center;padding:10px 12px;border-radius:999px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.10);color:rgba(255,255,255,0.88);font-weight:900;font-size:12px">🟡 '+esc(stLabel)+'</div>');
-            pc.appendChild(statusPill);
-          }else{
-            // Action zone (Variant A): primary + secondary
-            const actions = el("div");
-            actions.style.marginTop="12px";
-            actions.style.display="grid";
-            actions.style.gap="10px";
-
-            const claimBtn = el("div","btn");
-            claimBtn.style.justifyContent="center";
-            claimBtn.style.fontWeight="950";
-            claimBtn.style.border="1px solid rgba(235,245,255,0.22)";
-            claimBtn.style.background="rgba(235,245,255,0.10)";
-            claimBtn.innerHTML = (st==='awaiting_contact' ? '✍️ Продолжить оформление' : '🎁 Забрать приз');
-            claimBtn.addEventListener("click", ()=>{
-              haptic();
-              const cid = p.claim_id;
-              const code = String(p.claim_code||"").trim();
-              const label = String(p.prize_label||"Приз");
-              if(cid){
-                openClaimForm(cid, code, label);
-              }else if(state.botUsername && tg && tg.openTelegramLink && code){
-                tg.openTelegramLink("https://t.me/"+state.botUsername+"?start=claim_"+encodeURIComponent(code));
-              }else{
-                alert("/claim "+code);
-              }
-            });
-
-            const convLink = el("div",null,'<div style="text-align:center;font-weight:900;font-size:12.5px;color:rgba(255,255,255,0.78);padding:10px 12px;border-radius:16px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);cursor:pointer">💎 Конвертировать • +'+esc(diorValue)+'</div>');
-            convLink.style.opacity = state.busy ? 0.6 : 1;
-            convLink.style.cursor = state.busy ? "not-allowed" : "pointer";
-            convLink.addEventListener("click", async ()=>{
-              const code = String(p.claim_code||"").trim();
-              if(!code || state.busy) return;
-
-              const ok = await askConfirm(
-                "Конвертировать приз?",
-                "Вы получите +"+diorValue+" баллов. После конвертации забрать приз будет нельзя.",
-                "Да, конвертировать"
-              );
-              if(!ok) return;
-
-              state.busy=true; state.invMsg=""; renderInventorySheet();
-              try{
-                const d = await apiPost("/api/inventory/convert_prize", {telegram_id: tgUserId, claim_code: code});
-                state.invMsg = "✅ Приз превращён в бонусы: +"+d.added_points+" баллов";
-                await refreshUser();
-                state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
-                haptic("light");
-              }catch(e){
-                state.invMsg = "❌ "+(e.message||"Ошибка");
-              }finally{
-                state.busy=false;
-                renderInventorySheet();
-              }
-            });
-
-            actions.appendChild(claimBtn);
-            actions.appendChild(convLink);
-            pc.appendChild(actions);
-          }
-
-          list.appendChild(pc);
+          grid.appendChild(tile);
         }
-        pCard.appendChild(list);
+        pCard.appendChild(grid);
+        pCard.appendChild(el("div","sub","Тапни на приз, чтобы открыть детали."));
       }
       content.appendChild(pCard);
 
@@ -5355,6 +5420,242 @@ function renderDailySheet(){
         content.appendChild(m);
       }
     }
+
+
+    function prizeStatusBadge(st){
+      st = String(st||"draft").trim() || "draft";
+      // 3 premium states (no colored dots)
+      if(st==="submitted"){
+        return {cls:"badgeGold", text:"✉️ Заявка отправлена"};
+      }
+      if(st==="approved" || st==="fulfilled"){
+        return {cls:"badgeSilver", text:"✔ Получен"};
+      }
+      if(st==="rejected"){
+        return {cls:"badgeDark", text:"⚡ Отклонено"};
+      }
+      if(st==="closed"){
+        return {cls:"badgeSilver", text:"✔ Закрыто"};
+      }
+      // draft / awaiting_contact / unknown -> needs action
+      return {cls:"badgeDark", text:"⚡ Ожидает действия"};
+    }
+
+    function diorThumbDataUri(){
+      // Inline premium SVG (stable inside Telegram; no external image requests)
+      const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="900" viewBox="0 0 900 900">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07121f"/>
+      <stop offset="0.55" stop-color="#0c2033"/>
+      <stop offset="1" stop-color="#06101a"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f3dbb3" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#c79b5c" stop-opacity="0.95"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="35%" cy="28%" r="78%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="900" height="900" rx="58" fill="url(#bg)"/>
+  <rect x="0" y="0" width="900" height="900" rx="58" fill="url(#glow)"/>
+
+  <!-- compact -->
+  <rect x="110" y="165" width="680" height="570" rx="62" fill="#090c10" opacity="0.66"/>
+  <rect x="128" y="183" width="644" height="534" rx="54" fill="#0b141d" opacity="0.78" stroke="#ffffff" stroke-opacity="0.10" stroke-width="2"/>
+
+  <!-- pans (9) -->
+  <g transform="translate(185,255)">
+    <defs>
+      <linearGradient id="pan" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+        <stop offset="1" stop-color="#000000" stop-opacity="0.10"/>
+      </linearGradient>
+    </defs>
+
+    <!-- row 1 -->
+    <rect x="0" y="0" width="150" height="120" rx="30" fill="#d9b58c" opacity="0.18" stroke="#f3dbb3" stroke-opacity="0.20" stroke-width="2"/>
+    <rect x="175" y="0" width="150" height="120" rx="30" fill="#c8a178" opacity="0.18" stroke="#f3dbb3" stroke-opacity="0.16" stroke-width="2"/>
+    <rect x="350" y="0" width="150" height="120" rx="30" fill="#b58c68" opacity="0.16" stroke="#ffffff" stroke-opacity="0.12" stroke-width="2"/>
+
+    <!-- row 2 -->
+    <rect x="0" y="145" width="150" height="120" rx="30" fill="#e8d2b5" opacity="0.16" stroke="#ffffff" stroke-opacity="0.14" stroke-width="2"/>
+    <rect x="175" y="145" width="150" height="120" rx="30" fill="#aacdff" opacity="0.12" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2"/>
+    <rect x="350" y="145" width="150" height="120" rx="30" fill="#9dbbe6" opacity="0.10" stroke="#ffffff" stroke-opacity="0.14" stroke-width="2"/>
+
+    <!-- row 3 -->
+    <rect x="0" y="290" width="150" height="120" rx="30" fill="#d9b58c" opacity="0.14" stroke="#f3dbb3" stroke-opacity="0.18" stroke-width="2"/>
+    <rect x="175" y="290" width="150" height="120" rx="30" fill="#0f141b" opacity="0.22" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2"/>
+    <rect x="350" y="290" width="150" height="120" rx="30" fill="#e6c180" opacity="0.12" stroke="#f3dbb3" stroke-opacity="0.16" stroke-width="2"/>
+
+    <!-- subtle sheen -->
+    <rect x="-10" y="-10" width="520" height="440" rx="46" fill="url(#glass)"/>
+  </g>
+
+  <!-- mark -->
+  <text x="450" y="690" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+        font-size="52" letter-spacing="7" fill="url(#gold)">DIOR</text>
+  <text x="450" y="730" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+        font-size="18" letter-spacing="4" fill="#ffffff" opacity="0.45">BACKSTAGE</text>
+</svg>`.trim();
+      return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    }
+
+    function prizeDisplayLabel(p){
+      // UI-only mapping (do NOT touch backend logic/db labels)
+      const raw = String((p && p.prize_label) ? p.prize_label : "").trim();
+      const low = raw.toLowerCase();
+      // If backend stores generic label like "главный приз" (sometimes with emoji) -> show a premium name
+      if(low.includes("главный приз")){
+        return "Палетка Dior";
+      }
+      return raw || "Палетка Dior";
+    }
+
+
+    function openPrizeSheet(p){
+      state.prizeSelected = p || null;
+      state.prizeOpen = true;
+      renderPrizeSheet();
+    }
+    function closePrizeSheet(){
+      state.prizeOpen = false;
+      state.prizeSelected = null;
+      renderPrizeSheet();
+    }
+
+    function renderPrizeSheet(){
+      const overlay = document.getElementById("prizeOverlay");
+      if(!overlay) return;
+      overlay.classList.toggle("open", !!state.prizeOpen);
+      const content = document.getElementById("prizeContent");
+      if(!content) return;
+      content.innerHTML = "";
+      if(!state.prizeOpen) return;
+
+      const p = state.prizeSelected || {};
+      const hdr = el("div","row"); hdr.style.alignItems="baseline";
+      hdr.appendChild(el("div","h1","🎁 Приз"));
+      const close = el("div",null,'<div style="font-size:13px;color:var(--muted);cursor:pointer">Закрыть</div>');
+      close.addEventListener("click", ()=>{ haptic(); closePrizeSheet(); });
+      hdr.appendChild(close);
+      content.appendChild(hdr);
+
+      const hero = el("div","prizeHero");
+      hero.style.marginTop="12px";
+      const img = document.createElement("img");
+      img.alt = "Dior palette";
+      img.src = diorThumbDataUri();
+      hero.appendChild(img);
+      content.appendChild(hero);
+
+      content.appendChild(el("div",null,'<div style="margin-top:12px;font-size:16px;font-weight:950">'+esc(prizeDisplayLabel(p))+'</div>'));
+
+      const code = String(p.claim_code||"").trim() || "-";
+      const codeBox = el("div","card2");
+      codeBox.style.marginTop="10px";
+      codeBox.style.display="flex";
+      codeBox.style.justifyContent="space-between";
+      codeBox.style.alignItems="center";
+      codeBox.style.gap="10px";
+      codeBox.innerHTML = '<div><div style="font-size:12px;color:rgba(255,255,255,0.62)">Код</div><div style="margin-top:6px;font-size:14px;font-weight:950;letter-spacing:.3px">'+esc(code)+'</div></div>';
+      const copy = el("div","pill","📎 Копировать");
+      copy.style.cursor="pointer";
+      copy.addEventListener("click", async ()=>{
+        try{
+          await navigator.clipboard.writeText(code);
+          state.invMsg = "✅ Код скопирован";
+          haptic("light");
+        }catch(e){
+          state.invMsg = "ℹ️ Не удалось скопировать";
+        }
+        try{ renderInventorySheet(); }catch(e){}
+      });
+      codeBox.appendChild(copy);
+      content.appendChild(codeBox);
+
+      const b = prizeStatusBadge(p.status);
+      content.appendChild(el("div",null,'<div style="margin-top:12px" class="statusBadge '+esc(b.cls)+'">'+esc(b.text)+'</div>'));
+
+      const stRaw = String(p.status||"draft").trim() || "draft";
+      const canAct = (stRaw==="draft" || stRaw==="awaiting_contact");
+      if(canAct){
+        const actions = el("div");
+        actions.style.marginTop="14px";
+        actions.style.display="grid";
+        actions.style.gap="10px";
+
+        const claimBtn = el("div","btn");
+        claimBtn.style.justifyContent="center";
+        claimBtn.style.fontWeight="950";
+        claimBtn.style.border="1px solid rgba(235,245,255,0.22)";
+        claimBtn.style.background="rgba(235,245,255,0.10)";
+        claimBtn.innerHTML = (stRaw==='awaiting_contact' ? '✍️ Продолжить оформление' : '🎁 Забрать приз');
+        claimBtn.addEventListener("click", ()=>{
+          haptic();
+          const cid = p.claim_id;
+          const label = String(p.prize_label||"Приз");
+          if(cid){
+            openClaimForm(cid, code, label);
+          }else if(state.botUsername && tg && tg.openTelegramLink && code && code!=="-"){
+            tg.openTelegramLink("https://t.me/"+state.botUsername+"?start=claim_"+encodeURIComponent(code));
+          }else{
+            alert("/claim "+code);
+          }
+        });
+
+        const diorValue = Number((state.inventory||{}).dior_convert_value || 0) || 0;
+        const convBtn = el("div",null,'<div style="text-align:center;font-weight:900;font-size:12.5px;color:rgba(255,255,255,0.78);padding:12px 12px;border-radius:16px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);cursor:pointer">💎 Конвертировать • +'+esc(diorValue)+'</div>');
+        convBtn.style.opacity = state.busy ? 0.6 : 1;
+        convBtn.style.cursor = state.busy ? "not-allowed" : "pointer";
+        convBtn.addEventListener("click", async ()=>{
+          const code2 = String(p.claim_code||"").trim();
+          if(!code2 || state.busy) return;
+
+          const ok = await askConfirm(
+            "Конвертировать приз?",
+            "Вы получите +"+diorValue+" баллов. После конвертации забрать приз будет нельзя.",
+            "Да, конвертировать"
+          );
+          if(!ok) return;
+
+          state.busy=true; state.invMsg=""; renderPrizeSheet();
+          try{
+            const d = await apiPost("/api/inventory/convert_prize", {telegram_id: tgUserId, claim_code: code2});
+            state.invMsg = "✅ Приз превращён в бонусы: +"+d.added_points+" баллов";
+            await refreshUser();
+            state.inventory = await apiGet("/api/inventory?telegram_id="+encodeURIComponent(tgUserId));
+            haptic("light");
+            closePrizeSheet();
+          }catch(e){
+            state.invMsg = "❌ "+(e.message||"Ошибка");
+          }finally{
+            state.busy=false;
+            try{ renderInventorySheet(); }catch(e){}
+            try{ renderPrizeSheet(); }catch(e){}
+          }
+        });
+
+        actions.appendChild(claimBtn);
+        actions.appendChild(convBtn);
+        content.appendChild(actions);
+      }
+
+      if(state.invMsg){
+        const m = el("div","card2", esc(state.invMsg));
+        m.style.marginTop="12px";
+        content.appendChild(m);
+      }
+    }
+
 
     function renderRouletteOddsSheet(){
       const overlay = document.getElementById("oddsOverlay");
@@ -6095,6 +6396,15 @@ if(state.profileView==="history"){
       const iC = el("div"); iC.id="invContent";
       iS.appendChild(iC); iO.appendChild(iS); root.appendChild(iO);
 
+      // Prize modal (per-item details)
+      const zO = el("div","sheetOverlay"); zO.id="prizeOverlay";
+      zO.addEventListener("click", (e)=>{ if(e.target===zO){ haptic(); closePrizeSheet(); }});
+      const zS = el("div","sheet");
+      zS.addEventListener("click",(e)=>e.stopPropagation());
+      zS.appendChild(el("div","sheetHandle"));
+      const zC = el("div"); zC.id="prizeContent";
+      zS.appendChild(zC); zO.appendChild(zS); root.appendChild(zO);
+
       // Профиль
       const prO = el("div","sheetOverlay"); prO.id="profileOverlay";
       prO.addEventListener("click", (e)=>{ if(e.target===prO){ haptic(); closeПрофиль(); }});
@@ -6153,7 +6463,7 @@ dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
         t.style.maxWidth = "92vw";
         t.style.padding = "10px 14px";
         t.style.borderRadius = "999px";
-        t.style.background = "rgba(8,18,30,0.17)";
+        t.style.background = "rgba(12,34,54,0.30)";
         t.style.border = "1px solid rgba(255,255,255,0.14)";
         t.style.backdropFilter = "blur(10px)";
         t.style.webkitBackdropFilter = "blur(10px)";
@@ -6168,6 +6478,7 @@ dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
 
       renderPostsSheet();
       renderInventorySheet();
+      renderPrizeSheet();
       renderRouletteOddsSheet();
       renderПрофильSheet();
       renderDailySheet();
@@ -7300,8 +7611,14 @@ async def daily_event_api(request: Request):
                 cnt = int((lg.meta or {}).get("count", 0) if lg else 0)
                 cnt = min(3, cnt + 1)
                 await _mark_daily_done(session, tid, day, "open_post", {"count": cnt})
+            elif ev in {"open_daily", "open_daily_bonus", "open_daily_modal", "open_daily_popup", "daily_open"}:
+                # Opening the Daily UI should never trigger errors/toasts; it's a pure UI action.
+                # Treat as no-op.
+                pass
             else:
-                return {"ok": False, "reason": "unknown_event", "event": ev}
+                # Unknown events must not produce user-visible errors; ignore silently (best-effort sink).
+                logger.info("daily_event_api: ignore unknown event tid=%s ev=%s", tid, ev)
+                pass
 
             await session.commit()
             return {"ok": True}
