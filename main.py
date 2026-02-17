@@ -2615,25 +2615,20 @@ def get_webapp_html() -> str:
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
-      /* Theme (tuned): slightly darker vs previous "x2 brighter", still no pure black */
-      --bg:#152f44;
-      --glowGold:rgba(120,170,255,0.28);
-      --glowGoldBottom:rgba(120,170,255,0.33);
-      --glowWhite:rgba(255,255,255,0.07);
-      --card:rgba(140,185,255,0.20);
-      --card2:rgba(140,185,255,0.18);
+      --bg:#13283a;
+      --glowGold:rgba(120,170,255,0.22);
+      --glowGoldBottom:rgba(120,170,255,0.28);
+      --glowWhite:rgba(255,255,255,0.06);
+      --card:rgba(140,185,255,0.16);
+      --card2:rgba(140,185,255,0.14);
       --text:rgba(255,255,255,0.92);
       --muted:rgba(255,255,255,0.60);
       --gold:rgba(230,193,128,0.90);
-      --stroke:rgba(170,205,255,0.26);
-      --sheetOverlay:rgba(18,38,58,0.26);
-      --sheetCardBg:rgba(140,185,255,0.20);
-      --glassStroke:rgba(190,220,255,0.32);
-      --glassShadow:rgba(12,32,52,0.14);
-      /* Premium sheen (subtle highlights, no layout changes) */
-      --sheen:rgba(255,255,255,0.09);
-      --sheen2:rgba(140,190,255,0.12);
-      --sheenGold:rgba(230,193,128,0.10);
+      --stroke:rgba(170,205,255,0.20);
+      --sheetOverlay:rgba(12,24,38,0.38);
+      --sheetCardBg:rgba(140,185,255,0.16);
+      --glassStroke:rgba(190,220,255,0.28);
+      --glassShadow:rgba(8,18,30,0.228);
       --r-lg:22px;
       --r-md:16px;
       --r-sm:14px;
@@ -2655,8 +2650,8 @@ def get_webapp_html() -> str:
       position:fixed; inset:0;
       pointer-events:none;
       background:
-        radial-gradient(1200px 820px at 50% 48%, rgba(12,32,52,0.0) 58%, rgba(12,32,52,0.14) 100%),
-        linear-gradient(to bottom, rgba(12,32,52,0.07), rgba(12,32,52,0.0) 38%, rgba(12,32,52,0.14));
+        radial-gradient(1200px 820px at 50% 48%, rgba(8,18,30,0.0) 58%, rgba(8,18,30,0.27) 100%),
+        linear-gradient(to bottom, rgba(8,18,30,0.132), rgba(8,18,30,0.0) 38%, rgba(8,18,30,0.27));
       z-index:0;
     }
 #root{min-height:100vh;position:relative;z-index:1}
@@ -2673,32 +2668,9 @@ def get_webapp_html() -> str:
       background:linear-gradient(180deg, rgba(140,185,255,0.12), rgba(140,185,255,0.06));
       border-radius:var(--r-lg);
       padding:14px;
-      box-shadow:0 10px 30px rgba(12,32,52,0.14);
+      box-shadow:0 10px 30px rgba(8,18,30,0.21);
       position:relative;
       overflow:hidden;
-    }
-    /* Premium highlights (subtle, glassy) */
-    .card::before{
-      content:"";
-      position:absolute;
-      inset:-1px;
-      pointer-events:none;
-      background:
-        radial-gradient(780px 340px at 18% 0%, var(--sheen), transparent 62%),
-        radial-gradient(900px 520px at 85% 8%, var(--sheen2), transparent 60%),
-        linear-gradient(135deg, transparent 0%, rgba(255,255,255,0.06) 12%, transparent 28%),
-        linear-gradient(180deg, var(--sheenGold), transparent 55%);
-      mix-blend-mode:screen;
-      opacity:.85;
-    }
-    .card::after{
-      content:"";
-      position:absolute;
-      inset:0;
-      pointer-events:none;
-      border-radius:var(--r-lg);
-      box-shadow:inset 0 1px 0 rgba(255,255,255,0.10);
-      opacity:.8;
     }
     .card2{
       border:1px solid var(--stroke);
@@ -2725,16 +2697,6 @@ def get_webapp_html() -> str:
       align-items:center;
       cursor:pointer;
       user-select:none;
-      position:relative;
-      overflow:hidden;
-    }
-    .btn::before{
-      content:"";
-      position:absolute;
-      inset:-1px;
-      pointer-events:none;
-      background:linear-gradient(135deg, rgba(255,255,255,0.08), transparent 44%);
-      opacity:.55;
     }
     .btn:active{transform:translateY(1px)}
     .btnTitle{font-size:15px;font-weight:750}
@@ -2788,7 +2750,7 @@ def get_webapp_html() -> str:
       transform:scale(1.02);
       filter:saturate(1.05) contrast(1.02);
     }
-    .thumbOverlay{position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,26,42,0.0) 35%, rgba(10,26,42,0.20) 100%);pointer-events:none}
+    .thumbOverlay{position:absolute;inset:0;background:linear-gradient(180deg, rgba(8,18,30,0.0) 35%, rgba(8,18,30,0.432) 100%);pointer-events:none}
     .thumbBadge{
       position:absolute;left:10px;bottom:10px;
       padding:6px 10px;border-radius:999px;
@@ -2846,8 +2808,8 @@ def get_webapp_html() -> str:
       border-radius:20px;
       overflow:hidden;
       border:1px solid rgba(255,255,255,0.10);
-      background:linear-gradient(180deg, rgba(10,26,42,0.12), rgba(10,26,42,0.04));
-      box-shadow:0 10px 28px rgba(10,26,42,0.16);
+      background:linear-gradient(180deg, rgba(8,18,30,0.18), rgba(8,18,30,0.06));
+      box-shadow:0 10px 28px rgba(8,18,30,0.22);
       cursor:pointer;
       user-select:none;
       aspect-ratio:1/1;
@@ -2908,7 +2870,7 @@ def get_webapp_html() -> str:
       letter-spacing:.18px;
       backdrop-filter:blur(14px) saturate(170%);
       -webkit-backdrop-filter:blur(14px) saturate(170%);
-      box-shadow:0 8px 22px rgba(10,26,42,0.14);
+      box-shadow:0 8px 22px rgba(8,18,30,0.20);
       user-select:none;
       max-width:88%;
       white-space:nowrap;
@@ -2962,7 +2924,7 @@ def get_webapp_html() -> str:
       width:min(560px, calc(100% - 24px));
       display:flex;gap:10px;padding:10px;
       border-radius:22px;border:1px solid var(--glassStroke);
-      background:rgba(20,40,62,0.55);
+      background:rgba(18,22,30,0.55);
       backdrop-filter:blur(22px) saturate(180%);
       -webkit-backdrop-filter:blur(22px) saturate(180%);
       box-shadow:0 12px 40px var(--glassShadow);
@@ -2998,18 +2960,6 @@ def get_webapp_html() -> str:
       box-shadow:0 12px 40px var(--glassShadow);
       padding:14px 14px 10px;
       max-height:84vh;overflow:auto;
-      position:relative;
-    }
-    .sheet::before{
-      content:"";
-      position:absolute;
-      inset:-1px;
-      pointer-events:none;
-      background:
-        radial-gradient(900px 420px at 20% 0%, rgba(255,255,255,0.08), transparent 62%),
-        radial-gradient(820px 520px at 90% 18%, rgba(140,190,255,0.12), transparent 60%);
-      mix-blend-mode:screen;
-      opacity:.75;
     }
     .sheetHandle{width:46px;height:5px;border-radius:999px;background:rgba(255,255,255,0.22);margin:0 auto 10px}
     .input{
@@ -3043,7 +2993,7 @@ def get_webapp_html() -> str:
       width:74px; height:74px; border-radius:24px;
       border:1px solid rgba(255,255,255,0.14);
       background:linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.05));
-      box-shadow:0 18px 60px rgba(10,26,42,0.18);
+      box-shadow:0 18px 60px rgba(8,18,30,0.33);
       display:flex; align-items:center; justify-content:center;
       font-weight:950; letter-spacing:1px; font-size:22px;
       position:relative; overflow:hidden;
@@ -3060,7 +3010,7 @@ def get_webapp_html() -> str:
     .nsMark:after{
       content:"";
       position:absolute; inset:1px; border-radius:23px;
-      background:rgba(14,28,44,0.86);
+      background:rgba(12,15,20,0.88);
       backdrop-filter:blur(16px) saturate(180%);
       -webkit-backdrop-filter:blur(16px) saturate(180%);
       z-index:1;
@@ -3116,9 +3066,9 @@ def get_webapp_html() -> str:
     linear-gradient(180deg, rgba(28,34,48,0.90), rgba(12,15,22,0.92));
   border:1px solid rgba(255,255,255,0.10);
   box-shadow:
-    0 14px 34px rgba(10,26,42,0.18),
+    0 14px 34px rgba(8,18,30,0.252),
     inset 0 1px 0 rgba(255,255,255,0.08),
-    inset 0 0 0 1px rgba(10,26,42,0.08);
+    inset 0 0 0 1px rgba(8,18,30,0.132);
   overflow:hidden;
 }
 /* subtle premium frame (no gold) */
@@ -3147,7 +3097,7 @@ def get_webapp_html() -> str:
   background:
     radial-gradient(320px 240px at 18% 22%, rgba(255,255,255,0.06), transparent 62%),
     radial-gradient(320px 240px at 84% 26%, rgba(140,170,255,0.07), transparent 64%),
-    linear-gradient(135deg, rgba(255,255,255,0.06), transparent 40%, rgba(10,26,42,0.10)),
+    linear-gradient(135deg, rgba(255,255,255,0.06), transparent 40%, rgba(8,18,30,0.156)),
     repeating-linear-gradient(90deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 8px);
   opacity:0.70;
   pointer-events:none;
@@ -3163,7 +3113,7 @@ def get_webapp_html() -> str:
   font-weight:900;
   letter-spacing:0.35px;
   font-size:13px;
-  text-shadow:0 1px 0 rgba(10,26,42,0.18);
+  text-shadow:0 1px 0 rgba(8,18,30,0.33);
 }
 .cabinetMain{
   position:relative;
@@ -3211,14 +3161,14 @@ def get_webapp_html() -> str:
   background:
     radial-gradient(220px 120px at 30% 0%, rgba(140,170,255,0.16), transparent 60%),
     linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 18px rgba(10,26,42,0.16);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 18px rgba(8,18,30,0.216);
   font-size:13px;
   font-weight:950;
   color:rgba(255,255,255,0.94);
   white-space:nowrap;
 }
 .cabinetBalanceGem{
-  filter: drop-shadow(0 2px 6px rgba(10,26,42,0.16));
+  filter: drop-shadow(0 2px 6px rgba(8,18,30,0.27));
 }
 
 .cabinetStats{
@@ -3260,17 +3210,17 @@ def get_webapp_html() -> str:
     .rouletteWrap{margin-top:12px}
     .wheelStage{display:flex;flex-direction:column;align-items:center;gap:10px}
     .wheelBox{position:relative; width:min(78vw, 360px); aspect-ratio: 1 / 1; border-radius:999px;
-      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 42%, rgba(10,26,42,0.0) 70%),
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 42%, rgba(8,18,30,0.0) 70%),
                   rgba(255,255,255,0.03);
       border: 1px solid rgba(255,255,255,0.10);
-      box-shadow: 0 18px 40px rgba(10,26,42,0.18);
+      box-shadow: 0 18px 40px rgba(8,18,30,0.33);
       overflow:hidden;
     }
     .wheelCanvas{width:100%; height:100%; display:block}
     .wheelCenter{position:absolute; inset:28%; border-radius:999px;
       background: rgba(255,255,255,0.06);
       border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 10px 22px rgba(10,26,42,0.14);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 10px 22px rgba(8,18,30,0.21);
       display:flex; align-items:center; justify-content:center;
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
@@ -3284,7 +3234,7 @@ def get_webapp_html() -> str:
       border-left:10px solid transparent;
       border-right:10px solid transparent;
       border-bottom:28px solid rgba(235,245,255,0.86);
-      filter: drop-shadow(0 12px 20px rgba(10,26,42,0.22));
+      filter: drop-shadow(0 12px 20px rgba(8,18,30,0.372));
     }
     /* wheelPointerDot removed: pointer should be arrow only */
     .microHud{margin-top:10px; font-size:12px; color: rgba(255,255,255,0.62); text-align:center}
@@ -3303,8 +3253,8 @@ def get_webapp_html() -> str:
       color: rgba(255,255,255,0.86);
       font-size:12px;
     }
-    .resultSheetOverlay{position:fixed; inset:0; background: rgba(10,26,42,0.0); pointer-events:none; transition:background 180ms ease; z-index:10050}
-    .resultSheetOverlay.on{background: rgba(10,26,42,0.08); pointer-events:auto}
+    .resultSheetOverlay{position:fixed; inset:0; background: rgba(8,18,30,0.0); pointer-events:none; transition:background 180ms ease; z-index:10050}
+    .resultSheetOverlay.on{background: rgba(8,18,30,0.132); pointer-events:auto}
     /* Dior: subtle cold sparkle (quiet luxury) */
     .resultSheetOverlay.on.dior::before{
       content:"";
@@ -3332,7 +3282,7 @@ def get_webapp_html() -> str:
     .resultCard{max-width:520px; margin:0 auto; border-radius:22px; padding:14px 14px 12px 14px;
       background: rgba(255,255,255,0.07);
       border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: 0 18px 50px rgba(10,26,42,0.22);
+      box-shadow: 0 18px 50px rgba(8,18,30,0.36);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
     }
@@ -3384,7 +3334,7 @@ def get_webapp_html() -> str:
     const CHANNEL = "__CHANNEL__";
     const BOT_USERNAME = "__BOT_USERNAME__"; // может быть пустым
 
-    const DEFAULT_BG = '#152f44';
+    const DEFAULT_BG = '#0b141d';
 
     function showSplash(){
       const s = document.getElementById("nsSplash");
@@ -3420,20 +3370,20 @@ def get_webapp_html() -> str:
       setVar("--muted", muted);
 
       // cold-glass surfaces
-      setVar("--stroke", "rgba(170,205,255,0.26)");
-      setVar("--card", "rgba(140,185,255,0.20)");
-      setVar("--card2", "rgba(140,185,255,0.18)");
+      setVar("--stroke", "rgba(170,205,255,0.16)");
+      setVar("--card", "rgba(140,185,255,0.10)");
+      setVar("--card2", "rgba(140,185,255,0.08)");
 
       // background haze (top + bottom), no warm/amber cast
-      setVar("--glowGold", "rgba(120,170,255,0.28)");
-      setVar("--glowGoldBottom", "rgba(120,170,255,0.33)");
-      setVar("--glowWhite", "rgba(255,255,255,0.07)");
+      setVar("--glowGold", "rgba(120,170,255,0.16)");
+      setVar("--glowGoldBottom", "rgba(120,170,255,0.20)");
+      setVar("--glowWhite", "rgba(255,255,255,0.04)");
 
       // sheets / modals
-      setVar("--sheetOverlay", "rgba(18,38,58,0.26)");
-      setVar("--sheetCardBg", "rgba(140,185,255,0.20)");
-      setVar("--glassStroke", "rgba(190,220,255,0.32)");
-      setVar("--glassShadow", "rgba(12,32,52,0.14)");
+      setVar("--sheetOverlay", "rgba(8,14,22,0.60)");
+      setVar("--sheetCardBg", "rgba(140,185,255,0.12)");
+      setVar("--glassStroke", "rgba(190,220,255,0.22)");
+      setVar("--glassShadow", "rgba(8,18,30,0.27)");
 
       try{
         if(tg){
@@ -6513,7 +6463,7 @@ dS.appendChild(dC); dO.appendChild(dS); root.appendChild(dO);
         t.style.maxWidth = "92vw";
         t.style.padding = "10px 14px";
         t.style.borderRadius = "999px";
-        t.style.background = "rgba(12,34,54,0.30)";
+        t.style.background = "rgba(8,18,30,0.33)";
         t.style.border = "1px solid rgba(255,255,255,0.14)";
         t.style.backdropFilter = "blur(10px)";
         t.style.webkitBackdropFilter = "blur(10px)";
